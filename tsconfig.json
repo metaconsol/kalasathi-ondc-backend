@@ -2,11 +2,12 @@
   "compilerOptions": {
     "rootDir": "./src",
     "outDir": "./dist",
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
+    "module": "esnext",
+    "moduleResolution": "bundler",
     "target": "esnext",
     "lib": ["esnext"],
     "types": ["node"],
+    "typeRoots": ["./src/types", "./node_modules/@types"],
     "sourceMap": true,
     "declaration": true,
     "declarationMap": true,
@@ -17,8 +18,27 @@
     "isolatedModules": true,
     "noUncheckedSideEffectImports": true,
     "moduleDetection": "force",
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "allowJs": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "paths": {
+      "~/*": ["./src/*"]
+    },
+    // Important for NodeNext + extensionless imports in ESM
+    "noEmit": true
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"],
+  // ts-node config (for development)
+  "ts-node": {
+    "esm": true,
+    "experimentalSpecifierResolution": "node",
+    "transpileOnly": true,
+    "compilerOptions": {
+      "module": "nodenext",
+      "moduleResolution": "nodenext"
+    }
+  }
 }

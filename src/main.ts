@@ -2,17 +2,20 @@ import 'dotenv/config';
 
 import { createServer } from 'node:http';
 
-import { createApp } from './config/app.js';
+import { logger } from './lib/logger.js';
+import { env } from './config/env.config.js';
+import { createApp } from './config/app.config.js';
 
-const port = Number(process.env.PORT) || 3000;
 const app = createApp();
 const server = createServer(app);
 
 try {
-  server.listen(port, () => {
-    console.log(`Listening on http://localhost:${port}`);
-  });
+  if (env.serverPort) {
+    server.listen(env.serverPort, () => {
+      logger.info(`Server is running on port ${env.serverPort} in ${env.nodeEnv} mode`);
+    });
+  }
 } catch (error) {
-  console.error(error);
+  logger.error(error);
   process.exit(1);
 }

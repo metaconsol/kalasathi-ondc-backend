@@ -13,9 +13,22 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "husky",
-    "precommit": "lint-staged"
+    "precommit": "lint-staged",
+    "prod": "pm2 start dist/main.js --name odop-backend",
+    "postinstall": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:reset": "prisma migrate reset -f",
+    "db:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio",
+    "db:seed": "prisma db seed"
   },
-  "keywords": [],
+  "prisma": {
+    "seed": "bun run src/prisma/seed.ts",
+    "schema": "./src/prisma/schema.prisma"
+  },
+  "keywords": [
+    "odop"
+  ],
   "author": "",
   "license": "MIT",
   "type": "module",
@@ -30,29 +43,37 @@
   "devDependencies": {
     "@eslint/js": "^9.39.4",
     "@types/bcrypt": "^6.0.0",
+    "@types/compression": "^1.8.1",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^2.1.0",
     "@types/node": "^25.5.2",
+    "@types/pg": "^8.20.0",
     "esbuild": "^0.25.0",
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
     "prettier": "^3.8.1",
+    "prisma": "^6.19.3",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.50.0"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "^7.7.0",
+    "@prisma/client": "^6.19.3",
     "axios": "^1.15.0",
     "bcrypt": "^6.0.0",
+    "compression": "^1.8.1",
     "cors": "^2.8.6",
     "dotenv": "^17.4.1",
     "express": "^5.2.1",
+    "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
+    "pg": "^8.20.0",
     "winston": "^3.19.0"
   }
 }
