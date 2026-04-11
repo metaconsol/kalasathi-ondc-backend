@@ -15,12 +15,12 @@ export interface AuthResponseDTO extends Response {
 
 export type UserPayloadDTO = {
   name: string;
-  email: string;
+  email: string | null;
+  phoneNumber: string;
   username: string;
   avatar: string | null;
   role: string;
   isTwoFactorEnabled: boolean;
-  isCredentialAccount: boolean;
 };
 
 export type UserPayloadDAO = UserPayloadDTO & {
