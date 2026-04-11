@@ -2,6 +2,15 @@ node_modules/
 dist/
 coverage/
 .env
-.env.local
+.env.*
+!.env.example
+!.env.sample
 *.log
 .DS_Store
+
+/src/generated/prisma
+prisma/migrations
+logs/
+
+tmp
+temp
