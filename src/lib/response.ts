@@ -19,7 +19,7 @@ export class ApiResponse {
     const response: IResponseData = {
       success: true,
       message,
-      data,
+      data: this.processData(data),
       meta: this.processData(meta),
     };
     return res.status(200).json(response);
