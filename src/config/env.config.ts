@@ -31,12 +31,22 @@ export const env = {
   googleClientId: process.env.GOOGLE_CLIENT_ID!,
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET!,
 
-  githubClientId: process.env.GITHUB_CLIENT_ID!,
-  githubClientSecret: process.env.GITHUB_CLIENT_SECRET!,
-
+  mailService: process.env.MAIL_SERVICE || 'smtp',
   mailHost: process.env.MAIL_HOST!,
   mailPort: parseInt(process.env.MAIL_PORT || '587', 10),
   mailPortSecure: process.env.MAIL_PORT_SECURE === 'true',
   mailUser: process.env.MAIL_USER!,
   mailPassword: process.env.MAIL_PASSWORD!,
+
+  /** @see https://www.smsgateway.center/docs/api/send-sms-curl/ */
+  smsGatewayUrl: process.env.SMS_GATEWAY_URL!,
+  smsGatewaySendUrl:
+    process.env.SMS_GATEWAY_SEND_URL || 'https://www.smsgateway.center/SMSApi/rest/send',
+  smsGatewayUserId: process.env.SMS_GATEWAY_USERID!,
+  smsGatewayPassword: process.env.SMS_GATEWAY_PASSWORD!,
+  smsSenderId: process.env.SMS_SENDER_ID!,
+  /** Principal entity ID (India DLT); optional if saved in SMSGateway.Center profile */
+  smsDltEntityId: process.env.SMS_DLT_ENTITY_ID || '',
+  /** Template ID registered on DLT; required by many Indian routes if not in dashboard */
+  smsDltTemplateId: process.env.SMS_DLT_TEMPLATE_ID || '',
 };

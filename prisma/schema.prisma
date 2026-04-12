@@ -14,7 +14,7 @@ model User {
     username           String    @unique @default(cuid())
     name               String
     email              String?
-    phoneNumber        String?   @unique
+    phoneNumber        String   @unique
     password           String?
     avatar             String?
     role               UserRole  @default(USER)
@@ -76,7 +76,7 @@ enum AccountStatus {
     BLOCKED
 }
 
-model OTP {
+model Otp {
     id          Int       @id @default(autoincrement())
     phoneNumber String
     code        String
@@ -94,8 +94,11 @@ model AuthToken {
     createdAt   DateTime      @default(now())
     expiresAt   DateTime
     type        AuthTokenType
+    usedAt      DateTime?
 
-    otp OTP[]
+    @@unique([phoneNumber, token])
+
+    otp Otp[]
 }
 
 enum AuthTokenType {

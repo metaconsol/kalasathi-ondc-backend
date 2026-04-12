@@ -2,7 +2,6 @@ import { z } from 'zod';
 import { UserRole } from '~/generated/prisma/enums';
 
 function hasControlChars(val: string): boolean {
-  // Checks for ASCII control characters (0x00-0x1F, 0x7F)
   for (let i = 0; i < val.length; i++) {
     const code = val.charCodeAt(i);
     if ((code >= 0x00 && code <= 0x1f) || code === 0x7f) {
@@ -12,13 +11,14 @@ function hasControlChars(val: string): boolean {
   return false;
 }
 
+// phone number must start with country code with +
 export const PhoneNumberSchema = z.object({
   phoneNumber: z
     .string()
     .trim()
     .min(10, { message: 'Phone number must be at least 10 characters long.' })
     .max(15, { message: 'Phone number must be at most 15 characters long.' })
-    .regex(/^[0-9]{10}$/, { message: 'Please enter a valid phone number.' }),
+    .regex(/^\+[1-9]\d{1,14}$/, { message: 'Please enter a valid phone number.' }),
 });
 
 export const RegisterSchema = PhoneNumberSchema.extend({
@@ -48,6 +48,7 @@ export const RegisterSchema = PhoneNumberSchema.extend({
 });
 
 export const LoginSchema = PhoneNumberSchema.extend({
+  email: z.email({ message: 'Please enter a valid email.' }).optional(),
   isLoginWithPassword: z.boolean().default(false),
   isLoginWithOtp: z.boolean().default(false),
   loginRole: z.enum([UserRole.USER, UserRole.ADMIN]).default(UserRole.USER),
@@ -64,7 +65,7 @@ export const LoginSchema = PhoneNumberSchema.extend({
 export const OTPVerifySchema = PhoneNumberSchema.extend({
   tokens: z.array(
     z.object({
-      name: z.string(),
+      key: z.string(),
       value: z.string(),
     }),
   ),
@@ -75,18 +76,19 @@ export const OTPVerifySchema = PhoneNumberSchema.extend({
     .refine((val) => !hasControlChars(val), {
       message: 'Password cannot contain escape sequences or control characters.',
     }),
+  rememberMe: z.boolean().default(false).optional(),
 });
 
-export const OTPResendSchema = PhoneNumberSchema.extend({
-  token: z
-    .string()
-    .trim()
-    .refine((val) => !hasControlChars(val), {
-      message: 'Password cannot contain escape sequences or control characters.',
+export const OTPSchema = PhoneNumberSchema.extend({
+  tokens: z.array(
+    z.object({
+      key: z.string(),
+      value: z.string(),
     }),
+  ),
 });
 
-export const ResetPasswordSchema = OTPResendSchema.extend({
+export const ResetPasswordSchema = OTPSchema.extend({
   password: z
     .string()
     .trim()

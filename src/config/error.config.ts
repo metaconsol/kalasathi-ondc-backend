@@ -72,3 +72,11 @@ export const notFoundHandler = (req: Request, _res: Response, next: NextFunction
   const error = ApiError.NOT_FOUND(`Cannot ${req.method}`);
   next(error);
 };
+
+export const errorCodes = {
+  MAIL_CONNECTION_FAILURE: 'MAIL_CONNECTION_FAILURE',
+  MAIL_SEND_FAILURE: 'MAIL_SEND_FAILURE',
+  SMS_SEND_FAILURE: 'SMS_SEND_FAILURE',
+  SMS_CONNECTION_FAILURE: 'SMS_CONNECTION_FAILURE',
+  OTP_CREATE_FAILURE: 'OTP_CREATE_FAILURE',
+};

@@ -11,6 +11,21 @@ export class AuthTokenUtil {
     return new AuthTokenUtil();
   }
 
+  public static readonly REFRESH_TOKEN_KEY_NAME = 'refreshToken';
+  public static readonly ACCESS_TOKEN_KEY_NAME = 'accessToken';
+  public static readonly REFRESH_TOKEN_EXPIRE_TIME_IN_DAYS = 7;
+
+  public static getInvalidRefreshTokenCookieOptions = (): CookieOptions => {
+    return {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: env.isProduction,
+      expires: new Date(0),
+      domain: env.isProduction ? AuthUtil.getParentDomain(env?.serverUrl) : undefined,
+    };
+  };
+
   public static readonly getRefreshTokenCookieOptions = (
     rememberMe: boolean = false,
   ): CookieOptions => {
@@ -69,15 +84,22 @@ export class AuthTokenUtil {
 
   public static verifyAccessToken = (token: string): UserPayloadDAO => {
     const payload = jwt.verify(token, env.accessTokenSecretKey);
-    delete (payload as { iat?: number }).iat;
-    delete (payload as { exp?: number }).exp;
     return payload as UserPayloadDAO;
   };
 
   public static verifyRefreshToken = (token: string): UserPayloadDAO => {
     const payload = jwt.verify(token, env.refreshTokenSecretKey);
-    delete (payload as { iat?: number }).iat;
-    delete (payload as { exp?: number }).exp;
     return payload as UserPayloadDAO;
+  };
+
+  public static isRefreshTokenWillExpireInLessThan = (
+    token: string,
+    days: number = AuthTokenUtil.REFRESH_TOKEN_EXPIRE_TIME_IN_DAYS,
+  ): boolean => {
+    const payload = jwt.verify(token, env.refreshTokenSecretKey);
+    const expiresAt = new Date((payload as any)?.exp ?? 0 * 1000);
+    const now = new Date();
+    const diff = expiresAt.getTime() - now.getTime();
+    return diff < days * 24 * 60 * 60 * 1000;
   };
 }

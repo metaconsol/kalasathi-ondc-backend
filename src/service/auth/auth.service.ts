@@ -1,12 +1,4 @@
 import {
-  LoginSchema,
-  RegisterSchema,
-  OTPResendSchema,
-  OTPVerifySchema,
-  ResetPasswordSchema,
-} from './auth.schema';
-
-import {
   UserRole,
   AccountType,
   AccountStatus,
@@ -14,20 +6,17 @@ import {
   AccountProvider,
 } from '~/generated/prisma/enums';
 import { db } from '../../lib/db';
-import { env } from '~/config/env.config';
 import { AuthUtil } from './auth.util';
-import { otpService } from '../otp/otp.service';
+import { debugForDev } from '~/lib/utils';
 import { AuthTokenUtil } from './jwt.util';
-
-import type { CookieOptions, NextFunction, Request, Response } from 'express';
-import type { OAuthResponse, UserPayloadDAO, UserPayloadDTO } from './auth.types';
-import z from 'zod';
+import { authConstants } from '~/lib/constant';
+import { otpService } from '../otp/otp.service';
 import { ApiError, ApiResponse } from '~/lib/response';
-import { logger } from '~/lib/logger';
+
+import type { NextFunction, Request, Response } from 'express';
+import type { UserPayloadDAO, UserPayloadDTO } from './auth.types';
 
 class AuthService {
-  private static instance: AuthService;
-
   private constructor() {}
   public static getInstance(): AuthService {
     return new AuthService();
@@ -39,6 +28,7 @@ class AuthService {
       userId: number;
       message: string;
       status?: number;
+      rememberMe?: boolean;
     },
   ) => {
     const user = await db.user.findUnique({
@@ -49,79 +39,65 @@ class AuthService {
     if (!user) {
       return ApiResponse.notFound(res, 'User not found');
     }
-    const userPayloadPrivateSchema: { [K in keyof UserPayloadDAO]: true } = {
-      id: true,
-      name: true,
-      phoneNumber: true,
-      email: true,
-      username: true,
-      avatar: true,
-      role: true,
-      isTwoFactorEnabled: true,
-    };
-    const userPayloadPublicSchema: { [K in keyof UserPayloadDTO]: true } = {
-      name: true,
-      phoneNumber: true,
-      email: true,
-      username: true,
-      avatar: true,
-      role: true,
-      isTwoFactorEnabled: true,
-    };
-    const userPayloadPrivate: UserPayloadDAO = AuthUtil.convertToType<any, UserPayloadDAO>(
-      user,
-      userPayloadPrivateSchema,
-    );
-    const userPayloadPublic: UserPayloadDTO = AuthUtil.convertToType<any, UserPayloadDTO>(
-      user,
-      userPayloadPublicSchema,
-    );
 
-    const accessToken: string = AuthTokenUtil.generateAccessToken(userPayloadPrivate);
-    const refreshToken: string = AuthTokenUtil.generateRefreshToken(userPayloadPrivate);
+    const userPayloadDAO: UserPayloadDAO = {
+      id: user.id,
+      name: user.name,
+      phoneNumber: user.phoneNumber,
+      email: user.email,
+      username: user.username,
+      avatar: user.avatar,
+      role: user.role,
+      isTwoFactorEnabled: user.isTwoFactorEnabled,
+      isRememberMe: options.rememberMe ?? false,
+    };
+
+    const userPayloadDTO: UserPayloadDTO = {
+      name: user.name,
+      phoneNumber: user.phoneNumber,
+      email: user.email,
+      username: user.username,
+      avatar: user.avatar,
+      role: user.role,
+      isTwoFactorEnabled: user.isTwoFactorEnabled,
+      isRememberMe: options.rememberMe ?? false,
+    };
+
+    const accessToken: string = AuthTokenUtil.generateAccessToken(userPayloadDAO);
+    const refreshToken: string = AuthTokenUtil.generateRefreshToken(
+      userPayloadDAO,
+      options.rememberMe ?? false,
+    );
 
     res.setHeader('Authorization', `Bearer ${accessToken}`);
     res.cookie('refreshToken', refreshToken, AuthTokenUtil.getRefreshTokenCookieOptions());
     return ApiResponse.success(res, options.message, {
-      user: userPayloadPublic,
+      user: userPayloadDTO,
     });
   };
 
   public register = async (req: Request, res: Response) => {
     const { name, email, phoneNumber, password } = req.body;
-    const validatedData = RegisterSchema.safeParse({
-      name,
-      email,
-      phoneNumber,
-      password,
-    });
-    if (!validatedData.success) {
-      return ApiResponse.badRequest(
-        res,
-        'Invalid data',
-        z.flattenError(validatedData.error).fieldErrors,
-      );
-    }
 
     const isExist = await db.user.findUnique({
       select: {
         id: true,
       },
       where: {
-        phoneNumber: validatedData.data.phoneNumber,
+        phoneNumber: phoneNumber,
       },
     });
     if (isExist) {
-      return ApiResponse.badRequest(res, 'Email is already registered.');
+      return ApiResponse.badRequest(res, 'Phone number is already registered');
     }
 
-    const hashedPassword: string = await AuthUtil.getHashedPassword(validatedData.data.password);
+    const hashedPassword: string = await AuthUtil.getHashedPassword(password);
     const user = await db.$transaction(async (tx) => {
       const createdUser = await tx.user.create({
         data: {
-          email: validatedData.data.email ?? null,
-          name: validatedData.data.name,
-          phoneNumber: validatedData.data.phoneNumber,
+          email: email ?? null,
+          name: name,
+          phoneNumber: phoneNumber,
           password: hashedPassword,
           role: UserRole.USER,
           profile: {
@@ -155,7 +131,7 @@ class AuthService {
     const otp = await otpService.sendOTP({
       name: user.name,
       phoneNumber: user.phoneNumber!,
-      token: AuthTokenType.VERIFICATION,
+      tokenType: AuthTokenType.VERIFICATION,
     });
     if (!otp) {
       throw ApiError.INTERNAL_SERVER_ERROR('Failed to send OTP');
@@ -175,7 +151,7 @@ class AuthService {
     return ApiResponse.created(res, 'Registered successfully', {
       tokens: [
         {
-          name: AuthTokenType.VERIFICATION,
+          key: AuthTokenType.VERIFICATION,
           value: token.token,
         },
       ],
@@ -183,26 +159,15 @@ class AuthService {
   };
 
   public login = async (req: Request, res: Response) => {
-    const requestData = req.body;
-
-    const validatedData = LoginSchema.safeParse({
-      phoneNumber: requestData.phoneNumber,
-      password: requestData.password,
-      isLoginWithPassword: requestData.isLoginWithPassword,
-      isLoginWithOtp: requestData.isLoginWithOtp ?? false,
-      loginRole: requestData.loginRole ?? UserRole.USER,
-      rememberMe: requestData.rememberMe ?? false,
-    });
-    if (!validatedData.success) {
-      return ApiResponse.badRequest(
-        res,
-        'Invalid data',
-        z.flattenError(validatedData.error).fieldErrors,
-      );
-    }
-
-    const { phoneNumber, password, isLoginWithPassword, isLoginWithOtp, loginRole, rememberMe } =
-      validatedData.data;
+    const {
+      phoneNumber,
+      email,
+      password,
+      isLoginWithPassword,
+      isLoginWithOtp,
+      loginRole,
+      rememberMe,
+    } = req.body;
 
     if (isLoginWithPassword) {
       const user = await db.user.findUnique({
@@ -249,31 +214,18 @@ class AuthService {
         credentialsAccount.status === AccountStatus.PENDING ||
         credentialsAccount.status === AccountStatus.INACTIVE
       ) {
-        const otp = await otpService.sendOTP({
+        const token = await otpService.sendOTP({
           name: user.name,
           phoneNumber: phoneNumber,
-          token: AuthTokenType.VERIFICATION,
+          email: email,
+          tokenType: AuthTokenType.VERIFICATION,
         });
-        if (!otp) {
-          throw ApiError.INTERNAL_SERVER_ERROR('Failed to send OTP');
-        }
-
-        const token = await db.authToken.create({
-          data: {
-            phoneNumber: phoneNumber,
-            expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
-            type: AuthTokenType.VERIFICATION,
-          },
-        });
-        if (!token) {
-          throw ApiError.INTERNAL_SERVER_ERROR('Failed to create token');
-        }
 
         return ApiResponse.success(res, 'OTP sent successfully to your phone number', {
           tokens: [
             {
-              name: AuthTokenType.VERIFICATION,
-              value: token.token,
+              key: AuthTokenType.VERIFICATION,
+              value: token,
             },
           ],
         });
@@ -289,12 +241,20 @@ class AuthService {
         return this.newAuthenticatedResponse(res, {
           userId: user.id,
           message: 'Login successful',
+          rememberMe: rememberMe,
         });
       }
     }
 
     if (isLoginWithOtp) {
-      const user = await db.user.findUnique({
+      type User = {
+        id: number;
+        name: string;
+        email: string | null;
+        phoneNumber: string;
+      } | null;
+
+      const user: User = await db.user.findUnique({
         where: {
           phoneNumber: phoneNumber,
         },
@@ -302,24 +262,17 @@ class AuthService {
           id: true,
           name: true,
           email: true,
-          password: true,
-          role: true,
-          isTwoFactorEnabled: true,
-          accounts: {
-            select: {
-              provider: true,
-              providerAccountId: true,
-              status: true,
-            },
-          },
+          phoneNumber: true,
         },
       });
-      let newUser: any | null = null;
+
+      let newUser: User = user ?? null;
       if (!user) {
         newUser = await db.$transaction(async (tx) => {
           const createdUser = await tx.user.create({
             data: {
               phoneNumber: phoneNumber,
+              email: email,
               name: phoneNumber.toString(),
               role: UserRole.USER,
               profile: {
@@ -329,6 +282,8 @@ class AuthService {
             select: {
               id: true,
               name: true,
+              email: true,
+              phoneNumber: true,
             },
           });
           await tx.account.create({
@@ -343,37 +298,24 @@ class AuthService {
 
           return createdUser;
         });
-
-        if (!newUser) {
-          throw ApiError.INTERNAL_SERVER_ERROR('Failed to create user');
-        }
       }
 
-      const otp = await otpService.sendOTP({
+      if (!newUser) {
+        throw ApiError.INTERNAL_SERVER_ERROR('Failed to create user');
+      }
+
+      const token = await otpService.sendOTP({
         name: newUser.name,
-        phoneNumber: phoneNumber,
-        token: AuthTokenType.VERIFICATION,
+        phoneNumber: newUser.phoneNumber,
+        email: newUser?.email,
+        tokenType: AuthTokenType.VERIFICATION,
       });
-      if (!otp) {
-        throw ApiError.INTERNAL_SERVER_ERROR('Failed to create OTP');
-      }
-
-      const token = await db.authToken.create({
-        data: {
-          phoneNumber: phoneNumber,
-          expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
-          type: AuthTokenType.VERIFICATION,
-        },
-      });
-      if (!token) {
-        throw ApiError.INTERNAL_SERVER_ERROR('Failed to create auth token');
-      }
 
       return ApiResponse.success(res, 'OTP sent successfully to your phone number', {
         tokens: [
           {
-            name: AuthTokenType.VERIFICATION,
-            value: token.token,
+            key: AuthTokenType.VERIFICATION,
+            value: token,
           },
         ],
       });
@@ -381,159 +323,64 @@ class AuthService {
   };
 
   public logout = async (_req: Request, res: Response) => {
-    res.cookie('refreshToken', null, {
-      path: '/',
-      httpOnly: true,
-      sameSite: 'lax',
-      expires: new Date(0),
-      secure: env.isProduction,
-      domain: env.isProduction ? AuthUtil.getParentDomain(env?.serverUrl) : undefined,
-    });
-
+    res.cookie('refreshToken', null, AuthTokenUtil.getInvalidRefreshTokenCookieOptions());
     return ApiResponse.success(res, 'Logged out successfully');
   };
 
   public getUser = async (req: Request, res: Response) => {
     const { username } = req.query;
     const user = req?.user;
-    delete (user as { id?: string }).id;
+    delete (user as { id?: number }).id;
     return ApiResponse.success(res, 'User found', {
       user: user as UserPayloadDTO,
       isAuthByUsername: user?.username == (username as string),
     });
   };
 
-  public otpVerificationForCredentialAccount = async (req: Request, res: Response) => {
-    const { phoneNumber, otp, tokens } = req.body;
-    const validatedData = OTPVerifySchema.safeParse({
-      phoneNumber,
-      otp,
-      tokens,
-    });
-    if (!validatedData.success) {
-      return ApiResponse.badRequest(
-        res,
-        'Invalid data',
-        z.flattenError(validatedData.error).fieldErrors,
-      );
-    }
-
-    if (!Array.isArray(tokens) || tokens.length === 0) {
-      return ApiError.BAD_REQUEST('Verification tokens are required');
-    }
-
-    const token = tokens.find((t) => t?.name === AuthTokenType.VERIFICATION)?.value;
-
-    if (!token) {
-      return ApiResponse.badRequest(res, 'Verification token not found');
-    }
-
-    const tokenType = await otpService.verifyOTP(
-      validatedData.data.phoneNumber,
-      validatedData.data.otp,
-    );
-    if (!tokenType) {
-      return ApiResponse.badRequest(res, 'Invalid OTP');
-    }
-
-    const user0 = await db.user.findUnique({
-      where: {
-        phoneNumber: validatedData.data.phoneNumber,
-      },
-      select: {
-        id: true,
-        role: true,
-      },
-    });
-
-    if (!user0) {
-      return ApiResponse.notFound(res, 'User not found');
-    }
-
-    await db.account.update({
-      where: {
-        provider_providerAccountId: {
-          provider: AccountProvider.CREDENTIALS,
-          providerAccountId: user0.id.toString(),
-        },
-      },
-      data: {
-        status: AccountStatus.ACTIVE,
-      },
-    });
-
-    return this.newAuthenticatedResponse(res, {
-      userId: user0.id,
-      message: 'OTP verified successfully',
-    });
-  };
-
   public authenticate = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const accessToken: string | null = req.headers.authorization?.split(' ')[1] || null;
-      const { message } = req.query;
-      console.log(`accessToken ${message}=>>`, accessToken);
+    const accessToken: string | null = req.headers?.authorization?.split(' ')?.[1] ?? null;
+    // const refreshToken = req.cookies?.refreshToken || null;
+    const headerCookie = req.headers.cookie || null;
 
-      if (!accessToken || accessToken == '' || accessToken == null || accessToken == 'null') {
-        throw new Error('Access token not found');
-      }
-
-      const userPayload: UserPayloadDAO = AuthTokenUtil.verifyAccessToken(accessToken);
-      if (!userPayload || !userPayload?.id) {
-        throw new Error('Invalid Access Token');
-      }
-
-      const accessToken_neo: string = AuthTokenUtil.generateAccessToken(userPayload);
-
-      req.user = userPayload;
-      res.setHeader('Authorization', `Bearer ${accessToken_neo}`);
-      next();
-      return;
-    } catch (error) {
-      // const refreshToken = req.cookies?.refreshToken || null;
-      const headerCookie = req.headers.cookie || null;
-      // console.log("headerCookie =>>", headerCookie);
-
-      if (!headerCookie) {
-        return res.status(404).json({ error: 'No user found' });
-      }
-
-      try {
-        const cookies = headerCookie.split(';');
-        let refreshToken: string | null = null;
-
-        cookies.forEach((cookie) => {
-          const [key, value] = cookie.trim().split('=');
-          if (key == 'refreshToken') {
-            refreshToken = value as string | null;
-          }
-        });
-
-        const { message } = req.query;
-        console.log(`refreshToken ${message}=>>`, refreshToken);
-
-        if (!refreshToken || refreshToken == '' || refreshToken == null || refreshToken == 'null') {
-          return res.status(404).json({ error: 'No user found' });
-        }
-
-        const userPayload: UserPayloadDAO = AuthTokenUtil.verifyRefreshToken(refreshToken);
-
-        if (!userPayload || !userPayload?.id) {
-          throw new Error('Invalid Refresh Token');
-        }
-
-        const accessToken_neo: string = AuthTokenUtil.generateAccessToken(userPayload);
-        const refreshToken_neo: string = AuthTokenUtil.generateRefreshToken(userPayload, false);
-
-        req.user = userPayload;
-        res
-          .setHeader('Authorization', `Bearer ${accessToken_neo}`)
-          .cookie('refreshToken', refreshToken_neo, AuthTokenUtil.getRefreshTokenCookieOptions());
-        return next();
-      } catch (error: any) {
-        return next(error);
-      }
+    if (!headerCookie) {
+      return ApiResponse.unauthorized(res, 'Unauthorized');
     }
+
+    const cookies = headerCookie.split(';');
+    let refreshToken: string | null = null;
+
+    cookies.forEach((cookie) => {
+      const [key, value] = cookie.trim().split('=');
+      if (key == AuthTokenUtil.REFRESH_TOKEN_KEY_NAME) {
+        refreshToken = value as string | null;
+      }
+    });
+
+    debugForDev(`accessToken => ${accessToken}`);
+    debugForDev(`refreshToken => ${refreshToken}`);
+
+    if (!refreshToken || refreshToken == '') {
+      return ApiResponse.unauthorized(res, 'Unauthorized');
+    }
+
+    const userPayloadUsingAccessToken: UserPayloadDAO | null =
+      accessToken && accessToken != '' ? AuthTokenUtil.verifyAccessToken(accessToken) : null;
+    if (userPayloadUsingAccessToken && userPayloadUsingAccessToken?.id) {
+      const newAccessToken: string = AuthTokenUtil.generateAccessToken(userPayloadUsingAccessToken);
+      req.user = userPayloadUsingAccessToken;
+      res.setHeader('Authorization', `Bearer ${newAccessToken}`);
+      return next();
+    }
+
+    const userPayloadUsingRefreshToken: UserPayloadDAO =
+      AuthTokenUtil.verifyRefreshToken(refreshToken);
+    if (!userPayloadUsingRefreshToken || !userPayloadUsingRefreshToken?.id) {
+      return ApiResponse.unauthorized(res, 'Invalid Refresh Token');
+    }
+    const newAccessToken: string = AuthTokenUtil.generateAccessToken(userPayloadUsingRefreshToken);
+    req.user = userPayloadUsingRefreshToken;
+    res.setHeader('Authorization', `Bearer ${newAccessToken}`);
+    return next();
   };
 
   public authorize = (roleCheck: string[] | ((user: UserPayloadDAO) => boolean)) => {
@@ -543,7 +390,7 @@ class AuthService {
           if (err) return next(err);
 
           if (!req.user) {
-            return res.status(401).json({ error: 'Unauthorized' });
+            return ApiResponse.unauthorized(res, 'Unauthorized');
           }
 
           let isAuthorized = false;
@@ -555,10 +402,7 @@ class AuthService {
           }
 
           if (!isAuthorized) {
-            return res.status(403).json({
-              error: 'Unauthorized access',
-              message: 'You do not have permission to access this resource.',
-            });
+            return ApiResponse.forbidden(res, 'You do not have permission to access this resource');
           }
 
           next();
@@ -570,68 +414,509 @@ class AuthService {
   };
 
   public authInterceptor = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const accessToken: string | null = req.headers.authorization?.split(' ')[1] || null;
+    const accessToken: string | null = req.headers?.authorization?.split(' ')?.[1] ?? null;
+    // const refreshToken = req.cookies?.refreshToken || null;
+    const headerCookie = req.headers.cookie || null;
 
-      if (!accessToken || accessToken == '' || accessToken == null || accessToken == 'null') {
-        throw new Error('Access token not found');
-      }
-
-      const userPayload: UserPayloadDAO = AuthTokenUtil.verifyAccessToken(accessToken);
-
-      if (!userPayload || !userPayload?.id) {
-        throw new Error('Invalid Access Token');
-      }
-
-      const accessToken_neo: string = AuthTokenUtil.generateAccessToken(userPayload);
-
-      req.user = userPayload;
-      res.setHeader('Authorization', `Bearer ${accessToken_neo}`);
+    if (!headerCookie) {
       return next();
-    } catch (error) {
-      const headerCookie = req.headers.cookie || null;
-
-      if (!headerCookie) {
-        return next();
-      }
-
-      try {
-        const cookies = headerCookie.split(';');
-        let refreshToken: string | null = null;
-
-        cookies.forEach((cookie) => {
-          const [key, value] = cookie.trim().split('=');
-          if (key == 'refreshToken') {
-            refreshToken = value as string | null;
-          }
-        });
-
-        if (!refreshToken || refreshToken == '' || refreshToken == null || refreshToken == 'null') {
-          return next();
-        }
-
-        const userPayload: UserPayloadDAO = AuthTokenUtil.verifyRefreshToken(refreshToken);
-
-        if (!userPayload || !userPayload?.id) {
-          return next();
-        }
-
-        const accessToken_neo: string = AuthTokenUtil.generateAccessToken(userPayload);
-        const refreshToken_neo: string = AuthTokenUtil.generateRefreshToken(userPayload, false);
-
-        req.user = userPayload;
-        res
-          .setHeader('Authorization', `Bearer ${accessToken_neo}`)
-          .cookie(
-            'refreshToken',
-            refreshToken_neo,
-            AuthTokenUtil.getRefreshTokenCookieOptions(false),
-          );
-        return next();
-      } catch (error: any) {
-        return next(error);
-      }
     }
+
+    const cookies = headerCookie.split(';');
+    let refreshToken: string | null = null;
+
+    cookies.forEach((cookie) => {
+      const [key, value] = cookie.trim().split('=');
+      if (key == AuthTokenUtil.REFRESH_TOKEN_KEY_NAME) {
+        refreshToken = value as string | null;
+      }
+    });
+
+    debugForDev(`accessToken => ${accessToken}`);
+    debugForDev(`refreshToken => ${refreshToken}`);
+
+    if (!refreshToken || refreshToken == '') {
+      return next();
+    }
+
+    const userPayloadUsingAccessToken: UserPayloadDAO | null =
+      accessToken && accessToken != '' ? AuthTokenUtil.verifyAccessToken(accessToken) : null;
+    if (userPayloadUsingAccessToken && userPayloadUsingAccessToken?.id) {
+      const newAccessToken: string = AuthTokenUtil.generateAccessToken(userPayloadUsingAccessToken);
+      req.user = userPayloadUsingAccessToken;
+      res.setHeader('Authorization', `Bearer ${newAccessToken}`);
+      return next();
+    }
+
+    const userPayloadUsingRefreshToken: UserPayloadDAO =
+      AuthTokenUtil.verifyRefreshToken(refreshToken);
+    if (!userPayloadUsingRefreshToken || !userPayloadUsingRefreshToken?.id) {
+      return next();
+    }
+    const newAccessToken: string = AuthTokenUtil.generateAccessToken(userPayloadUsingRefreshToken);
+    req.user = userPayloadUsingRefreshToken;
+    res.setHeader('Authorization', `Bearer ${newAccessToken}`);
+    return next();
+  };
+
+  public getNewAccessTokenUsingRefreshToken = async (req: Request, res: Response) => {
+    // const refreshToken = req.cookies?.refreshToken || null;
+    const headerCookie = req.headers.cookie || null;
+
+    if (!headerCookie) {
+      return ApiResponse.unauthorized(res, 'Unauthorized');
+    }
+
+    const cookies = headerCookie.split(';');
+    let refreshToken: string | null = null;
+
+    cookies.forEach((cookie) => {
+      const [key, value] = cookie.trim().split('=');
+      if (key == AuthTokenUtil.REFRESH_TOKEN_KEY_NAME) {
+        refreshToken = value as string | null;
+      }
+    });
+
+    debugForDev(`refreshToken => ${refreshToken}`);
+
+    if (!refreshToken || refreshToken == '') {
+      return ApiResponse.unauthorized(res, 'Unauthorized');
+    }
+
+    const userPayloadUsingRefreshToken: UserPayloadDAO =
+      AuthTokenUtil.verifyRefreshToken(refreshToken);
+    if (!userPayloadUsingRefreshToken || !userPayloadUsingRefreshToken?.id) {
+      return ApiResponse.unauthorized(res, 'Invalid Refresh Token');
+    }
+    const newAccessToken: string = AuthTokenUtil.generateAccessToken(userPayloadUsingRefreshToken);
+    res.setHeader('Authorization', `Bearer ${newAccessToken}`);
+    if (
+      userPayloadUsingRefreshToken.isRememberMe &&
+      AuthTokenUtil.isRefreshTokenWillExpireInLessThan(refreshToken)
+    ) {
+      const newRefreshToken: string = AuthTokenUtil.generateRefreshToken(
+        userPayloadUsingRefreshToken,
+        true,
+      );
+      res.cookie(
+        AuthTokenUtil.REFRESH_TOKEN_KEY_NAME,
+        newRefreshToken,
+        AuthTokenUtil.getRefreshTokenCookieOptions(),
+      );
+    }
+
+    return ApiResponse.success(res, 'New access token generated successfully');
+  };
+
+  public otpVerificationForCredentialAccountPreviewData = async (req: Request, res: Response) => {
+    const { token } = req.query;
+    if (!token) {
+      return ApiResponse.badRequest(res, 'Token is required');
+    }
+    const authToken = await db.authToken.findUnique({
+      where: {
+        token: token as string,
+      },
+      select: {
+        phoneNumber: true,
+        expiresAt: true,
+      },
+    });
+
+    if (!authToken) {
+      return ApiResponse.notFound(res, 'Invalid token');
+    }
+
+    if (authToken.expiresAt < new Date()) {
+      return ApiResponse.notFound(res, 'Token has expired');
+    }
+
+    const user = await db.user.findUnique({
+      where: {
+        phoneNumber: authToken.phoneNumber,
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
+    if (!user) {
+      return ApiResponse.notFound(res, 'User not found');
+    }
+
+    return ApiResponse.success(res, 'Token verified successfully', {
+      expiresAt: authToken.expiresAt,
+      user: {
+        name: user.name,
+        phoneNumber: authToken.phoneNumber,
+      },
+    });
+  };
+
+  public otpVerificationForCredentialAccount = async (req: Request, res: Response) => {
+    const { phoneNumber, otp, tokens, rememberMe } = req.body;
+
+    debugForDev(tokens);
+    if (!Array.isArray(tokens) || tokens.length === 0) {
+      return ApiError.BAD_REQUEST('Verification tokens are required');
+    }
+
+    const token = tokens.find((t) => t?.key === AuthTokenType.VERIFICATION)?.value;
+
+    if (!token) {
+      return ApiResponse.badRequest(res, 'Verification token not found');
+    }
+
+    const verifyOTPResponse = await otpService.verifyOTP(phoneNumber, otp, token);
+
+    if (!verifyOTPResponse.success || !verifyOTPResponse.userId) {
+      return ApiResponse.badRequest(res, verifyOTPResponse.message);
+    }
+
+    await db.account.update({
+      where: {
+        provider_providerAccountId: {
+          provider: AccountProvider.CREDENTIALS,
+          providerAccountId: verifyOTPResponse.userId.toString(),
+        },
+      },
+      data: {
+        status: AccountStatus.ACTIVE,
+      },
+    });
+
+    return this.newAuthenticatedResponse(res, {
+      userId: verifyOTPResponse.userId,
+      message: 'OTP verified successfully',
+      rememberMe: rememberMe ?? false,
+    });
+  };
+
+  public otpResendForCredentialAccount = async (req: Request, res: Response) => {
+    const { phoneNumber, tokens } = req.body;
+    if (!Array.isArray(tokens) || tokens.length === 0) {
+      return ApiResponse.badRequest(res, 'Verification tokens are required');
+    }
+
+    const token = tokens.find((t) => t?.key === AuthTokenType.VERIFICATION)?.value;
+    if (!token) {
+      return ApiResponse.badRequest(res, 'Verification token not found');
+    }
+
+    const data = await db.authToken.findUnique({
+      where: {
+        token: token,
+        phoneNumber: phoneNumber,
+      },
+      select: {
+        phoneNumber: true,
+        expiresAt: true,
+        usedAt: true,
+      },
+    });
+
+    if (!data) {
+      return ApiResponse.notFound(res, 'Invalid token');
+    }
+
+    if (data?.usedAt) {
+      return ApiResponse.notFound(res, 'Token has already been used');
+    }
+
+    await db.authToken.update({
+      where: {
+        token: token,
+        phoneNumber: phoneNumber,
+      },
+      data: {
+        usedAt: new Date(),
+      },
+    });
+
+    const user = await db.user.findUnique({
+      where: {
+        phoneNumber: data.phoneNumber,
+      },
+      select: {
+        name: true,
+      },
+    });
+
+    if (!user) {
+      return ApiResponse.notFound(res, 'User not found');
+    }
+
+    const newToken = await otpService.sendOTP({
+      phoneNumber: data.phoneNumber,
+      name: user.name,
+      tokenType: AuthTokenType.VERIFICATION,
+    });
+
+    return ApiResponse.success(res, 'OTP sent successfully', {
+      expiresAt: data.expiresAt,
+      tokens: [
+        {
+          key: AuthTokenType.VERIFICATION,
+          value: newToken,
+        },
+      ],
+    });
+  };
+
+  public forgotPasswordForCredentialAccountTokenGenerate = async (req: Request, res: Response) => {
+    const { phoneNumber } = req.body;
+
+    const data = await db.user.findUnique({
+      where: {
+        phoneNumber: phoneNumber,
+      },
+    });
+
+    if (!data) {
+      return ApiResponse.notFound(res, 'User not found');
+    }
+
+    const token = await otpService.sendOTP({
+      phoneNumber: phoneNumber,
+      name: data.name,
+      tokenType: AuthTokenType.FORGOT_PASSWORD,
+    });
+
+    return ApiResponse.success(res, 'Forgot password token generated successfully', {
+      tokens: [
+        {
+          key: AuthTokenType.FORGOT_PASSWORD,
+          value: token,
+        },
+      ],
+    });
+  };
+
+  public forgotPasswordForCredentialAccountPreviewData = async (req: Request, res: Response) => {
+    const { phoneNumber, tokens } = req.body;
+    if (!Array.isArray(tokens) || tokens.length === 0) {
+      return ApiResponse.badRequest(res, 'Tokens are required');
+    }
+
+    const token = tokens.find((t) => t?.key === AuthTokenType.FORGOT_PASSWORD)?.value;
+    if (!token) {
+      return ApiResponse.badRequest(res, 'Token is required');
+    }
+
+    const data = await db.authToken.findUnique({
+      where: {
+        token: token,
+        phoneNumber: phoneNumber,
+      },
+      select: {
+        phoneNumber: true,
+        expiresAt: true,
+        usedAt: true,
+      },
+    });
+
+    if (!data || data.usedAt) {
+      return ApiResponse.badRequest(res, 'Invalid token');
+    }
+
+    if (data.expiresAt < new Date()) {
+      return ApiResponse.badRequest(res, 'Token has expired');
+    }
+
+    const user = await db.user.findUnique({
+      where: {
+        phoneNumber: data.phoneNumber,
+      },
+      select: {
+        name: true,
+      },
+    });
+
+    if (!user) {
+      return ApiResponse.notFound(res, 'User not found');
+    }
+
+    return ApiResponse.success(res, 'Forgot password token verified successfully', {
+      expiresAt: data.expiresAt,
+      user: {
+        name: user.name,
+        phoneNumber: data.phoneNumber,
+      },
+    });
+  };
+
+  public forgotPasswordForCredentialAccountTokenResend = async (req: Request, res: Response) => {
+    const { phoneNumber, tokens } = req.body;
+    if (!Array.isArray(tokens) || tokens.length === 0) {
+      return ApiResponse.badRequest(res, 'Tokens are required');
+    }
+
+    const token = tokens.find((t) => t?.key === AuthTokenType.FORGOT_PASSWORD)?.value;
+    if (!token) {
+      return ApiResponse.badRequest(res, 'Token is required');
+    }
+
+    const data = await db.authToken.findUnique({
+      where: {
+        token: token,
+        phoneNumber: phoneNumber,
+      },
+      select: {
+        phoneNumber: true,
+        expiresAt: true,
+      },
+    });
+    if (!data) {
+      return ApiResponse.notFound(res, 'Invalid token');
+    }
+
+    const user = await db.user.findUnique({
+      where: {
+        phoneNumber: data.phoneNumber,
+      },
+      select: {
+        name: true,
+      },
+    });
+    if (!user) {
+      return ApiResponse.notFound(res, 'User not found');
+    }
+
+    const newToken = await otpService.sendOTP({
+      phoneNumber: data.phoneNumber,
+      name: user.name,
+      tokenType: AuthTokenType.FORGOT_PASSWORD,
+    });
+
+    return ApiResponse.success(res, 'Forgot password token sent successfully', {
+      tokens: [
+        {
+          key: AuthTokenType.FORGOT_PASSWORD,
+          value: newToken,
+        },
+      ],
+    });
+  };
+
+  public forgotPasswordForCredentialAccountOtpVerification = async (
+    req: Request,
+    res: Response,
+  ) => {
+    const { phoneNumber, otp, tokens } = req.body;
+    if (!Array.isArray(tokens) || tokens.length === 0) {
+      return ApiResponse.badRequest(res, 'Tokens are required');
+    }
+
+    const token = tokens.find((t) => t?.key === AuthTokenType.FORGOT_PASSWORD)?.value;
+    if (!token) {
+      return ApiResponse.badRequest(res, 'Token is required');
+    }
+
+    const verifyOTPResponse = await otpService.verifyOTP(phoneNumber, otp, token);
+    if (!verifyOTPResponse.success || !verifyOTPResponse.userId) {
+      return ApiResponse.badRequest(res, verifyOTPResponse.message);
+    }
+
+    const newToken = await db.authToken.create({
+      data: {
+        phoneNumber: phoneNumber,
+        expiresAt: new Date(Date.now() + authConstants.RESET_PASSWORD_EXPIRATION_TIME),
+        type: AuthTokenType.RESET_PASSWORD,
+      },
+    });
+    if (!newToken) {
+      throw ApiError.BAD_REQUEST('Failed to create token');
+    }
+
+    return ApiResponse.success(res, 'Forgot password token verified successfully', {
+      tokens: [
+        {
+          key: AuthTokenType.RESET_PASSWORD,
+          value: newToken,
+        },
+      ],
+    });
+  };
+
+  public resetPasswordForCredentialAccount = async (req: Request, res: Response) => {
+    const { phoneNumber, tokens, password } = req.body;
+
+    if (!Array.isArray(tokens) || tokens.length === 0) {
+      return ApiResponse.badRequest(res, 'Tokens are required');
+    }
+
+    const token = tokens.find((t) => t?.key === AuthTokenType.RESET_PASSWORD)?.value;
+    if (!token) {
+      return ApiResponse.badRequest(res, 'Token is required');
+    }
+
+    const data = await db.authToken.findUnique({
+      where: {
+        token: token,
+        phoneNumber: phoneNumber,
+      },
+      select: {
+        expiresAt: true,
+        usedAt: true,
+      },
+    });
+
+    if (!data || data?.usedAt) {
+      return ApiResponse.badRequest(res, 'Invalid token');
+    }
+
+    await db.authToken.update({
+      where: {
+        token: token,
+      },
+      data: {
+        usedAt: new Date(),
+      },
+    });
+
+    if (data.expiresAt < new Date()) {
+      return ApiResponse.badRequest(res, 'Token has expired');
+    }
+
+    const userId = await db.$transaction(async (tx) => {
+      const hashedPassword = await AuthUtil.getHashedPassword(password);
+      const user = await tx.user.update({
+        where: {
+          phoneNumber: phoneNumber,
+        },
+        data: {
+          password: hashedPassword,
+        },
+      });
+
+      if (!user) {
+        return null;
+      }
+
+      await tx.account.update({
+        where: {
+          provider_providerAccountId: {
+            provider: AccountProvider.CREDENTIALS,
+            providerAccountId: user.id.toString(),
+          },
+        },
+        data: {
+          status: AccountStatus.ACTIVE,
+        },
+      });
+
+      return user.id;
+    });
+
+    if (!userId) {
+      return ApiResponse.notFound(res, 'User not found');
+    }
+
+    return this.newAuthenticatedResponse(res, {
+      userId: userId,
+      message: 'Password reset successfully',
+    });
   };
 }
 

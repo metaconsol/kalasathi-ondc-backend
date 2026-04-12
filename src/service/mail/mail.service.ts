@@ -1,46 +1,66 @@
 import nodemailer from 'nodemailer';
-import type { MailOptions, MailServiceConfig, MailTransport } from './mail.types';
-import { env } from '~/config/env.config';
+
 import { meta } from '~/lib/meta';
+import { logger } from '~/lib/logger';
+import { AppError } from '~/lib/response';
+import { env } from '~/config/env.config';
+import { errorCodes } from '~/config/error.config';
+import type { MailOptions, MailServiceConfig, MailTransport } from './mail.types';
+import { debugForDev } from '~/lib/utils';
 
 export class MailService {
   private transporter: nodemailer.Transporter;
   private config: MailServiceConfig;
 
+  private readonly defaultMailServiceConfig: MailServiceConfig = {
+    defaultTransport: env.mailService as MailTransport, // or 'ses' for AWS SES
+    defaultFrom: `${meta.appName} <${env.mailUser}>`,
+    smtp: {
+      host: env.mailHost!,
+      port: env.mailPort!,
+      secure: env.mailPortSecure, // true for 465, false for other ports
+      requireTLS: !env.mailPortSecure && env.mailPort === 587,
+      auth: {
+        user: env.mailUser!,
+        pass: env.mailPassword!,
+      },
+    },
+    retryOptions: {
+      maxRetries: 3,
+      delayMs: 1000,
+    },
+  };
+
   constructor(
     config: MailServiceConfig = {
-      defaultTransport: 'smtp', // or 'ses' for AWS SES
-      defaultFrom: `${meta.appName} <${env.mailUser}>`,
-      smtp: {
-        host: env.mailHost!,
-        port: env.mailPort!,
-        secure: env.mailPortSecure, // true for 465, false for other ports
-        auth: {
-          user: env.mailUser!,
-          pass: env.mailPassword!,
-        },
-      },
-      retryOptions: {
-        maxRetries: 3,
-        delayMs: 1000,
-      },
+      ...this.defaultMailServiceConfig,
     },
   ) {
     this.config = config;
-    this.transporter = this.createTransporter(config.defaultTransport) as nodemailer.Transporter;
+    this.transporter = this.createTransporter(this.config.defaultTransport);
   }
 
-  private createTransporter(transportType: MailTransport): nodemailer.Transporter | undefined {
+  private createTransporter(transportType: MailTransport): nodemailer.Transporter {
     switch (transportType) {
       case 'smtp':
         if (!this.config.smtp) {
-          throw new Error('SMTP configuration is required for SMTP transport');
+          throw new AppError(
+            'SMTP configuration is required for SMTP transport',
+            500,
+            true,
+            errorCodes.MAIL_CONNECTION_FAILURE,
+          );
         }
         return nodemailer.createTransport(this.config.smtp);
 
       case 'ses':
         if (!this.config.ses) {
-          throw new Error('SES configuration is required for SES transport');
+          throw new AppError(
+            'SES configuration is required for SES transport',
+            500,
+            true,
+            errorCodes.MAIL_CONNECTION_FAILURE,
+          );
         }
         // const ses = new AWS.SES({
         //   region: this.config.ses.region,
@@ -53,7 +73,12 @@ export class MailService {
         //     sendingRate: this.config.ses.rateLimit || 1,
         //   }),
         // );
-        break;
+        throw new AppError(
+          `Unsupported transport type: ${transportType}`,
+          500,
+          true,
+          errorCodes.MAIL_CONNECTION_FAILURE,
+        );
 
       case 'test':
         return nodemailer.createTransport({
@@ -61,10 +86,14 @@ export class MailService {
           newline: 'unix',
           buffer: true,
         });
-        break;
 
       default:
-        throw new Error(`Unsupported transport type: ${transportType}`);
+        throw new AppError(
+          `Unsupported transport type: ${transportType}`,
+          500,
+          true,
+          errorCodes.MAIL_CONNECTION_FAILURE,
+        );
     }
   }
 
@@ -127,7 +156,7 @@ export class MailService {
       const delayMs = this.config.retryOptions?.delayMs || 1000;
 
       if (attempt >= maxRetries) {
-        throw error;
+        throw new AppError('Error sending mail', 500, true, errorCodes.MAIL_SEND_FAILURE);
       }
 
       await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
@@ -137,14 +166,10 @@ export class MailService {
 
   public async sendMail(options: MailOptions) {
     try {
-      if (!(await this.verifyConnection())) {
-        throw new Error('Connection to mail server failed');
-      }
       const mailOptions = await this.prepareMailOptions(options);
       return this.sendWithRetry(mailOptions);
     } catch (error) {
-      console.error(error);
-      throw error;
+      throw new AppError('Error sending mail', 500, true, errorCodes.MAIL_SEND_FAILURE);
     }
   }
 
@@ -153,7 +178,8 @@ export class MailService {
       await this.sendMail(options);
       await this.close();
     } catch (error) {
-      return null;
+      debugForDev('Error sending mail', error);
+      throw new AppError('Error sending mail', 500, true, errorCodes.MAIL_SEND_FAILURE);
     }
   };
 
@@ -164,9 +190,19 @@ export class MailService {
 
 export async function mailServiceQucik(options: MailOptions, config?: MailServiceConfig) {
   try {
-    const mailService = new MailService(config);
+    const mailService = new MailService(config || undefined);
     await mailService.sendMailAndClose(options);
   } catch (error) {
-    console.log(error);
+    throw new AppError('Error sending mail', 500, true, errorCodes.MAIL_SEND_FAILURE);
+  }
+}
+
+export async function mailServiceAsync(options: MailOptions, config?: MailServiceConfig) {
+  try {
+    const mailService = new MailService(config || undefined);
+    await mailService.sendMailAndClose(options);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error('Error sending mail', { message, to: options.to });
   }
 }

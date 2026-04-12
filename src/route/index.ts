@@ -3,8 +3,7 @@ import { ApiResponse } from '~/lib/response';
 import type { Request, Response } from 'express';
 
 import { testRouter } from './test.route';
-
-// import authRouter from "./auth.route";
+import { authRouter } from './auth.route';
 
 const router = express.Router();
 
@@ -14,6 +13,7 @@ router.get('/', (_req: Request, res: Response) => {
   });
 });
 
+router.use('/auth', authRouter);
 router.use('/test', testRouter);
 
 export default router;
