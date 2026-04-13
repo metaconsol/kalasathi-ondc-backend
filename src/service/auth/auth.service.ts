@@ -345,12 +345,10 @@ class AuthService {
   };
 
   public getUser = async (req: Request, res: Response) => {
-    const { username } = req.query;
     const user = req?.user;
     delete (user as { id?: number }).id;
     return ApiResponse.success(res, 'User found', {
       user: user as UserPayloadDTO,
-      isAuthByUsername: user?.username == (username as string),
     });
   };
 
