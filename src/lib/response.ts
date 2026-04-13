@@ -35,6 +35,16 @@ export class ApiResponse {
     return res.status(201).json(response);
   }
 
+  // Accepted response (202)
+  static accepted(res: Response, message: string, data?: any): Response {
+    const response: IResponseData = {
+      success: true,
+      message,
+      data: this.processData(data),
+    };
+    return res.status(202).json(response);
+  }
+
   // No content response (204)
   static noContent(res: Response): Response {
     return res.status(204).send();

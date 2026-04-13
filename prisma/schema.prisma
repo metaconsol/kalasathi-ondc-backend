@@ -9,12 +9,110 @@ datasource db {
 }
 
 
-// Just for testing
-model User { 
-  id    Int     @id @default(autoincrement()) 
-  email String  @unique
-  name  String?
-  password String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-} 
+model User {
+    id                 Int       @id @default(autoincrement())
+    username           String    @unique @default(cuid())
+    name               String
+    email              String?
+    phoneNumber        String   @unique
+    password           String?
+    avatar             String?
+    role               UserRole  @default(USER)
+    isTwoFactorEnabled Boolean   @default(false)
+
+    createdAt          DateTime? @default(now())
+    updatedAt          DateTime  @updatedAt
+
+    accounts Account[]
+    profile  Profile?
+}
+
+enum UserRole {
+    ADMIN
+    USER
+    SELLER
+}
+
+model Account {
+    id                String          @id @default(cuid())
+    userId            Int
+    type              AccountType
+    provider          AccountProvider
+    providerAccountId String
+    refreshToken      String?         @db.Text
+    accessToken       String?         @db.Text
+    expiresAt         Int?
+    tokenType         String?
+    scope             String?
+    idToken           String?         @db.Text
+    sessionState      String?
+    status            AccountStatus   @default(ACTIVE)
+    phoneNumberVerifiedAt DateTime?
+    emailVerifiedAt DateTime?
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@unique([provider, providerAccountId])
+}
+
+enum AccountType {
+    CREDENTIALS
+    GOOGLE
+    GITHUB
+}
+
+enum AccountProvider {
+    CREDENTIALS
+    GOOGLE
+    GITHUB
+}
+
+enum AccountStatus {
+    ACTIVE
+    INACTIVE
+    PENDING
+    BLOCKED
+}
+
+model Otp {
+    id          Int       @id @default(autoincrement())
+    phoneNumber String
+    code        String
+    createdAt   DateTime  @default(now())
+    expiresAt   DateTime
+    usedAt      DateTime?
+
+    authToken    String?
+    authTokenRef AuthToken? @relation(fields: [authToken], references: [token], onDelete: Cascade)
+}
+
+model AuthToken {
+    token       String        @id @default(uuid())
+    phoneNumber String
+    createdAt   DateTime      @default(now())
+    expiresAt   DateTime
+    type        AuthTokenType
+    usedAt      DateTime?
+
+    @@unique([phoneNumber, token])
+
+    otp Otp[]
+}
+
+enum AuthTokenType {
+    RESET_PASSWORD
+    VERIFICATION
+    FORGOT_PASSWORD
+}
+
+model Profile {
+    userId         Int      @unique
+    about          String?
+    region         String?
+    user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    createdAt      DateTime @default(now())
+    updatedAt      DateTime @updatedAt
+}
