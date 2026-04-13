@@ -30,6 +30,7 @@ model User {
 enum UserRole {
     ADMIN
     USER
+    SELLER
 }
 
 model Account {
@@ -110,10 +111,6 @@ enum AuthTokenType {
 model Profile {
     userId         Int      @unique
     about          String?
-    totalArticles  Int      @default(0)
-    totalQuestions Int      @default(0)
-    totalAnswers   Int      @default(0)
-    reputation     Int      @default(0)
     region         String?
     user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
     createdAt      DateTime @default(now())

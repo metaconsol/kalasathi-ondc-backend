@@ -1,11 +1,11 @@
 export class OTPTemplate {
-  public static readonly verificationForSMS = (code: string) => {
+  public static verificationForSMS = (code: string) => {
     return `Your verification code is ${code}. Please use this code to verify your account.`;
   };
-  public static readonly forgotPasswordForSMS = (code: string) => {
+  public static forgotPasswordForSMS = (code: string) => {
     return `Your forgot password code is ${code}. Please use this code to reset your password.`;
   };
-  public static readonly verificationForEmail = (otp: string, userName: string): string => {
+  public static verificationForEmail = (otp: string, userName: string): string => {
     return `
       <!DOCTYPE html>
       <html>
@@ -122,7 +122,7 @@ export class OTPTemplate {
       </html>
     `;
   };
-  public static readonly forgotPasswordForEmail = (otp: string, userName: string): string => {
+  public static forgotPasswordForEmail = (otp: string, userName: string): string => {
     return `
       <!DOCTYPE html>
       <html>

@@ -1,14 +1,15 @@
 import { db } from '~/lib/db';
 import { logger } from '~/lib/logger';
 
-import { env } from '~/config/env.config';
+import { debugForDev } from '~/lib/utils';
 import { AppError } from '~/lib/response';
 import { OTPTemplate } from './otp.template';
 import { authConstants } from '~/lib/constant';
 import { smsService } from '../sms/sms.service';
+import { errorCodes } from '~/config/error.config';
+import type { Prisma } from '~/generated/prisma/client';
 import { AuthTokenType } from '~/generated/prisma/enums';
 import { mailServiceAsync } from '~/service/mail/mail.service';
-import { errorCodes } from '~/config/error.config';
 
 type SendOTPType = {
   phoneNumber: string;
@@ -39,10 +40,13 @@ class OTPService {
     return otp.toString();
   };
 
-  public sendOTP = async (data: SendOTPType): Promise<string> => {
+  public sendOTP = async (
+    data: SendOTPType,
+    dbTransaction?: Prisma.TransactionClient,
+  ): Promise<string> => {
     const expires = Date.now() + authConstants.OTP_EXPIRATION_TIME;
 
-    const token = await db.authToken.create({
+    const token = await (dbTransaction ?? db).authToken.create({
       data: {
         phoneNumber: data.phoneNumber,
         expiresAt: new Date(expires),
@@ -59,7 +63,7 @@ class OTPService {
 
     const code = this.generateOTP();
 
-    await db.otp.create({
+    await (dbTransaction ?? db).otp.create({
       data: {
         phoneNumber: data.phoneNumber,
         code: code,
@@ -68,12 +72,12 @@ class OTPService {
       },
     });
 
-    await smsService.sendSMS({
+    const smsResponse = await smsService.sendSMS({
       phoneNumber: data.phoneNumber,
       message: TemplateMap[data.tokenType as keyof typeof TemplateMap].sms(code),
-      senderId: env.smsSenderId,
-      dltEntityId: env.smsDltEntityId,
     });
+
+    debugForDev('SMS Response', smsResponse);
 
     if (data?.email) {
       mailServiceAsync({

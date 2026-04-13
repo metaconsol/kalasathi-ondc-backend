@@ -199,6 +199,7 @@ export async function mailServiceQucik(options: MailOptions, config?: MailServic
 
 export async function mailServiceAsync(options: MailOptions, config?: MailServiceConfig) {
   try {
+    debugForDev('Mail Request', { to: options?.to, subject: options?.subject });
     const mailService = new MailService(config || undefined);
     await mailService.sendMailAndClose(options);
   } catch (error) {

@@ -87,13 +87,14 @@ class AuthService {
         phoneNumber: phoneNumber,
       },
     });
-    if (isExist) {
+
+    if (isExist && isExist?.id) {
       return ApiResponse.badRequest(res, 'Phone number is already registered');
     }
 
     const hashedPassword: string = await AuthUtil.getHashedPassword(password);
-    const user = await db.$transaction(async (tx) => {
-      const createdUser = await tx.user.create({
+    const token = await db.$transaction(async (tx) => {
+      const user = await tx.user.create({
         data: {
           email: email ?? null,
           name: name,
@@ -113,46 +114,50 @@ class AuthService {
       });
       await tx.account.create({
         data: {
-          userId: createdUser.id,
+          userId: user.id,
           type: AccountType.CREDENTIALS,
           provider: AccountProvider.CREDENTIALS,
-          providerAccountId: createdUser.id.toString(),
+          providerAccountId: user.id.toString(),
           status: AccountStatus.PENDING,
         },
       });
 
-      return createdUser;
-    });
+      if (!user) {
+        throw ApiError.INTERNAL_SERVER_ERROR('Failed to user create');
+      }
 
-    if (!user) {
-      throw ApiError.INTERNAL_SERVER_ERROR('Failed to user create');
-    }
+      const otp = await otpService.sendOTP(
+        {
+          name: user.name,
+          email: user.email,
+          phoneNumber: user.phoneNumber,
+          tokenType: AuthTokenType.VERIFICATION,
+        },
+        tx,
+      );
+      if (!otp) {
+        throw ApiError.INTERNAL_SERVER_ERROR('Failed to send OTP');
+      }
 
-    const otp = await otpService.sendOTP({
-      name: user.name,
-      phoneNumber: user.phoneNumber!,
-      tokenType: AuthTokenType.VERIFICATION,
-    });
-    if (!otp) {
-      throw ApiError.INTERNAL_SERVER_ERROR('Failed to send OTP');
-    }
+      const token = await tx.authToken.create({
+        data: {
+          phoneNumber: user.phoneNumber,
+          expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+          type: AuthTokenType.VERIFICATION,
+        },
+      });
+      if (!token) {
+        throw ApiError.INTERNAL_SERVER_ERROR('Failed to create token');
+      }
 
-    const token = await db.authToken.create({
-      data: {
-        phoneNumber: user.phoneNumber!,
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
-        type: AuthTokenType.VERIFICATION,
-      },
+      return token.token;
     });
-    if (!token) {
-      throw ApiError.INTERNAL_SERVER_ERROR('Failed to create token');
-    }
 
     return ApiResponse.created(res, 'Registered successfully', {
       tokens: [
         {
           key: AuthTokenType.VERIFICATION,
-          value: token.token,
+          value: token,
         },
       ],
     });
@@ -266,9 +271,9 @@ class AuthService {
         },
       });
 
-      let newUser: User = user ?? null;
+      let token: string | null = null;
       if (!user) {
-        newUser = await db.$transaction(async (tx) => {
+        token = await db.$transaction(async (tx) => {
           const createdUser = await tx.user.create({
             data: {
               phoneNumber: phoneNumber,
@@ -296,20 +301,32 @@ class AuthService {
             },
           });
 
-          return createdUser;
+          if (!createdUser) {
+            throw ApiError.INTERNAL_SERVER_ERROR('Failed to create user');
+          }
+
+          return await otpService.sendOTP(
+            {
+              name: createdUser.name,
+              phoneNumber: createdUser.phoneNumber,
+              email: createdUser?.email,
+              tokenType: AuthTokenType.VERIFICATION,
+            },
+            tx,
+          );
+        });
+      } else {
+        token = await otpService.sendOTP({
+          name: user.name,
+          phoneNumber: user.phoneNumber,
+          email: user?.email,
+          tokenType: AuthTokenType.VERIFICATION,
         });
       }
 
-      if (!newUser) {
-        throw ApiError.INTERNAL_SERVER_ERROR('Failed to create user');
+      if (!token) {
+        throw ApiError.INTERNAL_SERVER_ERROR('Failed to send OTP');
       }
-
-      const token = await otpService.sendOTP({
-        name: newUser.name,
-        phoneNumber: newUser.phoneNumber,
-        email: newUser?.email,
-        tokenType: AuthTokenType.VERIFICATION,
-      });
 
       return ApiResponse.success(res, 'OTP sent successfully to your phone number', {
         tokens: [
