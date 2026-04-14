@@ -23,10 +23,6 @@
     "db:studio": "prisma studio",
     "db:seed": "prisma db seed"
   },
-  "prisma": {
-    "seed": "bun run ./prisma/seed.ts",
-    "schema": "./prisma/schema.prisma"
-  },
   "keywords": [
     "odop"
   ],
