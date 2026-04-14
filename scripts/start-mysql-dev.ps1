@@ -205,7 +205,7 @@ function Backup-Database {
     Write-Info "Creating database backup: $backupFile"
     
     # Using cmd /c to redirect output properly
-    $backupCommand = "docker exec $ContainerName mysqldump -u"$MySQLUser" -p"$MySQLPassword" --all-databases"
+    $backupCommand = "docker exec $ContainerName mysqldump -u$MySQLUser -p$MySQLPassword --all-databases"
     Invoke-Expression $backupCommand | Out-File -FilePath $backupFile -Encoding utf8
     
     if ($LASTEXITCODE -eq 0) {

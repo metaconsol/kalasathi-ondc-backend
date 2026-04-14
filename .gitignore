@@ -9,7 +9,6 @@ coverage/
 .DS_Store
 
 /src/generated/prisma
-prisma/migrations
 logs/
 
 tmp
