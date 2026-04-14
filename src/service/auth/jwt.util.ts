@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 
 import { AuthUtil } from './auth.util';
 import { env } from '~/config/env.config';
+import { debugForDev } from '~/lib/utils';
 import type { CookieOptions } from 'express';
 import type { UserPayloadDAO } from './auth.types';
 
@@ -19,7 +20,7 @@ export class AuthTokenUtil {
     return {
       path: '/',
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: 'strict',
       secure: env.isProduction,
       expires: new Date(0),
       domain: env.isProduction ? AuthUtil.getParentDomain(env?.serverUrl) : undefined,
@@ -32,7 +33,7 @@ export class AuthTokenUtil {
     return {
       path: '/',
       httpOnly: true, // Prevent client-side access to cookie
-      sameSite: 'lax', // CSRF protection : Restrict cookie to same-site requests
+      sameSite: 'strict', // CSRF protection : Restrict cookie to same-site requests
       secure: env.isProduction, // Only send cookie over HTTPS
       expires: new Date(Date.now() + AuthTokenUtil.getRefreshTokenCookieMaxAgeMs(rememberMe)), // 30 days in milliseconds
       domain: env.isProduction ? AuthUtil.getParentDomain(env?.serverUrl) : undefined,
@@ -82,21 +83,52 @@ export class AuthTokenUtil {
     });
   };
 
-  public static verifyAccessToken = (token: string): UserPayloadDAO => {
-    const payload = jwt.verify(token, env.accessTokenSecretKey);
-    return payload as UserPayloadDAO;
+  public static verifyAccessToken = (
+    token: string,
+  ): {
+    success: boolean;
+    payload: UserPayloadDAO | null;
+  } => {
+    try {
+      const payload = jwt.verify(token, env.accessTokenSecretKey);
+      return {
+        success: true,
+        payload: payload as UserPayloadDAO,
+      };
+    } catch (error) {
+      debugForDev('Error verifying access token');
+      return {
+        success: false,
+        payload: null,
+      };
+    }
   };
 
-  public static verifyRefreshToken = (token: string): UserPayloadDAO => {
-    const payload = jwt.verify(token, env.refreshTokenSecretKey);
-    return payload as UserPayloadDAO;
+  public static verifyRefreshToken = (
+    token: string,
+  ): {
+    success: boolean;
+    payload: UserPayloadDAO | null;
+  } => {
+    try {
+      const payload = jwt.verify(token, env.refreshTokenSecretKey);
+      return {
+        success: true,
+        payload: payload as UserPayloadDAO,
+      };
+    } catch (error) {
+      debugForDev('Error verifying refresh token');
+      return {
+        success: false,
+        payload: null,
+      };
+    }
   };
 
   public static isRefreshTokenWillExpireInLessThan = (
-    token: string,
+    payload: UserPayloadDAO,
     days: number = AuthTokenUtil.REFRESH_TOKEN_EXPIRE_TIME_IN_DAYS,
   ): boolean => {
-    const payload = jwt.verify(token, env.refreshTokenSecretKey);
     const expiresAt = new Date((payload as any)?.exp ?? 0 * 1000);
     const now = new Date();
     const diff = expiresAt.getTime() - now.getTime();

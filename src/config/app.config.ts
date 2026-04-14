@@ -30,10 +30,10 @@ export function createApp(): Application {
   // Security middleware (CORS, Helmet)
   app.use(
     cors({
-      allowedHeaders: ['Content-Type', 'Authorization'],
-      credentials: true,
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Cart-Session'],
       exposedHeaders: ['Authorization', 'X-Total-Count'],
-      methods: ['GET', 'POST', 'PUT', 'DELETE'],
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      credentials: true,
       optionsSuccessStatus: 200,
       origin: (origin, callback) => {
         if (!origin || env.clients.includes(origin)) {

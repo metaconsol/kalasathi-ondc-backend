@@ -17,6 +17,7 @@ export const env = {
   serverUrl: process.env.SERVER_URL || 'http://localhost:5000',
 
   databaseUrl: process.env.DATABASE_URL!,
+  shadowDatabaseUrl: process.env.SHADOW_DATABASE_URL || '',
 
   clients: Object.keys(process.env)
     .filter((key) => key.startsWith('CLIENT_'))
