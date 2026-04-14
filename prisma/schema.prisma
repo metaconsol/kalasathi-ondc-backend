@@ -1,28 +1,26 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+    provider = "prisma-client"
+    output   = "../src/generated/prisma"
 }
 
 datasource db {
-  provider = "mysql"
-  url      = env("DATABASE_URL")
-  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+    provider = "mysql"
+    url      = env("DATABASE_URL")
 }
 
-
 model User {
-    id                 Int       @id @default(autoincrement())
-    username           String    @unique @default(cuid())
+    id                 Int      @id @default(autoincrement())
+    username           String   @unique @default(cuid())
     name               String
     email              String?
     phoneNumber        String   @unique
     password           String?
     avatar             String?
-    role               UserRole  @default(USER)
-    isTwoFactorEnabled Boolean   @default(false)
+    role               UserRole @default(USER)
+    isTwoFactorEnabled Boolean  @default(false)
 
-    createdAt          DateTime? @default(now())
-    updatedAt          DateTime  @updatedAt
+    createdAt DateTime? @default(now())
+    updatedAt DateTime  @updatedAt
 
     accounts Account[]
     profile  Profile?
@@ -35,21 +33,21 @@ enum UserRole {
 }
 
 model Account {
-    id                String          @id @default(cuid())
-    userId            Int
-    type              AccountType
-    provider          AccountProvider
-    providerAccountId String
-    refreshToken      String?         @db.Text
-    accessToken       String?         @db.Text
-    expiresAt         Int?
-    tokenType         String?
-    scope             String?
-    idToken           String?         @db.Text
-    sessionState      String?
-    status            AccountStatus   @default(ACTIVE)
+    id                    String          @id @default(cuid())
+    userId                Int
+    type                  AccountType
+    provider              AccountProvider
+    providerAccountId     String
+    refreshToken          String?         @db.Text
+    accessToken           String?         @db.Text
+    expiresAt             Int?
+    tokenType             String?
+    scope                 String?
+    idToken               String?         @db.Text
+    sessionState          String?
+    status                AccountStatus   @default(ACTIVE)
     phoneNumberVerifiedAt DateTime?
-    emailVerifiedAt DateTime?
+    emailVerifiedAt       DateTime?
 
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
@@ -98,9 +96,9 @@ model AuthToken {
     type        AuthTokenType
     usedAt      DateTime?
 
-    @@unique([phoneNumber, token])
-
     otp Otp[]
+
+    @@unique([phoneNumber, token])
 }
 
 enum AuthTokenType {
@@ -110,10 +108,11 @@ enum AuthTokenType {
 }
 
 model Profile {
-    userId         Int      @unique
-    about          String?
-    region         String?
-    user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-    createdAt      DateTime @default(now())
-    updatedAt      DateTime @updatedAt
+    id        Int      @id @default(autoincrement())
+    userId    Int      @unique
+    about     String?
+    region    String?
+    user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
 }

@@ -7,7 +7,6 @@ import {
 } from '~/generated/prisma/enums';
 import { db } from '../../lib/db';
 import { AuthUtil } from './auth.util';
-import { debugForDev } from '~/lib/utils';
 import { AuthTokenUtil } from './jwt.util';
 import { authConstants } from '~/lib/constant';
 import { otpService } from '../otp/otp.service';
@@ -77,7 +76,7 @@ class AuthService {
   };
 
   public register = async (req: Request, res: Response) => {
-    const { name, email, phoneNumber, password } = req.body;
+    const { fullName: name, email, phoneNumber, password } = req.body;
 
     const isExist = await db.user.findUnique({
       select: {
@@ -178,11 +177,6 @@ class AuthService {
       const user = await db.user.findUnique({
         where: {
           phoneNumber: phoneNumber,
-          accounts: {
-            some: {
-              provider: AccountProvider.CREDENTIALS,
-            },
-          },
         },
         select: {
           id: true,
@@ -371,29 +365,40 @@ class AuthService {
       }
     });
 
-    debugForDev(`accessToken => ${accessToken}`);
-    debugForDev(`refreshToken => ${refreshToken}`);
-
     if (!refreshToken || refreshToken == '') {
       return ApiResponse.unauthorized(res, 'Unauthorized');
     }
 
-    const userPayloadUsingAccessToken: UserPayloadDAO | null =
+    const userPayloadUsingAccessToken =
       accessToken && accessToken != '' ? AuthTokenUtil.verifyAccessToken(accessToken) : null;
-    if (userPayloadUsingAccessToken && userPayloadUsingAccessToken?.id) {
-      const newAccessToken: string = AuthTokenUtil.generateAccessToken(userPayloadUsingAccessToken);
-      req.user = userPayloadUsingAccessToken;
+    if (
+      userPayloadUsingAccessToken &&
+      userPayloadUsingAccessToken?.success &&
+      userPayloadUsingAccessToken?.payload
+    ) {
+      const newAccessToken: string = AuthTokenUtil.generateAccessToken(
+        userPayloadUsingAccessToken.payload,
+      );
+      req.user = userPayloadUsingAccessToken.payload;
       res.setHeader('Authorization', `Bearer ${newAccessToken}`);
       return next();
     }
 
-    const userPayloadUsingRefreshToken: UserPayloadDAO =
-      AuthTokenUtil.verifyRefreshToken(refreshToken);
-    if (!userPayloadUsingRefreshToken || !userPayloadUsingRefreshToken?.id) {
+    const userPayloadUsingRefreshToken: {
+      success: boolean;
+      payload: UserPayloadDAO | null;
+    } = AuthTokenUtil.verifyRefreshToken(refreshToken);
+    if (
+      !userPayloadUsingRefreshToken ||
+      !userPayloadUsingRefreshToken?.success ||
+      !userPayloadUsingRefreshToken?.payload
+    ) {
       return ApiResponse.unauthorized(res, 'Invalid Refresh Token');
     }
-    const newAccessToken: string = AuthTokenUtil.generateAccessToken(userPayloadUsingRefreshToken);
-    req.user = userPayloadUsingRefreshToken;
+    const newAccessToken: string = AuthTokenUtil.generateAccessToken(
+      userPayloadUsingRefreshToken.payload,
+    );
+    req.user = userPayloadUsingRefreshToken.payload;
     res.setHeader('Authorization', `Bearer ${newAccessToken}`);
     return next();
   };
@@ -447,29 +452,43 @@ class AuthService {
       }
     });
 
-    debugForDev(`accessToken => ${accessToken}`);
-    debugForDev(`refreshToken => ${refreshToken}`);
-
     if (!refreshToken || refreshToken == '') {
       return next();
     }
 
-    const userPayloadUsingAccessToken: UserPayloadDAO | null =
+    const userPayloadUsingAccessToken: {
+      success: boolean;
+      payload: UserPayloadDAO | null;
+    } | null =
       accessToken && accessToken != '' ? AuthTokenUtil.verifyAccessToken(accessToken) : null;
-    if (userPayloadUsingAccessToken && userPayloadUsingAccessToken?.id) {
-      const newAccessToken: string = AuthTokenUtil.generateAccessToken(userPayloadUsingAccessToken);
-      req.user = userPayloadUsingAccessToken;
+    if (
+      userPayloadUsingAccessToken &&
+      userPayloadUsingAccessToken?.success &&
+      userPayloadUsingAccessToken?.payload
+    ) {
+      const newAccessToken: string = AuthTokenUtil.generateAccessToken(
+        userPayloadUsingAccessToken.payload,
+      );
+      req.user = userPayloadUsingAccessToken.payload;
       res.setHeader('Authorization', `Bearer ${newAccessToken}`);
       return next();
     }
 
-    const userPayloadUsingRefreshToken: UserPayloadDAO =
-      AuthTokenUtil.verifyRefreshToken(refreshToken);
-    if (!userPayloadUsingRefreshToken || !userPayloadUsingRefreshToken?.id) {
+    const userPayloadUsingRefreshToken: {
+      success: boolean;
+      payload: UserPayloadDAO | null;
+    } = AuthTokenUtil.verifyRefreshToken(refreshToken);
+    if (
+      !userPayloadUsingRefreshToken ||
+      !userPayloadUsingRefreshToken?.success ||
+      !userPayloadUsingRefreshToken?.payload
+    ) {
       return next();
     }
-    const newAccessToken: string = AuthTokenUtil.generateAccessToken(userPayloadUsingRefreshToken);
-    req.user = userPayloadUsingRefreshToken;
+    const newAccessToken: string = AuthTokenUtil.generateAccessToken(
+      userPayloadUsingRefreshToken.payload,
+    );
+    req.user = userPayloadUsingRefreshToken.payload;
     res.setHeader('Authorization', `Bearer ${newAccessToken}`);
     return next();
   };
@@ -492,27 +511,42 @@ class AuthService {
       }
     });
 
-    debugForDev(`refreshToken => ${refreshToken}`);
-
     if (!refreshToken || refreshToken == '') {
       return ApiResponse.unauthorized(res, 'Unauthorized');
     }
 
-    const userPayloadUsingRefreshToken: UserPayloadDAO =
-      AuthTokenUtil.verifyRefreshToken(refreshToken);
-    if (!userPayloadUsingRefreshToken || !userPayloadUsingRefreshToken?.id) {
+    const userPayloadUsingRefreshToken: {
+      success: boolean;
+      payload: UserPayloadDAO | null;
+    } = AuthTokenUtil.verifyRefreshToken(refreshToken);
+
+    if (
+      !userPayloadUsingRefreshToken ||
+      !userPayloadUsingRefreshToken?.success ||
+      !userPayloadUsingRefreshToken?.payload
+    ) {
       return ApiResponse.unauthorized(res, 'Invalid Refresh Token');
     }
-    const newAccessToken: string = AuthTokenUtil.generateAccessToken(userPayloadUsingRefreshToken);
+
+    const newPayload = {
+      id: userPayloadUsingRefreshToken.payload?.id,
+      name: userPayloadUsingRefreshToken.payload?.name,
+      email: userPayloadUsingRefreshToken.payload?.email,
+      phoneNumber: userPayloadUsingRefreshToken.payload?.phoneNumber,
+      username: userPayloadUsingRefreshToken.payload?.username,
+      avatar: userPayloadUsingRefreshToken.payload?.avatar,
+      role: userPayloadUsingRefreshToken.payload?.role,
+      isTwoFactorEnabled: userPayloadUsingRefreshToken.payload?.isTwoFactorEnabled,
+      isRememberMe: userPayloadUsingRefreshToken.payload?.isRememberMe,
+    } satisfies UserPayloadDAO;
+
+    const newAccessToken: string = AuthTokenUtil.generateAccessToken(newPayload);
     res.setHeader('Authorization', `Bearer ${newAccessToken}`);
     if (
-      userPayloadUsingRefreshToken.isRememberMe &&
-      AuthTokenUtil.isRefreshTokenWillExpireInLessThan(refreshToken)
+      userPayloadUsingRefreshToken.payload?.isRememberMe &&
+      AuthTokenUtil.isRefreshTokenWillExpireInLessThan(userPayloadUsingRefreshToken.payload)
     ) {
-      const newRefreshToken: string = AuthTokenUtil.generateRefreshToken(
-        userPayloadUsingRefreshToken,
-        true,
-      );
+      const newRefreshToken: string = AuthTokenUtil.generateRefreshToken(newPayload, true);
       res.cookie(
         AuthTokenUtil.REFRESH_TOKEN_KEY_NAME,
         newRefreshToken,
@@ -524,10 +558,18 @@ class AuthService {
   };
 
   public otpVerificationForCredentialAccountPreviewData = async (req: Request, res: Response) => {
-    const { token } = req.query;
-    if (!token) {
-      return ApiResponse.badRequest(res, 'Token is required');
+    const { phoneNumber, tokens } = req.body;
+
+    if (!Array.isArray(tokens) || tokens.length === 0) {
+      return ApiError.BAD_REQUEST('Verification tokens are required');
     }
+
+    const token = tokens.find((t) => t?.key === AuthTokenType.VERIFICATION)?.value;
+
+    if (!token) {
+      return ApiResponse.badRequest(res, 'Verification token not found');
+    }
+
     const authToken = await db.authToken.findUnique({
       where: {
         token: token as string,
@@ -535,6 +577,7 @@ class AuthService {
       select: {
         phoneNumber: true,
         expiresAt: true,
+        usedAt: true,
       },
     });
 
@@ -544,6 +587,10 @@ class AuthService {
 
     if (authToken.expiresAt < new Date()) {
       return ApiResponse.notFound(res, 'Token has expired');
+    }
+
+    if (authToken.usedAt) {
+      return ApiResponse.notFound(res, 'Token has already been used');
     }
 
     const user = await db.user.findUnique({
@@ -572,7 +619,6 @@ class AuthService {
   public otpVerificationForCredentialAccount = async (req: Request, res: Response) => {
     const { phoneNumber, otp, tokens, rememberMe } = req.body;
 
-    debugForDev(tokens);
     if (!Array.isArray(tokens) || tokens.length === 0) {
       return ApiError.BAD_REQUEST('Verification tokens are required');
     }
@@ -642,7 +688,6 @@ class AuthService {
     await db.authToken.update({
       where: {
         token: token,
-        phoneNumber: phoneNumber,
       },
       data: {
         usedAt: new Date(),

@@ -8,9 +8,12 @@ info:
     (e.g. `http://localhost:5000/api/v1`). For protected calls, reuse the `Authorization` header and
     `refreshToken` cookie from login/register/verify responses.
 
+    **Phone numbers:** Request bodies use **`phoneNumber`** in **E.164** form: a leading `+`, country code,
+    then digits (`^\+[1-9]\d{1,14}$`), total length 10–15 characters (see `PhoneNumberSchema` in `auth.schema.ts`).
+
     **Tokens:** OTP-related responses return `data.tokens[]` with `key` matching `AuthTokenType`
     (`VERIFICATION`, `FORGOT_PASSWORD`, `RESET_PASSWORD`) and `value` as the opaque token string.
-    Pass these back in subsequent requests as required by each endpoint.
+    Pass these back in subsequent requests in the JSON **`tokens`** array where the schema requires it.
   version: 1.0.0
 
 servers:
@@ -42,9 +45,9 @@ paths:
             schema:
               $ref: '#/components/schemas/RegisterRequest'
             example:
-              name: Jane Doe
+              fullName: Jane Doe
               email: jane@example.com
-              phoneNumber: '9876543210'
+              phoneNumber: '+14155552671'
               password: 'Str0ng!pass'
       responses:
         '201':
@@ -72,9 +75,9 @@ paths:
       description: |
         Set exactly one of `isLoginWithPassword` or `isLoginWithOtp` to `true` for the desired mode.
 
-        - **Password:** If the credentials account is still `PENDING`/`INACTIVE`, returns OTP `tokens` instead of JWT.
+        - **Password:** Supply a non-empty `password`. If the credentials account is still `PENDING`/`INACTIVE`, returns OTP `tokens` instead of JWT.
         - **Password + active account:** Returns JWT + sets cookies (see successful auth response).
-        - **OTP:** Sends verification OTP; returns `tokens` for `/auth/credential-account/verify`.
+        - **OTP:** Omit `password` (or leave unused). Sends verification OTP; returns `tokens` for `/auth/credential-account/verify`.
       operationId: authLogin
       requestBody:
         required: true
@@ -86,7 +89,7 @@ paths:
               password:
                 summary: Login with password
                 value:
-                  phoneNumber: '9876543210'
+                  phoneNumber: '+14155552671'
                   password: 'yourPassword'
                   isLoginWithPassword: true
                   isLoginWithOtp: false
@@ -95,8 +98,7 @@ paths:
               otp:
                 summary: Request OTP login
                 value:
-                  phoneNumber: '9876543210'
-                  password: 'x'
+                  phoneNumber: '+14155552671'
                   isLoginWithPassword: false
                   isLoginWithOtp: true
                   loginRole: USER
@@ -117,6 +119,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -141,16 +145,10 @@ paths:
       tags: [Credential account]
       summary: Preview credential OTP session (by server token id)
       description: |
-        Validates the auth-token row referenced by **query** `token` (UUID). The route validates the body
-        (`phoneNumber` + `tokens`); the handler uses `token` from the query string to load `AuthToken`.
+        Validates the auth-token row referenced by **`tokens`**: the handler takes the entry where
+        `key` is `VERIFICATION` and uses `value` (UUID) to load `AuthToken`. Body must match `OTPSchema`
+        (`phoneNumber` + `tokens`).
       operationId: credentialAccountPreview
-      parameters:
-        - name: token
-          in: query
-          required: true
-          schema:
-            type: string
-          description: Auth token UUID (`AuthToken.token`)
       requestBody:
         required: true
         content:
@@ -182,7 +180,7 @@ paths:
             schema:
               $ref: '#/components/schemas/OtpVerifyRequest'
             example:
-              phoneNumber: '9876543210'
+              phoneNumber: '+14155552671'
               otp: '123456'
               rememberMe: false
               tokens:
@@ -353,18 +351,12 @@ paths:
       tags: [Auth]
       summary: Get current user
       description: |
-        Requires `Cookie` with `refreshToken` and optionally `Authorization: Bearer <accessToken>`.
-        On success, a fresh access token may be returned in the `Authorization` response header.
+        Uses middleware that requires a non-empty **`Cookie`** header containing **`refreshToken`**.
+        **`Authorization: Bearer <accessToken>`** is optional; if valid, the access token is rotated.
+        On success, a fresh access token is returned in the **`Authorization`** response header.
       operationId: authGetUser
       security:
         - cookieAuth: []
-      parameters:
-        - name: username
-          in: query
-          required: false
-          schema:
-            type: string
-          description: If provided, `data.isAuthByUsername` indicates whether it matches the session user.
       responses:
         '200':
           description: Current user profile
@@ -426,37 +418,45 @@ components:
       properties:
         phoneNumber:
           type: string
-          pattern: '^[0-9]{10}$'
-          example: '9876543210'
+          minLength: 10
+          maxLength: 15
+          pattern: '^\+[1-9]\d{1,14}$'
+          description: E.164; must start with + and country code
+          example: '+14155552671'
 
     RegisterRequest:
       allOf:
         - $ref: '#/components/schemas/PhoneRequest'
         - type: object
-          required: [name, password]
+          required: [fullName, password]
           properties:
-            name:
+            fullName:
               type: string
               minLength: 2
               maxLength: 40
-              description: Letters and single spaces only
+              description: Letters and single spaces only (trimmed; internal spaces collapsed)
             email:
               type: string
               format: email
+              description: Optional
             password:
               type: string
               minLength: 8
               maxLength: 50
-              description: Must include letter, number, and special character
+              description: Must include letter, number, special character; no control characters
 
     LoginRequest:
       allOf:
         - $ref: '#/components/schemas/PhoneRequest'
         - type: object
-          required: [password]
           properties:
+            email:
+              type: string
+              format: email
+              description: Optional
             password:
               type: string
+              description: Required when isLoginWithPassword is true (non-empty); omit for OTP-only login
             isLoginWithPassword:
               type: boolean
               default: false

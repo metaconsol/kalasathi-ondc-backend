@@ -1,0 +1,9 @@
+{
+  "dockerContainerName": "odop-mysql8-db",
+  "dockerImage": "mysql:8.0",
+  "dockerPort": 3306,
+  "dockerDatabase": "odop-dev",
+  "dockerUser": "root",
+  "dockerPassword": "root",
+  "dockerHost": "localhost"
+}

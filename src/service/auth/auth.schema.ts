@@ -22,7 +22,7 @@ export const PhoneNumberSchema = z.object({
 });
 
 export const RegisterSchema = PhoneNumberSchema.extend({
-  name: z
+  fullName: z
     .string()
     .trim()
     .min(2, { message: 'Name must be at least 2 characters long.' })
@@ -56,10 +56,18 @@ export const LoginSchema = PhoneNumberSchema.extend({
   password: z
     .string()
     .trim()
-    .min(1, { message: 'Password field must not be empty.' })
     .refine((val) => !hasControlChars(val), {
       message: 'Password cannot contain escape sequences or control characters.',
-    }),
+    })
+    .optional(),
+}).superRefine(({ isLoginWithPassword, password }, ctx) => {
+  if (isLoginWithPassword && (!password || password.length < 1)) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'Password field must not be empty.',
+      path: ['password'],
+    });
+  }
 });
 
 export const OTPVerifySchema = PhoneNumberSchema.extend({
