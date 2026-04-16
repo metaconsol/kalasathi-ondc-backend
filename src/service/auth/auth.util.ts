@@ -3,6 +3,23 @@ import bcrypt from 'bcrypt';
 export class AuthUtil {
   private constructor() {}
 
+  /** Match token entry by key case-insensitively; trim value (UUID must stay exact after trim). */
+  public static getTokenFromBody(
+    tokens: { key?: string; value?: string }[] | undefined,
+    expectedKey: string,
+  ): string | undefined {
+    if (!Array.isArray(tokens)) {
+      return undefined;
+    }
+    const want = expectedKey.toUpperCase();
+    const entry = tokens.find((t) => String(t?.key ?? '').toUpperCase() === want);
+    const raw = entry?.value;
+    if (raw == null) {
+      return undefined;
+    }
+    return String(raw).trim();
+  }
+
   public static getHashedPassword = async (password: string): Promise<string> => {
     return await bcrypt.hash(password, 10);
   };

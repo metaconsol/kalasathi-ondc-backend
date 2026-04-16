@@ -78,12 +78,16 @@ export const OTPVerifySchema = PhoneNumberSchema.extend({
     }),
   ),
   otp: z
-    .string()
-    .trim()
-    .min(6, { message: 'OTP must be at least 6 characters long.' })
-    .refine((val) => !hasControlChars(val), {
-      message: 'Password cannot contain escape sequences or control characters.',
-    }),
+    .union([z.string(), z.number()])
+    .transform((val) => String(val).trim())
+    .pipe(
+      z
+        .string()
+        .min(6, { message: 'OTP must be at least 6 characters long.' })
+        .refine((val) => !hasControlChars(val), {
+          message: 'OTP cannot contain escape sequences or control characters.',
+        }),
+    ),
   rememberMe: z.boolean().default(false).optional(),
 });
 

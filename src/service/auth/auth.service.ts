@@ -125,7 +125,8 @@ class AuthService {
         throw ApiError.INTERNAL_SERVER_ERROR('Failed to user create');
       }
 
-      const otp = await otpService.sendOTP(
+      // sendOTP creates AuthToken + Otp in this tx and returns the session UUID (do not create another AuthToken).
+      const verificationToken = await otpService.sendOTP(
         {
           name: user.name,
           email: user.email,
@@ -134,22 +135,11 @@ class AuthService {
         },
         tx,
       );
-      if (!otp) {
+      if (!verificationToken) {
         throw ApiError.INTERNAL_SERVER_ERROR('Failed to send OTP');
       }
 
-      const token = await tx.authToken.create({
-        data: {
-          phoneNumber: user.phoneNumber,
-          expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
-          type: AuthTokenType.VERIFICATION,
-        },
-      });
-      if (!token) {
-        throw ApiError.INTERNAL_SERVER_ERROR('Failed to create token');
-      }
-
-      return token.token;
+      return verificationToken;
     });
 
     return ApiResponse.created(res, 'Registered successfully', {
@@ -564,7 +554,7 @@ class AuthService {
       return ApiError.BAD_REQUEST('Verification tokens are required');
     }
 
-    const token = tokens.find((t) => t?.key === AuthTokenType.VERIFICATION)?.value;
+    const token = AuthUtil.getTokenFromBody(tokens, AuthTokenType.VERIFICATION);
 
     if (!token) {
       return ApiResponse.badRequest(res, 'Verification token not found');
@@ -623,7 +613,7 @@ class AuthService {
       return ApiError.BAD_REQUEST('Verification tokens are required');
     }
 
-    const token = tokens.find((t) => t?.key === AuthTokenType.VERIFICATION)?.value;
+    const token = AuthUtil.getTokenFromBody(tokens, AuthTokenType.VERIFICATION);
 
     if (!token) {
       return ApiResponse.badRequest(res, 'Verification token not found');
@@ -660,7 +650,7 @@ class AuthService {
       return ApiResponse.badRequest(res, 'Verification tokens are required');
     }
 
-    const token = tokens.find((t) => t?.key === AuthTokenType.VERIFICATION)?.value;
+    const token = AuthUtil.getTokenFromBody(tokens, AuthTokenType.VERIFICATION);
     if (!token) {
       return ApiResponse.badRequest(res, 'Verification token not found');
     }
@@ -759,7 +749,7 @@ class AuthService {
       return ApiResponse.badRequest(res, 'Tokens are required');
     }
 
-    const token = tokens.find((t) => t?.key === AuthTokenType.FORGOT_PASSWORD)?.value;
+    const token = AuthUtil.getTokenFromBody(tokens, AuthTokenType.FORGOT_PASSWORD);
     if (!token) {
       return ApiResponse.badRequest(res, 'Token is required');
     }
@@ -812,7 +802,7 @@ class AuthService {
       return ApiResponse.badRequest(res, 'Tokens are required');
     }
 
-    const token = tokens.find((t) => t?.key === AuthTokenType.FORGOT_PASSWORD)?.value;
+    const token = AuthUtil.getTokenFromBody(tokens, AuthTokenType.FORGOT_PASSWORD);
     if (!token) {
       return ApiResponse.badRequest(res, 'Token is required');
     }
@@ -868,7 +858,7 @@ class AuthService {
       return ApiResponse.badRequest(res, 'Tokens are required');
     }
 
-    const token = tokens.find((t) => t?.key === AuthTokenType.FORGOT_PASSWORD)?.value;
+    const token = AuthUtil.getTokenFromBody(tokens, AuthTokenType.FORGOT_PASSWORD);
     if (!token) {
       return ApiResponse.badRequest(res, 'Token is required');
     }
@@ -906,7 +896,7 @@ class AuthService {
       return ApiResponse.badRequest(res, 'Tokens are required');
     }
 
-    const token = tokens.find((t) => t?.key === AuthTokenType.RESET_PASSWORD)?.value;
+    const token = AuthUtil.getTokenFromBody(tokens, AuthTokenType.RESET_PASSWORD);
     if (!token) {
       return ApiResponse.badRequest(res, 'Token is required');
     }
