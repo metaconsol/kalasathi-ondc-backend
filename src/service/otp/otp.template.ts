@@ -1,6 +1,6 @@
 export class OTPTemplate {
   public static verificationForSMS = (code: string) => {
-    return `Your verification code is ${code}. Please use this code to verify your account.`;
+    return `Dear Customer, your OTP for Mrignayanee Registration is {#var#}. Valid for 5 minutes. Please do not share it with anyone. -Mrignayanee`;
   };
   public static forgotPasswordForSMS = (code: string) => {
     return `Your forgot password code is ${code}. Please use this code to reset your password.`;

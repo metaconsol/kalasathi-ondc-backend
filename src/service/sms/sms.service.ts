@@ -48,7 +48,8 @@ class SMSService {
       params.append('msgType', 'text');
       params.append('output', 'json');
       params.append('dltEntityId', data?.dltEntityId ?? env.smsDltEntityId);
-
+      // chngs by arjita
+      params.append('dltTemplateId', '1707177140268394844');
       if (data.duplicateCheck ?? true) {
         params.append('duplicatecheck', 'true');
       }
