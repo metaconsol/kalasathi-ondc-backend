@@ -48,22 +48,32 @@ export function createApp(): Application {
   );
 
   app.use(helmet());
+  console.log('in the app,config');
 
-  // Body parsing (before routes)
-  app.use(
-    express.urlencoded({
-      extended: true,
-      limit: '5mb',
-      type: 'application/x-www-form-urlencoded',
-    }),
-  );
-  app.use(
-    express.json({
-      limit: '10mb',
-      strict: true,
-      type: 'application/json',
-    }),
-  );
+  // Body parsing (before routes) - conditionally bypass for multipart
+  const urlencodedParser = express.urlencoded({
+    extended: true,
+    limit: '5mb',
+    // removed type argument so it gracefully handles defaults, but we skip entirely for multipart anyway
+  });
+  const jsonParser = express.json({
+    limit: '10mb',
+    strict: true,
+  });
+
+  app.use((req, res, next) => {
+    const contentType = req.headers['content-type'] || '';
+    // If it's multipart, skip body-parser entirely so multer can process the untouched stream.
+    if (contentType.includes('multipart/form-data')) {
+      return next();
+    }
+
+    // Otherwise parse urlencoded and json
+    urlencodedParser(req, res, (err) => {
+      if (err) return next(err);
+      jsonParser(req, res, next);
+    });
+  });
 
   // Compression (after body parsing)
   app.use(compression());
