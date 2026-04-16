@@ -204,6 +204,7 @@ export async function mailServiceAsync(options: MailOptions, config?: MailServic
     await mailService.sendMailAndClose(options);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    logger.error('Error sending mail', { message, to: options.to });
+    // OTP/SMS flow does not depend on mail; log at warn so it is not mistaken for verify/OTP failure.
+    logger.warn(`OTP mail send failed (non-blocking): ${message} to=${options.to}`);
   }
 }
