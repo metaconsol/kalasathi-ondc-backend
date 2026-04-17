@@ -9,6 +9,16 @@ export const globalErrorHandler = (
   res: Response,
   _next: NextFunction,
 ) => {
+  // Ignore/handle aborted requests before logging them as errors
+  if (
+    error.type === 'request.aborted' ||
+    error.code === 'ECONNABORTED' ||
+    (error.message && error.message.toLowerCase().includes('request aborted'))
+  ) {
+    // Silently return 499 to prevent console spam (often caused by React Strict Mode)
+    return res.status(499).end();
+  }
+
   // Log error
   logger.error({
     message: error.message,

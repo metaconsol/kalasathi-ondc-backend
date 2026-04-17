@@ -116,3 +116,30 @@ model Profile {
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
 }
+
+
+model cmsSlider {
+  id              BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  pageId          BigInt?  @db.UnsignedBigInt
+  imageUploadId   BigInt?  @db.UnsignedBigInt
+  imageUrl        String?  @db.VarChar(800)
+
+  // 👉 NEW fields (your requirement)
+  image           String?
+  imageMobile     String?
+
+  heading         String   @db.VarChar(200)
+  subheading      String?  @db.VarChar(240)
+  buttonText      String?  @db.VarChar(60)
+  buttonRedirect String? @db.VarChar(500) @map("button_redirect")
+
+  sortOrder       Int      @default(0)
+  isActive        Boolean  @default(true)
+
+  createdBy       BigInt?  @db.UnsignedBigInt
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime? @updatedAt
+  deletedAt       DateTime?
+
+
+}

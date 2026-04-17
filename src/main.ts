@@ -1,7 +1,5 @@
 import 'dotenv/config';
-
 import { createServer } from 'node:http';
-
 import { db } from '~/lib/db';
 import { logger } from '~/lib/logger';
 import { env } from '~/config/env.config';
@@ -9,6 +7,11 @@ import { createApp } from '~/config/app.config';
 
 const app = createApp();
 const server = createServer(app);
+
+server.on('error', (err) => {
+  logger.error('Server failed to start:', err);
+  process.exit(1);
+});
 
 const resolveListenPort = (): number => {
   const fromPassenger = parseInt(process.env.PORT || '', 10);
