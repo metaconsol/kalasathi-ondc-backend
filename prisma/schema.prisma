@@ -4,8 +4,8 @@ generator client {
 }
 
 datasource db {
-    provider = "mysql"
-    url      = env("DATABASE_URL")
+  provider = "mysql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -142,4 +142,33 @@ model cmsSlider {
   deletedAt       DateTime?
 
 
+}
+
+model ContactMessage {
+  id           Int      @id @default(autoincrement())
+  fullName     String
+  email        String
+  orderNumber  String?
+  topic        Topic
+  message      String
+
+  status       MessageStatus @default(UNRESOLVED)
+
+  adminNotes   String?
+  resolvedBy   Int?
+  resolvedAt   DateTime?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+enum Topic {
+  GENERAL_INQUIRY
+  ORDER_STATUS
+  RETURNS
+}
+
+enum MessageStatus {
+  RESOLVED
+  UNRESOLVED
 }

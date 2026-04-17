@@ -5,6 +5,7 @@ import type { Request, Response } from 'express';
 import { testRouter } from './test.route';
 import { authRouter } from './auth.route';
 import sliderRoutes from './cms/slider.route';
+import contactRoutes from './contact.route';
 
 const router = express.Router();
 
@@ -17,4 +18,6 @@ router.get('/', (_req: Request, res: Response) => {
 router.use('/auth', authRouter);
 router.use('/test', testRouter);
 router.use('/slider', sliderRoutes);
+router.use('/contact', contactRoutes);
+
 export default router;
