@@ -4,7 +4,7 @@ import type { Request, Response } from 'express';
 
 import { testRouter } from './test.route';
 import { authRouter } from './auth.route';
-import sliderRoutes from './slider.route';
+import sliderRoutes from './cms/slider.route';
 
 const router = express.Router();
 

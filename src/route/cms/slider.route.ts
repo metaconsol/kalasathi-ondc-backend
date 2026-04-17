@@ -8,9 +8,9 @@ import {
   updateSlider,
   deleteSlider,
   toggleSlider,
-} from '../service/slider.service';
-import { serializeBigInt } from '../lib/utils';
-import { upload } from '../middleware/multer';
+} from '../../service/cms/slider.service';
+import { serializeBigInt } from '../../lib/utils';
+import { upload } from '../../middleware/multer';
 
 const router = Router();
 
