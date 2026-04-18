@@ -1,21 +1,40 @@
 import 'dotenv/config';
-
 import { createServer } from 'node:http';
-
-import { logger } from './lib/logger.js';
-import { env } from './config/env.config.js';
-import { createApp } from './config/app.config.js';
+import { db } from '~/lib/db';
+import { logger } from '~/lib/logger';
+import { env } from '~/config/env.config';
+import { createApp } from '~/config/app.config';
 
 const app = createApp();
 const server = createServer(app);
 
-try {
-  if (env.serverPort) {
-    server.listen(env.serverPort, () => {
-      logger.info(`Server is running on port ${env.serverPort} in ${env.nodeEnv} mode`);
-    });
-  }
-} catch (error) {
-  logger.error(error);
+server.on('error', (err) => {
+  logger.error('Server failed to start:', err);
   process.exit(1);
-}
+});
+
+const resolveListenPort = (): number => {
+  const fromPassenger = parseInt(process.env.PORT || '', 10);
+  if (!Number.isNaN(fromPassenger) && fromPassenger > 0) {
+    return fromPassenger;
+  }
+  return env.serverPort > 0 ? env.serverPort : 3000;
+};
+
+const startServer = async () => {
+  try {
+    await db.$connect();
+    logger.info('Prisma connected to the database successfully');
+
+    const port = resolveListenPort();
+
+    server.listen(port, () => {
+      logger.info(`Server is running on port ${port} in ${env.nodeEnv} mode`);
+    });
+  } catch (error) {
+    logger.error('Startup failed:', error);
+    process.exit(1);
+  }
+};
+
+void startServer();

@@ -44,11 +44,12 @@ const fileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCa
   }
 };
 
-// Middleware setup
+// Middleware setup — disk storage with type validation for the media feature.
+// Limit is set to 15MB to accommodate larger files (images, PDFs, docs).
 export const upload = multer({
   storage,
   limits: {
-    fileSize: 1024 * 1024, // 1MB
+    fileSize: 15 * 1024 * 1024, // 15MB
   },
   fileFilter,
 });

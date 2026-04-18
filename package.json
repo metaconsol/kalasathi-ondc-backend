@@ -8,23 +8,21 @@
     "build": "node esbuild.config.mjs",
     "build:watch": "node esbuild.config.mjs --watch",
     "start": "node dist/main.js",
+    "start:plesk": "node passenger.cjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "prepare": "husky",
+    "prepare": "husky install",
     "precommit": "lint-staged",
     "prod": "pm2 start dist/main.js --name odop-backend",
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset -f",
+    "db:resolve": "prisma migrate resolve",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "db:seed": "prisma db seed"
-  },
-  "prisma": {
-    "seed": "bun run ./prisma/seed.ts",
-    "schema": "./prisma/schema.prisma"
   },
   "keywords": [
     "odop"
@@ -49,13 +47,16 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^2.1.0",
     "@types/node": "^25.5.2",
+    "@types/nodemailer": "^8.0.0",
     "esbuild": "^0.25.0",
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.7",
+    "nodemon": "^3.1.14",
     "prettier": "^3.8.1",
     "prisma": "^6.19.3",
+    "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.50.0"
@@ -72,6 +73,8 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
-    "winston": "^3.19.0"
+    "nodemailer": "^8.0.5",
+    "winston": "^3.19.0",
+    "zod": "^4.3.6"
   }
 }

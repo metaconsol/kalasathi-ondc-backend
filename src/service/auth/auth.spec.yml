@@ -1,0 +1,589 @@
+openapi: 3.0.3
+info:
+  title: ODOP Auth API
+  description: |
+    Authentication endpoints for the ODOP backend. Base path is `/api/v1` (see `src/config/app.config.ts`).
+
+    **Postman:** Import this file (Import → Upload Files). Set a collection/environment variable `baseUrl`
+    (e.g. `http://localhost:5000/api/v1`). For protected calls, reuse the `Authorization` header and
+    `refreshToken` cookie from login/register/verify responses.
+
+    **Phone numbers:** Request bodies use **`phoneNumber`** in **E.164** form: a leading `+`, country code,
+    then digits (`^\+[1-9]\d{1,14}$`), total length 10–15 characters (see `PhoneNumberSchema` in `auth.schema.ts`).
+
+    **Tokens:** OTP-related responses return `data.tokens[]` with `key` matching `AuthTokenType`
+    (`VERIFICATION`, `FORGOT_PASSWORD`, `RESET_PASSWORD`) and `value` as the opaque token string.
+    Pass these back in subsequent requests in the JSON **`tokens`** array where the schema requires it.
+  version: 1.0.0
+
+servers:
+  - url: '{baseUrl}'
+    variables:
+      baseUrl:
+        default: http://localhost:5000/api/v1
+        description: API root including `/api/v1` prefix
+
+tags:
+  - name: Auth
+    description: Registration, login, session, and current user
+  - name: Credential account
+    description: Phone OTP for credential (password) accounts
+  - name: Forgot password
+    description: Password recovery via OTP and reset token
+
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register and send verification OTP
+      description: Creates a user with a pending credentials account and returns a `VERIFICATION` token for the OTP flow.
+      operationId: authRegister
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              fullName: Jane Doe
+              email: jane@example.com
+              phoneNumber: '+14155552671'
+              password: 'Str0ng!pass'
+      responses:
+        '201':
+          description: Registered; OTP sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccess'
+              examples:
+                registered:
+                  value:
+                    success: true
+                    message: Registered successfully
+                    data:
+                      tokens:
+                        - key: VERIFICATION
+                          value: '<uuid-auth-token>'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login (password or OTP mode)
+      description: |
+        Set exactly one of `isLoginWithPassword` or `isLoginWithOtp` to `true` for the desired mode.
+
+        - **Password:** Supply a non-empty `password`. If the credentials account is still `PENDING`/`INACTIVE`, returns OTP `tokens` instead of JWT.
+        - **Password + active account:** Returns JWT + sets cookies (see successful auth response).
+        - **OTP:** Omit `password` (or leave unused). Sends verification OTP; returns `tokens` for `/auth/credential-account/verify`.
+      operationId: authLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              password:
+                summary: Login with password
+                value:
+                  phoneNumber: '+14155552671'
+                  password: 'yourPassword'
+                  isLoginWithPassword: true
+                  isLoginWithOtp: false
+                  loginRole: USER
+                  rememberMe: false
+              otp:
+                summary: Request OTP login
+                value:
+                  phoneNumber: '+14155552671'
+                  isLoginWithPassword: false
+                  isLoginWithOtp: true
+                  loginRole: USER
+                  rememberMe: false
+      responses:
+        '200':
+          description: OTP sent, or login successful
+          headers:
+            Authorization:
+              description: 'Present when session is issued (Bearer accessToken)'
+              schema:
+                type: string
+            Set-Cookie:
+              description: 'refreshToken httpOnly cookie when session is issued'
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /auth/logout:
+    delete:
+      tags: [Auth]
+      summary: Logout
+      description: Clears the `refreshToken` cookie.
+      operationId: authLogout
+      responses:
+        '200':
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccess'
+
+  /auth/credential-account/preview:
+    post:
+      tags: [Credential account]
+      summary: Preview credential OTP session (by server token id)
+      description: |
+        Validates the auth-token row referenced by **`tokens`**: the handler takes the entry where
+        `key` is `VERIFICATION` and uses `value` (UUID) to load `AuthToken`. Body must match `OTPSchema`
+        (`phoneNumber` + `tokens`).
+      operationId: credentialAccountPreview
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpContextRequest'
+      responses:
+        '200':
+          description: Token valid; preview user and expiry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /auth/credential-account/verify:
+    post:
+      tags: [Credential account]
+      summary: Verify OTP and activate credential account
+      description: Verifies SMS OTP, activates the credentials account, then issues JWT + refresh cookie.
+      operationId: credentialAccountVerify
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpVerifyRequest'
+            example:
+              phoneNumber: '+14155552671'
+              otp: '123456'
+              rememberMe: false
+              tokens:
+                - key: VERIFICATION
+                  value: '<uuid-from-register-or-login>'
+      responses:
+        '200':
+          description: Verified; session issued
+          headers:
+            Authorization:
+              schema:
+                type: string
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /auth/credential-account/resend:
+    post:
+      tags: [Credential account]
+      summary: Resend verification OTP
+      operationId: credentialAccountResend
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpContextRequest'
+      responses:
+        '200':
+          description: New OTP sent; updated `tokens`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /auth/forgot-password/initiate:
+    post:
+      tags: [Forgot password]
+      summary: Start forgot-password (send OTP)
+      operationId: forgotPasswordInitiate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneRequest'
+      responses:
+        '200':
+          description: OTP sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccess'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /auth/forgot-password/preview:
+    post:
+      tags: [Forgot password]
+      summary: Preview forgot-password token
+      operationId: forgotPasswordPreview
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpContextRequest'
+      responses:
+        '200':
+          description: Token valid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /auth/forgot-password/resend:
+    post:
+      tags: [Forgot password]
+      summary: Resend forgot-password OTP
+      operationId: forgotPasswordResend
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpContextRequest'
+      responses:
+        '200':
+          description: OTP resent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /auth/forgot-password/verify:
+    post:
+      tags: [Forgot password]
+      summary: Verify forgot-password OTP
+      description: Returns a `RESET_PASSWORD` token for the final reset call.
+      operationId: forgotPasswordVerify
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpVerifyRequest'
+      responses:
+        '200':
+          description: Verified; reset token issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /auth/forgot-password/reset:
+    post:
+      tags: [Forgot password]
+      summary: Set new password
+      description: Consumes `RESET_PASSWORD` token and issues a new session (JWT + cookie).
+      operationId: forgotPasswordReset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPasswordRequest'
+      responses:
+        '200':
+          description: Password updated; session issued
+          headers:
+            Authorization:
+              schema:
+                type: string
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /auth/user:
+    get:
+      tags: [Auth]
+      summary: Get current user
+      description: |
+        Uses middleware that requires a non-empty **`Cookie`** header containing **`refreshToken`**.
+        **`Authorization: Bearer <accessToken>`** is optional; if valid, the access token is rotated.
+        On success, a fresh access token is returned in the **`Authorization`** response header.
+      operationId: authGetUser
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Current user profile
+          headers:
+            Authorization:
+              description: May contain rotated `Bearer` access token
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccess'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/refresh-token:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      description: Uses `refreshToken` cookie only; returns new access token in `Authorization` header.
+      operationId: authRefreshToken
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: New access token
+          headers:
+            Authorization:
+              schema:
+                type: string
+            Set-Cookie:
+              description: May refresh the cookie when remember-me sliding renewal applies
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiSuccess'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token from `Authorization` response header on successful auth
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: refreshToken
+      description: HttpOnly refresh token set by the server on successful login/register/verify/reset
+
+  schemas:
+    PhoneRequest:
+      type: object
+      required: [phoneNumber]
+      properties:
+        phoneNumber:
+          type: string
+          minLength: 10
+          maxLength: 15
+          pattern: '^\+[1-9]\d{1,14}$'
+          description: E.164; must start with + and country code
+          example: '+14155552671'
+
+    RegisterRequest:
+      allOf:
+        - $ref: '#/components/schemas/PhoneRequest'
+        - type: object
+          required: [fullName, password]
+          properties:
+            fullName:
+              type: string
+              minLength: 2
+              maxLength: 40
+              description: Letters and single spaces only (trimmed; internal spaces collapsed)
+            email:
+              type: string
+              format: email
+              description: Optional
+            password:
+              type: string
+              minLength: 8
+              maxLength: 50
+              description: Must include letter, number, special character; no control characters
+
+    LoginRequest:
+      allOf:
+        - $ref: '#/components/schemas/PhoneRequest'
+        - type: object
+          properties:
+            email:
+              type: string
+              format: email
+              description: Optional
+            password:
+              type: string
+              description: Required when isLoginWithPassword is true (non-empty); omit for OTP-only login
+            isLoginWithPassword:
+              type: boolean
+              default: false
+            isLoginWithOtp:
+              type: boolean
+              default: false
+            loginRole:
+              type: string
+              enum: [USER, ADMIN]
+              default: USER
+            rememberMe:
+              type: boolean
+              default: false
+
+    TokenRef:
+      type: object
+      required: [key, value]
+      properties:
+        key:
+          type: string
+          description: AuthTokenType or flow label
+          example: VERIFICATION
+        value:
+          type: string
+
+    OtpContextRequest:
+      allOf:
+        - $ref: '#/components/schemas/PhoneRequest'
+        - type: object
+          required: [tokens]
+          properties:
+            tokens:
+              type: array
+              items:
+                $ref: '#/components/schemas/TokenRef'
+
+    OtpVerifyRequest:
+      allOf:
+        - $ref: '#/components/schemas/OtpContextRequest'
+        - type: object
+          required: [otp]
+          properties:
+            otp:
+              type: string
+              minLength: 6
+            rememberMe:
+              type: boolean
+
+    ResetPasswordRequest:
+      allOf:
+        - $ref: '#/components/schemas/OtpContextRequest'
+        - type: object
+          required: [password]
+          properties:
+            password:
+              type: string
+              minLength: 8
+              maxLength: 50
+
+    UserPayload:
+      type: object
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          nullable: true
+        phoneNumber:
+          type: string
+          nullable: true
+        username:
+          type: string
+        avatar:
+          type: string
+          nullable: true
+        role:
+          type: string
+          enum: [USER, ADMIN]
+        isTwoFactorEnabled:
+          type: boolean
+        isRememberMe:
+          type: boolean
+
+    ApiSuccess:
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+        data:
+          description: Endpoint-specific payload (user, tokens, expiresAt, etc.)
+        meta:
+          type: object
+
+    ApiError:
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+        error:
+          description: Present on some 400 responses
+
+  responses:
+    BadRequest:
+      description: Validation or business rule failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Unauthorized:
+      description: Missing or invalid credentials
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+security: []

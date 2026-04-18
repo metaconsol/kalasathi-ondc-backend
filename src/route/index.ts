@@ -4,8 +4,8 @@ import type { Request, Response } from 'express';
 
 import { testRouter } from './test.route';
 import { mediaRouter } from './media.route';
-
-// import authRouter from "./auth.route";
+import { authRouter } from './auth.route';
+import sliderRoutes from './cms/slider.route';
 
 const router = express.Router();
 
@@ -15,7 +15,9 @@ router.get('/', (_req: Request, res: Response) => {
   });
 });
 
+router.use('/auth', authRouter);
 router.use('/test', testRouter);
 router.use('/media', mediaRouter);
+router.use('/slider', sliderRoutes);
 
 export default router;

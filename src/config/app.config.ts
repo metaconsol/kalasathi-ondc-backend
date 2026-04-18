@@ -32,10 +32,10 @@ export function createApp(): Application {
   // Security middleware (CORS, Helmet)
   app.use(
     cors({
-      allowedHeaders: ['Content-Type', 'Authorization'],
-      credentials: true,
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Cart-Session'],
       exposedHeaders: ['Authorization', 'X-Total-Count'],
-      methods: ['GET', 'POST', 'PUT', 'DELETE'],
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      credentials: true,
       optionsSuccessStatus: 200,
       origin: (origin, callback) => {
         if (!origin || env.clients.includes(origin)) {
@@ -50,27 +50,30 @@ export function createApp(): Application {
   );
 
   app.use(helmet());
+  console.log('in the app,config');
 
   // Body parsing — skip for multipart/form-data (handled by multer)
-  const isMultipart = (req: Request) =>
-    req.headers['content-type']?.startsWith('multipart/form-data') ?? false;
-
-  app.use((req, res, next) => {
-    if (isMultipart(req)) return next();
-    express.urlencoded({
-      extended: true,
-      limit: '5mb',
-      type: 'application/x-www-form-urlencoded',
-    })(req, res, next);
+  const urlencodedParser = express.urlencoded({
+    extended: true,
+    limit: '5mb',
+  });
+  const jsonParser = express.json({
+    limit: '10mb',
+    strict: true,
   });
 
   app.use((req, res, next) => {
-    if (isMultipart(req)) return next();
-    express.json({
-      limit: '10mb',
-      strict: true,
-      type: 'application/json',
-    })(req, res, next);
+    const contentType = req.headers['content-type'] || '';
+    // If it's multipart, skip body-parser entirely so multer can process the untouched stream.
+    if (contentType.includes('multipart/form-data')) {
+      return next();
+    }
+
+    // Otherwise parse urlencoded and json
+    urlencodedParser(req, res, (err) => {
+      if (err) return next(err);
+      jsonParser(req, res, next);
+    });
   });
 
   // Compression (after body parsing)
