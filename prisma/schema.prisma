@@ -5,7 +5,7 @@ generator client {
 
 datasource db {
     provider = "mysql"
-    url      = env("DATABASE_URL")
+    // url      = env("DATABASE_URL")
 }
 
 model User {
@@ -118,55 +118,69 @@ model Profile {
 }
 
 model cmsSlider {
-  id              BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
-  pageId          BigInt?  @db.UnsignedBigInt
-  imageUploadId   BigInt?  @db.UnsignedBigInt
-  imageUrl        String?  @db.VarChar(800)
+    id            BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+    pageId        BigInt? @db.UnsignedBigInt
+    imageUploadId BigInt? @db.UnsignedBigInt
+    imageUrl      String? @db.VarChar(800)
 
-  image           String?
-  imageMobile     String?
+    image       String?
+    imageMobile String?
 
-  heading         String   @db.VarChar(200)
-  subheading      String?  @db.VarChar(240)
-  buttonText      String?  @db.VarChar(60)
-  buttonRedirect  String?  @db.VarChar(500) @map("button_redirect")
+    heading        String  @db.VarChar(200)
+    subheading     String? @db.VarChar(240)
+    buttonText     String? @db.VarChar(60)
+    buttonRedirect String? @map("button_redirect") @db.VarChar(500)
 
-  sortOrder       Int      @default(0)
-  isActive        Boolean  @default(true)
+    sortOrder Int     @default(0)
+    isActive  Boolean @default(true)
 
-  createdBy       BigInt?  @db.UnsignedBigInt
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime? @updatedAt
-  deletedAt       DateTime?
+    createdBy BigInt?   @db.UnsignedBigInt
+    createdAt DateTime  @default(now())
+    updatedAt DateTime? @updatedAt
+    deletedAt DateTime?
 }
 
 // ─── Media Feature ───────────────────────────────────────────────────────────
 
 enum FileType {
-  IMAGE
-  PDF
-  DOC
-  OTHER
+    IMAGE
+    PDF
+    DOC
+    OTHER
 }
 
 enum StorageProvider {
-  LOCAL
-  S3
-  CDN
+    LOCAL
+    S3
+    CDN
 }
 
 model MediaFile {
-  id              String          @id @default(uuid())
-  fileType        FileType        @map("file_type")
-  originalName    String          @map("original_name")
-  mimeType        String          @map("mime_type")
-  fileSizeBytes   Int             @map("file_size_bytes")
-  storageProvider StorageProvider @default(LOCAL) @map("storage_provider")
-  storagePath     String          @map("storage_path")
-  publicUrl       String          @map("public_url")
-  checksumSha256  String          @map("checksum_sha256")
-  uploadedBy      Int?            @map("uploaded_by")
-  createdAt       DateTime        @default(now()) @map("created_at")
+    id              String          @id @default(uuid())
+    fileType        FileType        @map("file_type")
+    originalName    String          @map("original_name")
+    mimeType        String          @map("mime_type")
+    fileSizeBytes   Int             @map("file_size_bytes")
+    storageProvider StorageProvider @default(LOCAL) @map("storage_provider")
+    storagePath     String          @map("storage_path")
+    publicUrl       String          @map("public_url")
+    checksumSha256  String          @map("checksum_sha256")
+    uploadedBy      Int?            @map("uploaded_by")
+    createdAt       DateTime        @default(now()) @map("created_at")
 
-  @@map("media_files")
+    @@map("media_files")
+}
+
+// ─── Announcement Feature ───
+model Announcement {
+    id          String    @id @default(uuid())
+    text        String
+    isPublished Boolean   @default(false)
+    startAt     DateTime?
+    endAt       DateTime?
+    createdAt   DateTime  @default(now())
+    updatedAt   DateTime  @updatedAt
+
+    @@index([isPublished])
+    @@index([startAt, endAt])
 }

@@ -6,6 +6,7 @@ import { testRouter } from './test.route';
 import { mediaRouter } from './media.route';
 import { authRouter } from './auth.route';
 import sliderRoutes from './cms/slider.route';
+import announcementRoutes from './cms/AnnoucementBar/announcement.route';
 
 const router = express.Router();
 
@@ -19,5 +20,6 @@ router.use('/auth', authRouter);
 router.use('/test', testRouter);
 router.use('/media', mediaRouter);
 router.use('/slider', sliderRoutes);
+router.use('/cms', announcementRoutes);
 
 export default router;
