@@ -9,6 +9,27 @@ export const globalErrorHandler = (
   res: Response,
   _next: NextFunction,
 ) => {
+  // Express 5 fires "Request aborted" when the client disconnects.
+  // We cannot respond to a gone client, so silently ignore it.
+  if (
+    error.message === 'Request aborted' ||
+    error.code === 'ECONNRESET' ||
+    error.type === 'request.aborted'
+  ) {
+    return;
+  }
+
+  // Log full error details for debugging
+  console.error('[GlobalErrorHandler]', {
+    message: error.message,
+    code: error.code,
+    type: error.type,
+    name: error.name,
+    stack: error.stack,
+    url: req.url,
+    method: req.method,
+  });
+
   // Log error
   logger.error({
     message: error.message,

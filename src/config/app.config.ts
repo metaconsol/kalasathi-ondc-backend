@@ -18,9 +18,11 @@ export function createApp(): Application {
 
   // Process events (can be anywhere, but fine here)
   process.on('uncaughtException', async (error) => {
+    console.error('Uncaught exception details:', error);
     logger.error('Uncaught exception', { error });
   });
   process.on('unhandledRejection', async (ex) => {
+    console.error('Unhandled rejection details:', ex);
     logger.error('Unhandled rejection', { ex });
   });
 
@@ -49,21 +51,27 @@ export function createApp(): Application {
 
   app.use(helmet());
 
-  // Body parsing (before routes)
-  app.use(
+  // Body parsing — skip for multipart/form-data (handled by multer)
+  const isMultipart = (req: Request) =>
+    req.headers['content-type']?.startsWith('multipart/form-data') ?? false;
+
+  app.use((req, res, next) => {
+    if (isMultipart(req)) return next();
     express.urlencoded({
       extended: true,
       limit: '5mb',
       type: 'application/x-www-form-urlencoded',
-    }),
-  );
-  app.use(
+    })(req, res, next);
+  });
+
+  app.use((req, res, next) => {
+    if (isMultipart(req)) return next();
     express.json({
       limit: '10mb',
       strict: true,
       type: 'application/json',
-    }),
-  );
+    })(req, res, next);
+  });
 
   // Compression (after body parsing)
   app.use(compression());

@@ -1,20 +1,48 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
+  // output   = "../src/generated/prisma"
 }
 
 datasource db {
   provider = "mysql"
-  url      = env("DATABASE_URL")
+  //url      = env("DATABASE_URL")
 }
 
-
 // Just for testing
-model User { 
-  id    Int     @id @default(autoincrement()) 
-  email String  @unique
-  name  String?
-  password String
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  name      String?
+  password  String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-} 
+}
+
+enum FileType {
+  IMAGE
+  PDF
+  DOC
+  OTHER
+}
+
+enum StorageProvider {
+  LOCAL
+  S3
+  CDN
+}
+
+model MediaFile {
+  id              String          @id @default(uuid())
+  fileType        FileType        @map("file_type")
+  originalName    String          @map("original_name")
+  mimeType        String          @map("mime_type")
+  fileSizeBytes   Int             @map("file_size_bytes")
+  storageProvider StorageProvider @default(LOCAL) @map("storage_provider")
+  storagePath     String          @map("storage_path")
+  publicUrl       String          @map("public_url")
+  checksumSha256  String          @map("checksum_sha256")
+  uploadedBy      Int?            @map("uploaded_by")
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  @@map("media_files")
+}

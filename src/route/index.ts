@@ -3,6 +3,7 @@ import { ApiResponse } from '~/lib/response';
 import type { Request, Response } from 'express';
 
 import { testRouter } from './test.route';
+import { mediaRouter } from './media.route';
 
 // import authRouter from "./auth.route";
 
@@ -15,5 +16,6 @@ router.get('/', (_req: Request, res: Response) => {
 });
 
 router.use('/test', testRouter);
+router.use('/media', mediaRouter);
 
 export default router;

@@ -4,7 +4,7 @@
   "description": "ODOP backend API",
   "main": "dist/main.js",
   "scripts": {
-    "dev": "bun run --hot src/main.ts",
+    "dev": "tsx watch src/main.ts",
     "build": "node esbuild.config.mjs",
     "build:watch": "node esbuild.config.mjs --watch",
     "start": "node dist/main.js",
