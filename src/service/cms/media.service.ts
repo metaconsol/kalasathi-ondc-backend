@@ -1,5 +1,5 @@
-import { db } from '../../lib/db';
-import { ApiError } from '../../lib/response';
+import { db } from '~/lib/db';
+import { ApiError } from '~/lib/response';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';

@@ -18,7 +18,7 @@ export const getAllAnnouncementsService = async () => {
 };
 
 export const updateAnnouncementService = async (
-  id: string,
+  id: number,
   data: Partial<{
     text: string;
     isPublished: boolean;
@@ -32,13 +32,13 @@ export const updateAnnouncementService = async (
   });
 };
 
-export const deleteAnnouncementService = async (id: string) => {
+export const deleteAnnouncementService = async (id: number) => {
   return db.announcement.delete({
     where: { id },
   });
 };
 
-export const toggleAnnouncementService = async (id: string) => {
+export const toggleAnnouncementService = async (id: number) => {
   const announcement = await db.announcement.findUnique({
     where: { id },
   });
