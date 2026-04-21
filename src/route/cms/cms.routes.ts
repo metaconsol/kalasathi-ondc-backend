@@ -8,6 +8,7 @@ import { asyncHandler } from '~/lib/response';
 import * as announcementController from '~/controller/cms/announcement.controller';
 import * as sliderController from '~/controller/cms/slider.controller';
 import * as mediaController from '~/controller/cms/media.controller';
+import * as testimonialController from '~/controller/cms/testimonial.controller';
 
 const router = express.Router();
 
@@ -87,5 +88,43 @@ router.post(
 router.get('/media', authMiddleware, isAdmin, asyncHandler(mediaController.getMediaFiles));
 
 router.delete('/media/:id', authMiddleware, isAdmin, asyncHandler(mediaController.deleteMediaFile));
+
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
+ *  TESTIMONIAL ROUTES
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
+// Admin Routes
+router.post(
+  '/admin/testimonials',
+  authMiddleware,
+  isAdmin,
+  memoryUpload.single('customerPhoto'),
+  testimonialController.createTestimonial,
+);
+router.get('/admin/testimonials', authMiddleware, isAdmin, testimonialController.getTestimonials);
+router.patch(
+  '/admin/testimonials/:id',
+  authMiddleware,
+  isAdmin,
+  memoryUpload.single('customerPhoto'),
+  testimonialController.updateTestimonial,
+);
+router.delete(
+  '/admin/testimonials/:id',
+  authMiddleware,
+  isAdmin,
+  testimonialController.deleteTestimonial,
+);
+router.patch(
+  '/admin/testimonials/:id/toggle',
+  authMiddleware,
+  isAdmin,
+  testimonialController.toggleTestimonial,
+);
+
+// Public Routes
+router.get('/testimonials', testimonialController.getTestimonials);
 
 export default router;

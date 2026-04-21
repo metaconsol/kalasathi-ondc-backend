@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import * as sliderService from '~/service/cms/slider.service';
 import { ApiResponse } from '~/lib/response';
-import { serializeBigInt } from '~/lib/utils';
+import { serializeBigInt, formatFileUrl } from '~/lib/utils';
 
 const desktopDir = path.join(process.cwd(), 'public', 'uploads', 'cmsSliders', 'desktop');
 const mobileDir = path.join(process.cwd(), 'public', 'uploads', 'cmsSliders', 'mobile');
@@ -17,6 +17,18 @@ async function saveFileBuffer(file: any, folderPath: string): Promise<string> {
   await fs.writeFile(path.join(folderPath, filename), file.buffer);
   return filename;
 }
+
+// Function to format slider response with dynamic URLs
+const formatSliderResponse = (slider: any) => {
+  if (!slider) return null;
+  if (Array.isArray(slider)) return slider.map(formatSliderResponse);
+
+  return {
+    ...slider,
+    image: formatFileUrl(slider.image),
+    imageMobile: formatFileUrl(slider.imageMobile),
+  };
+};
 
 export const createSlider = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -53,7 +65,11 @@ export const createSlider = async (req: Request, res: Response, next: NextFuncti
 
     // Note: No need to cleanPayload and remove undefined because we've provided defaults above
     const slider = await sliderService.createSlider(payload as any);
-    return ApiResponse.created(res, 'Slider created successfully', serializeBigInt(slider));
+    return ApiResponse.created(
+      res,
+      'Slider created successfully',
+      serializeBigInt(formatSliderResponse(slider)),
+    );
   } catch (error) {
     next(error);
   }
@@ -63,7 +79,11 @@ export const getSliders = async (req: Request, res: Response, next: NextFunction
   try {
     const { active } = req.query;
     const sliders = await sliderService.getSliders(active === 'true');
-    return ApiResponse.success(res, 'Sliders fetched successfully', serializeBigInt(sliders));
+    return ApiResponse.success(
+      res,
+      'Sliders fetched successfully',
+      serializeBigInt(formatSliderResponse(sliders)),
+    );
   } catch (error) {
     next(error);
   }
@@ -114,7 +134,11 @@ export const updateSlider = async (req: Request, res: Response, next: NextFuncti
       return ApiResponse.badRequest(res, 'No update fields provided');
 
     const updated = await sliderService.updateSlider(id, cleanedPayload as any);
-    return ApiResponse.success(res, 'Slider updated successfully', serializeBigInt(updated));
+    return ApiResponse.success(
+      res,
+      'Slider updated successfully',
+      serializeBigInt(formatSliderResponse(updated)),
+    );
   } catch (error) {
     next(error);
   }
@@ -135,7 +159,11 @@ export const toggleSlider = async (req: Request, res: Response, next: NextFuncti
     const id = Number(req.params.id);
     const { isActive } = req.body;
     const updated = await sliderService.toggleSlider(id, isActive);
-    return ApiResponse.success(res, 'Slider status toggled successfully', serializeBigInt(updated));
+    return ApiResponse.success(
+      res,
+      'Slider status toggled successfully',
+      serializeBigInt(formatSliderResponse(updated)),
+    );
   } catch (error) {
     next(error);
   }
