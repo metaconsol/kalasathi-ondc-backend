@@ -1,4 +1,4 @@
-import jwt from 'jsonwebtoken';
+import jwt, { type SignOptions } from 'jsonwebtoken';
 
 import { AuthUtil } from './auth.util';
 import { env } from '~/config/env.config';
@@ -68,18 +68,42 @@ export class AuthTokenUtil {
     return 0;
   }
 
+  /**
+   * `jwt.verify` returns reserved claims (`exp`, `iat`, …). Re-signing that object with
+   * `expiresIn` throws: "payload already has an exp property". Only pass user fields.
+   */
+  private static toSignableUserPayload(userPayload: UserPayloadDAO): UserPayloadDAO {
+    return {
+      id: userPayload.id,
+      name: userPayload.name,
+      email: userPayload.email,
+      phoneNumber: userPayload.phoneNumber,
+      username: userPayload.username,
+      avatar: userPayload.avatar,
+      role: userPayload.role,
+      isTwoFactorEnabled: userPayload.isTwoFactorEnabled,
+      isRememberMe: userPayload.isRememberMe,
+    };
+  }
+
   public static generateAccessToken = (userPayload: UserPayloadDAO): string => {
-    return jwt.sign(userPayload, env.accessTokenSecretKey, {
-      expiresIn: AuthTokenUtil.normalizeTokenExpiresIn(env.accessTokenExpiresIn ?? '1h'),
-    });
+    const payload = AuthTokenUtil.toSignableUserPayload(userPayload);
+    const raw = (env.accessTokenExpiresIn ?? '15m').trim();
+    const signOptions: SignOptions = {
+      expiresIn: (raw.length > 0 ? raw : '15m') as NonNullable<SignOptions['expiresIn']>,
+    };
+    return jwt.sign(payload, env.accessTokenSecretKey, signOptions);
   };
 
   public static generateRefreshToken = (
     userPayload: UserPayloadDAO,
     rememberMe: boolean = false,
   ): string => {
-    return jwt.sign(userPayload, env.refreshTokenSecretKey, {
-      expiresIn: AuthTokenUtil.getRefreshTokenCookieMaxAgeMs(rememberMe),
+    const payload = AuthTokenUtil.toSignableUserPayload(userPayload);
+    const ms = AuthTokenUtil.getRefreshTokenCookieMaxAgeMs(rememberMe);
+    const expiresInSeconds = Math.max(1, Math.floor(ms / 1000));
+    return jwt.sign(payload, env.refreshTokenSecretKey, {
+      expiresIn: expiresInSeconds,
     });
   };
 
@@ -129,9 +153,10 @@ export class AuthTokenUtil {
     payload: UserPayloadDAO,
     days: number = AuthTokenUtil.REFRESH_TOKEN_EXPIRE_TIME_IN_DAYS,
   ): boolean => {
-    const expiresAt = new Date((payload as any)?.exp ?? 0 * 1000);
+    const expSec = (payload as { exp?: number }).exp;
+    const expiresAtMs = expSec != null ? expSec * 1000 : 0;
     const now = new Date();
-    const diff = expiresAt.getTime() - now.getTime();
+    const diff = expiresAtMs - now.getTime();
     return diff < days * 24 * 60 * 60 * 1000;
   };
 }

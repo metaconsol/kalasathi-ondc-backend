@@ -152,6 +152,73 @@ class AuthService {
     });
   };
 
+  /** Same as `register`, but creates the account with the SELLER role (no GSTIN/PAN verification). */
+  public registerSeller = async (req: Request, res: Response) => {
+    const { fullName: name, email, phoneNumber, password } = req.body;
+
+    const isExist = await db.user.findUnique({
+      select: { id: true },
+      where: { phoneNumber },
+    });
+
+    if (isExist?.id) {
+      return ApiResponse.badRequest(res, 'Phone number is already registered');
+    }
+
+    const hashedPassword: string = await AuthUtil.getHashedPassword(password);
+    const token = await db.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email: email ?? null,
+          name,
+          phoneNumber,
+          password: hashedPassword,
+          role: UserRole.SELLER,
+          profile: { create: {} },
+        },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          phoneNumber: true,
+        },
+      });
+      await tx.account.create({
+        data: {
+          userId: user.id,
+          type: AccountType.CREDENTIALS,
+          provider: AccountProvider.CREDENTIALS,
+          providerAccountId: user.id.toString(),
+          status: AccountStatus.PENDING,
+        },
+      });
+
+      const verificationToken = await otpService.sendOTP(
+        {
+          name: user.name,
+          email: user.email,
+          phoneNumber: user.phoneNumber,
+          tokenType: AuthTokenType.VERIFICATION,
+        },
+        tx,
+      );
+      if (!verificationToken) {
+        throw ApiError.INTERNAL_SERVER_ERROR('Failed to send OTP');
+      }
+
+      return verificationToken;
+    });
+
+    return ApiResponse.created(res, 'Seller registered successfully', {
+      tokens: [
+        {
+          key: AuthTokenType.VERIFICATION,
+          value: token,
+        },
+      ],
+    });
+  };
+
   public login = async (req: Request, res: Response) => {
     const {
       phoneNumber,
