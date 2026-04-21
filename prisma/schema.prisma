@@ -167,20 +167,72 @@ model MediaFile {
     checksumSha256  String          @map("checksum_sha256")
     uploadedBy      Int?            @map("uploaded_by")
     createdAt       DateTime        @default(now()) @map("created_at")
+    deletedAt       DateTime?       @map("deleted_at")
 
     @@map("media_files")
 }
 
 // ─── Announcement Feature ───
 model Announcement {
-    id          Int       @id @default(autoincrement())
-    text        String
-    isPublished Boolean   @default(false)
-    startAt     DateTime?
-    endAt       DateTime?
-    createdAt   DateTime  @default(now())
-    updatedAt   DateTime  @updatedAt
+    id           Int       @id @default(autoincrement())
+    text         String
+    contactPhone String?
+    contactEmail String?
+    isPublished  Boolean   @default(false)
+    startAt      DateTime?
+    endAt        DateTime?
+    createdAt    DateTime  @default(now())
+    updatedAt    DateTime  @updatedAt
+    deletedAt    DateTime?
 
     @@index([isPublished])
     @@index([startAt, endAt])
 }
+
+
+
+// ─── Testimonials Feature ───
+model Testimonial {
+    id               Int      @id @default(autoincrement())
+    customerName     String   @db.VarChar(100)
+    location         String?  @db.VarChar(100)
+    testimonialText  String   @db.Text
+    rating           Int      @default(5)
+    customerPhoto    String?  @db.VarChar(255)
+    productOrService String?  @db.VarChar(100)
+    isPublished      Boolean  @default(false)
+    
+    createdAt        DateTime @default(now())
+    updatedAt        DateTime @updatedAt
+    deletedAt        DateTime?
+
+    @@index([isPublished])
+}
+
+// ─── Contact Message Feature ───
+model ContactMessage {
+    id          Int                   @id @default(autoincrement())
+    fullName    String
+    email       String
+    orderNumber String?
+    topic       ContactMessage_topic
+    message     String
+    status      ContactMessage_status @default(UNRESOLVED)
+    adminNotes  String?
+    resolvedBy  Int?
+    resolvedAt  DateTime?
+    createdAt   DateTime              @default(now())
+    updatedAt   DateTime              @updatedAt
+}
+
+enum ContactMessage_topic {
+    GENERAL_INQUIRY
+    ORDER_STATUS
+    RETURNS
+}
+
+enum ContactMessage_status {
+    RESOLVED
+    UNRESOLVED
+}
+

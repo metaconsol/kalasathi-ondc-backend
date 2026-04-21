@@ -2,6 +2,8 @@ import { db } from '~/lib/db';
 
 export const createAnnouncementService = async (data: {
   text: string;
+  contactPhone?: string;
+  contactEmail?: string;
   isPublished?: boolean;
   startAt?: Date;
   endAt?: Date;
@@ -13,6 +15,7 @@ export const createAnnouncementService = async (data: {
 
 export const getAllAnnouncementsService = async () => {
   return db.announcement.findMany({
+    where: { deletedAt: null },
     orderBy: { createdAt: 'desc' },
   });
 };
@@ -21,9 +24,11 @@ export const updateAnnouncementService = async (
   id: number,
   data: Partial<{
     text: string;
+    contactPhone: string | null;
+    contactEmail: string | null;
     isPublished: boolean;
-    startAt: Date;
-    endAt: Date;
+    startAt: Date | null;
+    endAt: Date | null;
   }>,
 ) => {
   return db.announcement.update({
@@ -33,14 +38,17 @@ export const updateAnnouncementService = async (
 };
 
 export const deleteAnnouncementService = async (id: number) => {
-  return db.announcement.delete({
+  return db.announcement.update({
     where: { id },
+    data: {
+      deletedAt: new Date(),
+    },
   });
 };
 
 export const toggleAnnouncementService = async (id: number) => {
   const announcement = await db.announcement.findUnique({
-    where: { id },
+    where: { id, deletedAt: null },
   });
 
   if (!announcement) {
@@ -61,6 +69,7 @@ export const getActiveAnnouncementsService = async () => {
   return db.announcement.findMany({
     where: {
       isPublished: true,
+      deletedAt: null,
       AND: [
         {
           OR: [{ startAt: null }, { startAt: { lte: now } }],

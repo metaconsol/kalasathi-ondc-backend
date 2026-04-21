@@ -12,7 +12,6 @@ export const createSlider = async (data: {
   sortOrder?: number;
   isActive?: boolean;
 }) => {
-  console.log('--- Slider Service Create ---');
   console.log('Incoming data:', JSON.stringify(data, null, 2));
 
   const createData = {

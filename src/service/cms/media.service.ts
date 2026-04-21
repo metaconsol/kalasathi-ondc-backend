@@ -80,9 +80,12 @@ export class MediaService {
 
     const skip = (page - 1) * limit;
 
+    const where = { deletedAt: null };
+
     const [total, mediaFiles] = await Promise.all([
-      db.mediaFile.count(),
+      db.mediaFile.count({ where }),
       db.mediaFile.findMany({
+        where,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
@@ -103,27 +106,26 @@ export class MediaService {
   }
 
   /**
-   * Delete media by ID
+   * Delete media by ID (Soft Delete)
    */
   static async deleteMediaFile(id: string) {
-    const mediaFile = await db.mediaFile.findUnique({ where: { id } });
+    const mediaFile = await db.mediaFile.findUnique({
+      where: { id, deletedAt: null },
+    });
+
     if (!mediaFile) {
       throw ApiError.NOT_FOUND('Media file not found');
     }
 
-    // Remove from local filesystem if it exists
-    if (mediaFile.storageProvider === 'LOCAL' && mediaFile.storagePath) {
-      if (fs.existsSync(mediaFile.storagePath)) {
-        try {
-          fs.unlinkSync(mediaFile.storagePath);
-        } catch (err) {
-          console.error(`Failed to delete file at ${mediaFile.storagePath}:`, err);
-        }
-      }
-    }
+    // Note: We keep the physical file for Soft Delete.
+    // To hard delete and cleanup disk space, we would unlink the file.
 
-    // Remove record from database
-    await db.mediaFile.delete({ where: { id } });
+    await db.mediaFile.update({
+      where: { id },
+      data: {
+        deletedAt: new Date(),
+      },
+    });
 
     return { success: true, message: 'Media file deleted successfully' };
   }
