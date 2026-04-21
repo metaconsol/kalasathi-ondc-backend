@@ -9,22 +9,15 @@ import { ApiResponse } from '../../lib/response';
 
 export const createAnnouncement = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { text, isPublished, startAt, endAt } = req.body;
-    console.log('--- Announcement Controller Create ---');
-    console.log('Incoming data:', JSON.stringify(req.body, null, 2));
-    // if (!text || text.trim().length < 5) {
-    //   return ApiResponse.badRequest(res, 'Announcement text must be at least 5 characters');
-    // }
-
-    // if (startAt && endAt && new Date(startAt) > new Date(endAt)) {
-    //   return ApiResponse.badRequest(res, 'Start date cannot be greater than end date');
-    // }
+    const { text, contactPhone, contactEmail, isPublished, startAt, endAt } = req.body;
 
     const announcement = await announcementService.createAnnouncementService({
       text,
-      isPublished,
-      startAt,
-      endAt,
+      contactPhone: contactPhone || null,
+      contactEmail: contactEmail || null,
+      isPublished: isPublished === 'true' || isPublished === true,
+      startAt: startAt ? new Date(startAt) : undefined,
+      endAt: endAt ? new Date(endAt) : undefined,
     });
 
     return ApiResponse.created(res, 'Announcement created successfully', announcement);
@@ -45,7 +38,18 @@ export const getAllAnnouncements = async (req: Request, res: Response, next: Nex
 export const updateAnnouncement = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = Number(req.params.id);
-    const updated = await announcementService.updateAnnouncementService(id, req.body);
+    const { text, contactPhone, contactEmail, isPublished, startAt, endAt } = req.body;
+
+    const payload: any = {};
+    if (text !== undefined) payload.text = text;
+    if (contactPhone !== undefined) payload.contactPhone = contactPhone || null;
+    if (contactEmail !== undefined) payload.contactEmail = contactEmail || null;
+    if (isPublished !== undefined)
+      payload.isPublished = isPublished === 'true' || isPublished === true;
+    if (startAt !== undefined) payload.startAt = startAt ? new Date(startAt) : null;
+    if (endAt !== undefined) payload.endAt = endAt ? new Date(endAt) : null;
+
+    const updated = await announcementService.updateAnnouncementService(id, payload);
     return ApiResponse.success(res, 'Announcement updated successfully', updated);
   } catch (error) {
     next(error);
