@@ -3,9 +3,11 @@ import { authRouter } from './auth.route';
 import { testRouter } from './test.route';
 import { ApiResponse } from '~/lib/response';
 
+// Unified CMS & Feature Routes
 import cmsRoutes from './cms/cms.routes';
-// Unified CMS Routes
 import { sellerRouter } from './seller.route';
+import contactRoutes from './contact.route';
+import adminRouter from './admin.route';
 
 const router = express.Router();
 
@@ -22,11 +24,12 @@ router.get('/', (_req: Request, res: Response) => {
 router.use('/auth', authRouter);
 
 /**
- * 🛠 CMS Unified Routes (/api/v1/cms/...)
- * Groups: Slider, Media, Announcements, etc.
+ * 🛠 Feature Routes
  */
 router.use('/cms', cmsRoutes);
 router.use('/seller', sellerRouter);
+router.use('/contact', contactRoutes);
+router.use('/', adminRouter); // Mounted at root as it has prefix in admin.route.ts
 
 /**
  * Utilities & Testing

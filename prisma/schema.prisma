@@ -4,8 +4,8 @@ generator client {
 }
 
 datasource db {
-    provider = "mysql"
-    url      = env("DATABASE_URL")
+  provider = "mysql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -191,8 +191,6 @@ model Announcement {
     @@index([startAt, endAt])
 }
 
-
-
 // ─── Testimonials Feature ───
 model Testimonial {
     id               Int      @id @default(autoincrement())
@@ -321,3 +319,4 @@ model StoreLocation {
     @@index([storeId, locationType])
     @@map("store_locations")
 }
+
