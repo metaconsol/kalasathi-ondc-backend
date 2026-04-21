@@ -3,8 +3,9 @@ import { authRouter } from './auth.route';
 import { testRouter } from './test.route';
 import { ApiResponse } from '~/lib/response';
 
-// Unified CMS Routes
 import cmsRoutes from './cms/cms.routes';
+// Unified CMS Routes
+import { sellerRouter } from './seller.route';
 
 const router = express.Router();
 
@@ -25,6 +26,7 @@ router.use('/auth', authRouter);
  * Groups: Slider, Media, Announcements, etc.
  */
 router.use('/cms', cmsRoutes);
+router.use('/seller', sellerRouter);
 
 /**
  * Utilities & Testing

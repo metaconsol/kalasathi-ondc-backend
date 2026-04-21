@@ -22,8 +22,10 @@ model User {
     createdAt DateTime? @default(now())
     updatedAt DateTime  @updatedAt
 
-    accounts Account[]
-    profile  Profile?
+    accounts      Account[]
+    profile       Profile?
+    sellerProfile SellerProfile?
+    stores        Store[]
 }
 
 enum UserRole {
@@ -183,4 +185,87 @@ model Announcement {
 
     @@index([isPublished])
     @@index([startAt, endAt])
+}
+
+// ─── Seller / Store (marketplace) ───────────────────────────────────────────
+
+enum KycStatus {
+    PENDING
+    SUBMITTED
+    IN_REVIEW
+    VERIFIED
+    REJECTED
+}
+
+enum StoreLocationType {
+    DELIVERY
+    SELF_PICKUP
+    RETURN
+}
+
+model SellerProfile {
+    userId        Int       @id @map("user_id")
+    gstin         String?   @db.VarChar(15)
+    pan           String?   @db.VarChar(10)
+    bankAccountNo String?   @map("bank_account_no") @db.VarChar(34)
+    bankIfsc      String?   @map("bank_ifsc") @db.VarChar(11)
+    upiId         String?   @map("upi_id") @db.VarChar(256)
+    kycStatus     KycStatus @default(PENDING) @map("kyc_status")
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@map("seller_profiles")
+}
+
+model Store {
+    id           BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+    sellerUserId Int     @map("seller_user_id")
+    storeName    String  @map("store_name") @db.VarChar(255)
+    storeSlug    String  @unique @map("store_slug") @db.VarChar(255)
+    description  String? @db.Text
+    supportEmail String? @map("support_email") @db.VarChar(255)
+    supportPhone String? @map("support_phone") @db.VarChar(20)
+    isActive     Boolean @default(true) @map("is_active")
+    deletedAt    DateTime? @map("deleted_at")
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    seller    User            @relation(fields: [sellerUserId], references: [id], onDelete: Cascade)
+    locations StoreLocation[]
+
+    @@index([sellerUserId])
+    @@index([sellerUserId, deletedAt])
+    @@map("stores")
+}
+
+model StoreLocation {
+    id             BigInt            @id @default(autoincrement()) @db.UnsignedBigInt
+    storeId        BigInt            @map("store_id") @db.UnsignedBigInt
+    locationType   StoreLocationType @map("location_type")
+    addressLine1   String            @map("address_line1") @db.VarChar(255)
+    addressLine2   String?           @map("address_line2") @db.VarChar(255)
+    city           String            @db.VarChar(120)
+    state          String            @db.VarChar(120)
+    country        String            @db.VarChar(120)
+    pincode        String            @db.VarChar(20)
+    latitude       Decimal?          @db.Decimal(10, 7)
+    longitude      Decimal?          @db.Decimal(10, 7)
+    radiusKm       BigInt?           @map("radius") @db.UnsignedBigInt
+    openingTime    Int?              @map("opening_time")
+    closingTime    Int?              @map("closing_time")
+    serviceability Int               @map("serviceability")
+    isActive       Boolean           @default(true) @map("is_active")
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+    @@index([storeId])
+    @@index([storeId, locationType])
+    @@map("store_locations")
 }
