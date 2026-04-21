@@ -1,25 +1,34 @@
-import express from 'express';
-import { ApiResponse } from '~/lib/response';
-import type { Request, Response } from 'express';
-
-import { testRouter } from './test.route';
-import { mediaRouter } from './media.route';
+import express, { type Request, type Response } from 'express';
 import { authRouter } from './auth.route';
-import sliderRoutes from './cms/slider.route';
-import announcementRoutes from './cms/AnnoucementBar/announcement.route';
+import { testRouter } from './test.route';
+import { ApiResponse } from '~/lib/response';
+
+// Unified CMS Routes
+import cmsRoutes from './cms/cms.routes';
 
 const router = express.Router();
 
+/**
+ * API Status Endpoint
+ */
 router.get('/', (_req: Request, res: Response) => {
-  return ApiResponse.success(res, 'API is running', {
-    message: 'Welcome to ODOP API',
-  });
+  return ApiResponse.success(res, 'ODOP API v1 is operational');
 });
 
+/**
+ * Authentication Routes
+ */
 router.use('/auth', authRouter);
+
+/**
+ * 🛠 CMS Unified Routes (/api/v1/cms/...)
+ * Groups: Slider, Media, Announcements, etc.
+ */
+router.use('/cms', cmsRoutes);
+
+/**
+ * Utilities & Testing
+ */
 router.use('/test', testRouter);
-router.use('/media', mediaRouter);
-router.use('/slider', sliderRoutes);
-router.use('/cms', announcementRoutes);
 
 export default router;

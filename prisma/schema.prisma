@@ -5,7 +5,7 @@ generator client {
 
 datasource db {
     provider = "mysql"
-    // url      = env("DATABASE_URL")
+    url      = env("DATABASE_URL")
 }
 
 model User {
@@ -173,7 +173,7 @@ model MediaFile {
 
 // ─── Announcement Feature ───
 model Announcement {
-    id          String    @id @default(uuid())
+    id          Int       @id @default(autoincrement())
     text        String
     isPublished Boolean   @default(false)
     startAt     DateTime?

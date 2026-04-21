@@ -1,12 +1,11 @@
 import { db } from '~/lib/db';
 import { logger } from '~/lib/logger';
-
 import { debugForDev } from '~/lib/utils';
 import { AppError } from '~/lib/response';
 import { OTPTemplate } from './otp.template';
 import { authConstants } from '~/lib/constant';
 import { smsService } from '../sms/sms.service';
-import { errorCodes } from '~/config/error.config';
+import { errorCodes } from '~/middleware/error.middleware';
 import type { Prisma } from '~/generated/prisma/client';
 import { AuthTokenType } from '~/generated/prisma/enums';
 import { mailServiceAsync } from '~/service/mail/mail.service';
