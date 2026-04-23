@@ -9,8 +9,20 @@ import * as announcementController from '~/controller/cms/announcement.controlle
 import * as sliderController from '~/controller/cms/slider.controller';
 import * as mediaController from '~/controller/cms/media.controller';
 import * as testimonialController from '~/controller/cms/testimonial.controller';
+import * as blogController from '~/controller/cms/blog.controller';
 
 const router = express.Router();
+
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * 📝 BLOG ROUTES
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+router.get('/blog', blogController.getAllBlogs);
+router.get('/blog/:id', blogController.getBlog);
+router.post('/blog', authMiddleware, isAdmin, blogController.createBlog);
+router.patch('/blog/:id', authMiddleware, isAdmin, blogController.updateBlog);
+router.delete('/blog/:id', authMiddleware, isAdmin, blogController.deleteBlog);
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────

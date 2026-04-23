@@ -320,3 +320,20 @@ model StoreLocation {
     @@map("store_locations")
 }
 
+// ─── Blog Feature ───
+model Blog {
+    id            Int       @id @default(autoincrement())
+    title         String    @db.VarChar(255)
+    subheading    String?   @db.VarChar(255)
+    content       String    @db.LongText
+    featuredImage String?   @db.VarChar(500)
+    slug          String    @unique @db.VarChar(255)
+    isPublished   Boolean   @default(true)
+    createdAt     DateTime  @default(now())
+    updatedAt     DateTime  @updatedAt
+    deletedAt     DateTime?
+
+    @@index([isPublished])
+    @@map("blogs")
+}
+
