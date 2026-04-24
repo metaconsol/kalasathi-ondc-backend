@@ -47,7 +47,11 @@ export function createApp(): Application {
       },
     }),
   );
-  app.use(helmet());
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' }, // 🔥 THIS FIXES YOUR IMAGE ISSUE
+    }),
+  );
   app.use(compression());
 
   /**
@@ -69,6 +73,7 @@ export function createApp(): Application {
   });
 
   // Static files and public assets
+  app.use('/uploads', express.static('uploads'));
   app.use(express.static('public'));
 
   // Health check / Root endpoint
