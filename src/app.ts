@@ -1,40 +1,42 @@
 import express, { type Application, type Request, type Response } from 'express';
-
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
+import 'dotenv/config';
 
 import routes from '~/route';
-import { env } from './env.config';
+import { env } from '~/config/env.config';
 import { logger } from '~/lib/logger';
 import { createSafeApp } from '~/lib/SafeExpress';
-import { globalErrorHandler, notFoundHandler } from './error.config';
+import { globalErrorHandler, notFoundHandler } from '~/middleware/error.middleware';
 import { ApiResponse } from '~/lib/response';
 
-const api = '/api/v1';
-
+/**
+ * Creates and configures the Express application.
+ * Follows Production-Ready Layered Architecture.
+ */
 export function createApp(): Application {
   const app = createSafeApp();
 
-  // Process events (can be anywhere, but fine here)
-  process.on('uncaughtException', async (error) => {
+  // Handle process-level events
+  process.on('uncaughtException', (error) => {
     logger.error('Uncaught exception', { error });
   });
-  process.on('unhandledRejection', async (ex) => {
+  process.on('unhandledRejection', (ex) => {
     logger.error('Unhandled rejection', { ex });
   });
 
-  // Trust proxy (first if needed)
+  // Basic security and scalability settings
   app.enable('trust proxy');
+  app.disable('x-powered-by');
 
-  // Security middleware (CORS, Helmet)
+  // Security & Optimization Middleware
   app.use(
     cors({
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Cart-Session'],
       exposedHeaders: ['Authorization', 'X-Total-Count'],
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       credentials: true,
-      optionsSuccessStatus: 200,
       origin: (origin, callback) => {
         if (!origin || env.clients.includes(origin)) {
           callback(null, true);
@@ -43,58 +45,42 @@ export function createApp(): Application {
           callback(new Error('Not allowed by CORS'));
         }
       },
-      preflightContinue: false,
     }),
   );
-
   app.use(helmet());
-  console.log('in the app,config');
+  app.use(compression());
 
-  // Body parsing (before routes) - conditionally bypass for multipart
-  const urlencodedParser = express.urlencoded({
-    extended: true,
-    limit: '5mb',
-    // removed type argument so it gracefully handles defaults, but we skip entirely for multipart anyway
-  });
-  const jsonParser = express.json({
-    limit: '10mb',
-    strict: true,
-  });
+  /**
+   * Custom Body Parsing Logic
+   * Skips built-in parsers for multipart/form-data to allow Multer to handle streams.
+   */
+  const urlencodedParser = express.urlencoded({ extended: true, limit: '5mb' });
+  const jsonParser = express.json({ limit: '10mb', strict: true });
 
   app.use((req, res, next) => {
     const contentType = req.headers['content-type'] || '';
-    // If it's multipart, skip body-parser entirely so multer can process the untouched stream.
     if (contentType.includes('multipart/form-data')) {
       return next();
     }
-
-    // Otherwise parse urlencoded and json
     urlencodedParser(req, res, (err) => {
       if (err) return next(err);
       jsonParser(req, res, next);
     });
   });
 
-  // Compression (after body parsing)
-  app.use(compression());
-
-  // Static files
+  // Static files and public assets
   app.use(express.static('public'));
 
-  // Disable headers
-  app.disable('x-powered-by');
-  // app.disable("etag");
-
-  // Routes
+  // Health check / Root endpoint
   app.get('/', (_req: Request, res: Response) => {
-    return ApiResponse.success(res, 'API is running');
+    return ApiResponse.success(res, 'ODOP API is running');
   });
-  app.use(api, routes);
 
-  // 404 handler
+  // Mount API Routes under /api/v1
+  app.use('/api/v1', routes);
+
+  // Global Handlers for 404 and Errors
   app.use(notFoundHandler);
-
-  // Global error handler
   app.use(globalErrorHandler);
 
   return app;

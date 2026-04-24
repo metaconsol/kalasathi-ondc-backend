@@ -152,6 +152,73 @@ class AuthService {
     });
   };
 
+  /** Same as `register`, but creates the account with the SELLER role (no GSTIN/PAN verification). */
+  public registerSeller = async (req: Request, res: Response) => {
+    const { fullName: name, email, phoneNumber, password } = req.body;
+
+    const isExist = await db.user.findUnique({
+      select: { id: true },
+      where: { phoneNumber },
+    });
+
+    if (isExist?.id) {
+      return ApiResponse.badRequest(res, 'Phone number is already registered');
+    }
+
+    const hashedPassword: string = await AuthUtil.getHashedPassword(password);
+    const token = await db.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email: email ?? null,
+          name,
+          phoneNumber,
+          password: hashedPassword,
+          role: UserRole.SELLER,
+          profile: { create: {} },
+        },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          phoneNumber: true,
+        },
+      });
+      await tx.account.create({
+        data: {
+          userId: user.id,
+          type: AccountType.CREDENTIALS,
+          provider: AccountProvider.CREDENTIALS,
+          providerAccountId: user.id.toString(),
+          status: AccountStatus.PENDING,
+        },
+      });
+
+      const verificationToken = await otpService.sendOTP(
+        {
+          name: user.name,
+          email: user.email,
+          phoneNumber: user.phoneNumber,
+          tokenType: AuthTokenType.VERIFICATION,
+        },
+        tx,
+      );
+      if (!verificationToken) {
+        throw ApiError.INTERNAL_SERVER_ERROR('Failed to send OTP');
+      }
+
+      return verificationToken;
+    });
+
+    return ApiResponse.created(res, 'Seller registered successfully', {
+      tokens: [
+        {
+          key: AuthTokenType.VERIFICATION,
+          value: token,
+        },
+      ],
+    });
+  };
+
   public login = async (req: Request, res: Response) => {
     const {
       phoneNumber,
@@ -338,11 +405,25 @@ class AuthService {
 
   public authenticate = async (req: Request, res: Response, next: NextFunction) => {
     const accessToken: string | null = req.headers?.authorization?.split(' ')?.[1] ?? null;
-    // const refreshToken = req.cookies?.refreshToken || null;
-    const headerCookie = req.headers.cookie || null;
 
+    // 1. Try Authenticating with Access Token first
+    if (accessToken && accessToken !== '') {
+      const result = AuthTokenUtil.verifyAccessToken(accessToken);
+      if (result.success && result.payload) {
+        // Strip iat and exp from payload before re-signing
+        const { iat, exp, ...cleanPayload } = result.payload as any;
+        req.user = cleanPayload as UserPayloadDAO;
+
+        const newAccessToken = AuthTokenUtil.generateAccessToken(cleanPayload as UserPayloadDAO);
+        res.setHeader('Authorization', `Bearer ${newAccessToken}`);
+        return next();
+      }
+    }
+
+    // 2. Fallback to Refresh Token (Cookie) if Access Token is missing or expired
+    const headerCookie = req.headers.cookie || null;
     if (!headerCookie) {
-      return ApiResponse.unauthorized(res, 'Unauthorized');
+      return ApiResponse.unauthorized(res, 'Unauthorized - Missing Token and Cookie');
     }
 
     const cookies = headerCookie.split(';');
@@ -356,39 +437,18 @@ class AuthService {
     });
 
     if (!refreshToken || refreshToken == '') {
-      return ApiResponse.unauthorized(res, 'Unauthorized');
+      return ApiResponse.unauthorized(res, 'Unauthorized - Missing Refresh Token');
     }
 
-    const userPayloadUsingAccessToken =
-      accessToken && accessToken != '' ? AuthTokenUtil.verifyAccessToken(accessToken) : null;
-    if (
-      userPayloadUsingAccessToken &&
-      userPayloadUsingAccessToken?.success &&
-      userPayloadUsingAccessToken?.payload
-    ) {
-      const newAccessToken: string = AuthTokenUtil.generateAccessToken(
-        userPayloadUsingAccessToken.payload,
-      );
-      req.user = userPayloadUsingAccessToken.payload;
-      res.setHeader('Authorization', `Bearer ${newAccessToken}`);
-      return next();
-    }
-
-    const userPayloadUsingRefreshToken: {
-      success: boolean;
-      payload: UserPayloadDAO | null;
-    } = AuthTokenUtil.verifyRefreshToken(refreshToken);
-    if (
-      !userPayloadUsingRefreshToken ||
-      !userPayloadUsingRefreshToken?.success ||
-      !userPayloadUsingRefreshToken?.payload
-    ) {
+    const userPayloadUsingRefreshToken = AuthTokenUtil.verifyRefreshToken(refreshToken);
+    if (!userPayloadUsingRefreshToken.success || !userPayloadUsingRefreshToken.payload) {
       return ApiResponse.unauthorized(res, 'Invalid Refresh Token');
     }
-    const newAccessToken: string = AuthTokenUtil.generateAccessToken(
-      userPayloadUsingRefreshToken.payload,
-    );
-    req.user = userPayloadUsingRefreshToken.payload;
+
+    // Strip iat and exp from payload before re-signing
+    const { iat, exp, ...cleanPayload } = userPayloadUsingRefreshToken.payload as any;
+    const newAccessToken = AuthTokenUtil.generateAccessToken(cleanPayload as UserPayloadDAO);
+    req.user = cleanPayload as UserPayloadDAO;
     res.setHeader('Authorization', `Bearer ${newAccessToken}`);
     return next();
   };

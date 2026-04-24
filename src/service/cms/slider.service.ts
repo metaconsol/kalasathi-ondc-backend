@@ -1,6 +1,4 @@
-import { PrismaClient } from '../../generated/prisma/client';
-
-const prisma = new PrismaClient();
+import { db } from '~/lib/db';
 
 // CREATE
 export const createSlider = async (data: {
@@ -14,59 +12,65 @@ export const createSlider = async (data: {
   sortOrder?: number;
   isActive?: boolean;
 }) => {
-  return await prisma.cmsSlider.create({
-    data: {
-      image: data.image ?? null,
-      imageMobile: data.imageMobile ?? null,
-      imageUrl: data.imageUrl ?? null,
+  console.log('Incoming data:', JSON.stringify(data, null, 2));
 
-      heading: data.heading,
-      subheading: data.subheading ?? null,
+  const createData = {
+    image: data.image ?? null,
+    imageMobile: data.imageMobile ?? null,
+    imageUrl: data.imageUrl ?? null,
 
-      buttonText: data.buttonText ?? null,
-      buttonRedirect: data.buttonRedirect ?? null,
+    heading: data.heading,
+    subheading: data.subheading ?? null,
 
-      sortOrder: data.sortOrder ?? 0,
-      isActive: data.isActive ?? true,
-    },
+    buttonText: data.buttonText ?? null,
+    buttonRedirect: data.buttonRedirect ?? null,
+
+    sortOrder: typeof data.sortOrder === 'number' && !isNaN(data.sortOrder) ? data.sortOrder : 0,
+    isActive: data.isActive === false ? false : true,
+  };
+
+  console.log('Prisma createData:', JSON.stringify(createData, null, 2));
+
+  return await db.cmsSlider.create({
+    data: createData,
   });
 };
 
 // GET ALL (with filter + sorting)
 export const getSliders = async (onlyActive = false) => {
-  return await prisma.cmsSlider.findMany({
+  return await db.cmsSlider.findMany({
     where: {
       ...(onlyActive ? { isActive: true } : {}),
-      deletedAt: null, // 👈 important
+      deletedAt: null,
     },
     orderBy: {
-      sortOrder: 'asc', // 👈 UI ke liye important
+      sortOrder: 'asc',
     },
   });
 };
 
 // UPDATE
 export const updateSlider = async (id: number, data: any) => {
-  return await prisma.cmsSlider.update({
-    where: { id },
+  return await db.cmsSlider.update({
+    where: { id: BigInt(id) },
     data,
   });
 };
 
 // DELETE (soft delete)
 export const deleteSlider = async (id: number) => {
-  return await prisma.cmsSlider.update({
-    where: { id },
+  return await db.cmsSlider.update({
+    where: { id: BigInt(id) },
     data: {
-      deletedAt: new Date(), // 👈 soft delete
+      deletedAt: new Date(),
     },
   });
 };
 
 // TOGGLE ACTIVE
 export const toggleSlider = async (id: number, isActive: boolean) => {
-  return await prisma.cmsSlider.update({
-    where: { id },
+  return await db.cmsSlider.update({
+    where: { id: BigInt(id) },
     data: { isActive },
   });
 };

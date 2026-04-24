@@ -1,9 +1,30 @@
-// middlewares/admin.middleware.ts
-import { Request, Response, NextFunction } from 'express';
+import type { NextFunction, Request, Response } from 'express';
+import { authService } from '~/service/auth/auth.service';
+import { UserRole } from '~/generated/prisma/enums';
 
-export const isAdmin = (req: Request, res: Response, next: NextFunction) => {
-  if (req.user.role !== 'ADMIN') {
-    return res.status(403).json({ message: 'Access denied' });
-  }
-  next();
-};
+/**
+ * Requires the authenticated user to have the ADMIN role.
+ * Must be placed AFTER `authMiddleware` in the middleware chain.
+ *
+ * Usage:
+ *   router.delete('/resource', authMiddleware, isAdmin, handler);
+ */
+export const isAdmin = authService.authorize([UserRole.ADMIN]);
+
+/**
+ * Requires the authenticated user to have the SELLER role.
+ */
+export const isSeller = authService.authorize([UserRole.SELLER]);
+
+/**
+ * Requires the authenticated user to have either ADMIN or SELLER role.
+ */
+export const isAdminOrSeller = authService.authorize([UserRole.ADMIN, UserRole.SELLER]);
+
+/**
+ * Generic role guard factory — use when you need a custom set of roles.
+ *
+ * Usage:
+ *   router.get('/route', authMiddleware, requireRole([UserRole.ADMIN]), handler);
+ */
+export const requireRole = (roles: string[]) => authService.authorize(roles);

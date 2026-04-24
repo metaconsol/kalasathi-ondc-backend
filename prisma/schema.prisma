@@ -22,8 +22,10 @@ model User {
     createdAt DateTime? @default(now())
     updatedAt DateTime  @updatedAt
 
-    accounts Account[]
-    profile  Profile?
+    accounts      Account[]
+    profile       Profile?
+    sellerProfile SellerProfile?
+    stores        Store[]
 }
 
 enum UserRole {
@@ -117,58 +119,221 @@ model Profile {
     updatedAt DateTime @updatedAt
 }
 
-
 model cmsSlider {
-  id              BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
-  pageId          BigInt?  @db.UnsignedBigInt
-  imageUploadId   BigInt?  @db.UnsignedBigInt
-  imageUrl        String?  @db.VarChar(800)
+    id            BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+    pageId        BigInt? @db.UnsignedBigInt
+    imageUploadId BigInt? @db.UnsignedBigInt
+    imageUrl      String? @db.VarChar(800)
 
-  // 👉 NEW fields (your requirement)
-  image           String?
-  imageMobile     String?
+    image       String?
+    imageMobile String?
 
-  heading         String   @db.VarChar(200)
-  subheading      String?  @db.VarChar(240)
-  buttonText      String?  @db.VarChar(60)
-  buttonRedirect String? @db.VarChar(500) @map("button_redirect")
+    heading        String  @db.VarChar(200)
+    subheading     String? @db.VarChar(240)
+    buttonText     String? @db.VarChar(60)
+    buttonRedirect String? @map("button_redirect") @db.VarChar(500)
 
-  sortOrder       Int      @default(0)
-  isActive        Boolean  @default(true)
+    sortOrder Int     @default(0)
+    isActive  Boolean @default(true)
 
-  createdBy       BigInt?  @db.UnsignedBigInt
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime? @updatedAt
-  deletedAt       DateTime?
-
-
+    createdBy BigInt?   @db.UnsignedBigInt
+    createdAt DateTime  @default(now())
+    updatedAt DateTime? @updatedAt
+    deletedAt DateTime?
 }
 
+// ─── Media Feature ───────────────────────────────────────────────────────────
+
+enum FileType {
+    IMAGE
+    PDF
+    DOC
+    OTHER
+}
+
+enum StorageProvider {
+    LOCAL
+    S3
+    CDN
+}
+
+model MediaFile {
+    id              String          @id @default(uuid())
+    fileType        FileType        @map("file_type")
+    originalName    String          @map("original_name")
+    mimeType        String          @map("mime_type")
+    fileSizeBytes   Int             @map("file_size_bytes")
+    storageProvider StorageProvider @default(LOCAL) @map("storage_provider")
+    storagePath     String          @map("storage_path")
+    publicUrl       String          @map("public_url")
+    checksumSha256  String          @map("checksum_sha256")
+    uploadedBy      Int?            @map("uploaded_by")
+    createdAt       DateTime        @default(now()) @map("created_at")
+    deletedAt       DateTime?       @map("deleted_at")
+
+    @@map("media_files")
+}
+
+// ─── Announcement Feature ───
+model Announcement {
+    id           Int       @id @default(autoincrement())
+    text         String
+    contactPhone String?
+    contactEmail String?
+    isPublished  Boolean   @default(false)
+    startAt      DateTime?
+    endAt        DateTime?
+    createdAt    DateTime  @default(now())
+    updatedAt    DateTime  @updatedAt
+    deletedAt    DateTime?
+
+    @@index([isPublished])
+    @@index([startAt, endAt])
+}
+
+// ─── Testimonials Feature ───
+model Testimonial {
+    id               Int      @id @default(autoincrement())
+    customerName     String   @db.VarChar(100)
+    location         String?  @db.VarChar(100)
+    testimonialText  String   @db.Text
+    rating           Int      @default(5)
+    customerPhoto    String?  @db.VarChar(255)
+    productOrService String?  @db.VarChar(100)
+    isPublished      Boolean  @default(false)
+    
+    createdAt        DateTime @default(now())
+    updatedAt        DateTime @updatedAt
+    deletedAt        DateTime?
+
+    @@index([isPublished])
+}
+
+// ─── Contact Message Feature ───
 model ContactMessage {
-  id           Int      @id @default(autoincrement())
-  fullName     String
-  email        String
-  orderNumber  String?
-  topic        Topic
-  message      String
-
-  status       MessageStatus @default(UNRESOLVED)
-
-  adminNotes   String?
-  resolvedBy   Int?
-  resolvedAt   DateTime?
-
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+    id          Int                   @id @default(autoincrement())
+    fullName    String
+    email       String
+    orderNumber String?
+    topic       ContactMessage_topic
+    message     String
+    status      ContactMessage_status @default(UNRESOLVED)
+    adminNotes  String?
+    resolvedBy  Int?
+    resolvedAt  DateTime?
+    createdAt   DateTime              @default(now())
+    updatedAt   DateTime              @updatedAt
 }
 
-enum Topic {
-  GENERAL_INQUIRY
-  ORDER_STATUS
-  RETURNS
+enum ContactMessage_topic {
+    GENERAL_INQUIRY
+    ORDER_STATUS
+    RETURNS
 }
 
-enum MessageStatus {
-  RESOLVED
-  UNRESOLVED
+enum ContactMessage_status {
+    RESOLVED
+    UNRESOLVED
 }
+
+
+// ─── Seller / Store (marketplace) ───────────────────────────────────────────
+
+enum KycStatus {
+    PENDING
+    SUBMITTED
+    IN_REVIEW
+    VERIFIED
+    REJECTED
+}
+
+enum StoreLocationType {
+    DELIVERY
+    SELF_PICKUP
+    RETURN
+}
+
+model SellerProfile {
+    userId        Int       @id @map("user_id")
+    gstin         String?   @db.VarChar(15)
+    pan           String?   @db.VarChar(10)
+    bankAccountNo String?   @map("bank_account_no") @db.VarChar(34)
+    bankIfsc      String?   @map("bank_ifsc") @db.VarChar(11)
+    upiId         String?   @map("upi_id") @db.VarChar(256)
+    kycStatus     KycStatus @default(PENDING) @map("kyc_status")
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@map("seller_profiles")
+}
+
+model Store {
+    id           BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+    sellerUserId Int     @map("seller_user_id")
+    storeName    String  @map("store_name") @db.VarChar(255)
+    storeSlug    String  @unique @map("store_slug") @db.VarChar(255)
+    description  String? @db.Text
+    supportEmail String? @map("support_email") @db.VarChar(255)
+    supportPhone String? @map("support_phone") @db.VarChar(20)
+    isActive     Boolean @default(true) @map("is_active")
+    deletedAt    DateTime? @map("deleted_at")
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    seller    User            @relation(fields: [sellerUserId], references: [id], onDelete: Cascade)
+    locations StoreLocation[]
+
+    @@index([sellerUserId])
+    @@index([sellerUserId, deletedAt])
+    @@map("stores")
+}
+
+model StoreLocation {
+    id             BigInt            @id @default(autoincrement()) @db.UnsignedBigInt
+    storeId        BigInt            @map("store_id") @db.UnsignedBigInt
+    locationType   StoreLocationType @map("location_type")
+    addressLine1   String            @map("address_line1") @db.VarChar(255)
+    addressLine2   String?           @map("address_line2") @db.VarChar(255)
+    city           String            @db.VarChar(120)
+    state          String            @db.VarChar(120)
+    country        String            @db.VarChar(120)
+    pincode        String            @db.VarChar(20)
+    latitude       Decimal?          @db.Decimal(10, 7)
+    longitude      Decimal?          @db.Decimal(10, 7)
+    radiusKm       BigInt?           @map("radius") @db.UnsignedBigInt
+    openingTime    Int?              @map("opening_time")
+    closingTime    Int?              @map("closing_time")
+    serviceability Int               @map("serviceability")
+    isActive       Boolean           @default(true) @map("is_active")
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+    @@index([storeId])
+    @@index([storeId, locationType])
+    @@map("store_locations")
+}
+
+// ─── Blog Feature ───
+model Blog {
+    id            Int       @id @default(autoincrement())
+    title         String    @db.VarChar(255)
+    subheading    String?   @db.VarChar(255)
+    content       String    @db.LongText
+    featuredImage String?   @db.VarChar(500)
+    slug          String    @unique @db.VarChar(255)
+    isPublished   Boolean   @default(true)
+    createdAt     DateTime  @default(now())
+    updatedAt     DateTime  @updatedAt
+    deletedAt     DateTime?
+
+    @@index([isPublished])
+    @@map("blogs")
+}
+

@@ -51,7 +51,7 @@ export const LoginSchema = PhoneNumberSchema.extend({
   email: z.email({ message: 'Please enter a valid email.' }).optional(),
   isLoginWithPassword: z.boolean().default(false),
   isLoginWithOtp: z.boolean().default(false),
-  loginRole: z.enum([UserRole.USER, UserRole.ADMIN]).default(UserRole.USER),
+  loginRole: z.enum([UserRole.USER, UserRole.ADMIN, UserRole.SELLER]).default(UserRole.USER),
   rememberMe: z.boolean().default(false),
   password: z
     .string()

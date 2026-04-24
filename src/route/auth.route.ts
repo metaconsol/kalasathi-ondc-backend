@@ -1,3 +1,6 @@
+import express from 'express';
+
+// ─── Validation schemas ───────────────────────────────────────────────────────
 import {
   OTPSchema,
   LoginSchema,
@@ -6,133 +9,122 @@ import {
   PhoneNumberSchema,
   ResetPasswordSchema,
 } from '~/service/auth/auth.schema';
-import express from 'express';
+
+// ─── Middleware ───────────────────────────────────────────────────────────────
 import { validate } from '~/middleware/validate';
-import { authService } from '../service/auth/auth.service';
+import { authMiddleware } from '~/middleware/auth.middleware';
+
+// ─── Controller ───────────────────────────────────────────────────────────────
+// All handlers are now imported from auth.controller instead of authService
+// directly, following the Route → Controller → Service pattern.
+import {
+  login,
+  logout,
+  register,
+  getUser,
+  refreshToken,
+  otpPreview,
+  otpVerify,
+  otpResend,
+  forgotPasswordInitiate,
+  forgotPasswordPreview,
+  forgotPasswordResend,
+  forgotPasswordVerify,
+  forgotPasswordReset,
+} from '~/controller/auth.controller';
 
 const router = express.Router();
 
-/**
- * @desc    Register a new user and send OTP
- * @route   POST /auth/register
- * @access  Public
- */
-router.post('/register', validate({ body: RegisterSchema }), authService.register);
+// ─── Public routes ────────────────────────────────────────────────────────────
 
 /**
- * @desc    Login a user and send OTP
- * @route   POST /auth/login
- * @access  Public
+ * @route   POST /api/v1/auth/register
+ * @desc    Register a new user (creates account + sends OTP for verification)
  */
-router.post('/login', validate({ body: LoginSchema }), authService.login);
+router.post('/register', validate({ body: RegisterSchema }), register);
 
 /**
- * @desc    Logout a user
- * @route   DELETE /auth/logout
+ * @route   POST /api/v1/auth/login
+ * @desc    Login with password or request OTP
+ * @body    { phoneNumber, password?, isLoginWithPassword, isLoginWithOtp, loginRole?, rememberMe? }
+ */
+router.post('/login', validate({ body: LoginSchema }), login);
+
+/**
+ * @route   DELETE /api/v1/auth/logout
+ * @desc    Logout — clears the refreshToken cookie
+ */
+router.delete('/logout', logout);
+
+/**
+ * @route   POST /api/v1/auth/refresh-token
+ * @desc    Get a new access token using the refreshToken cookie
+ */
+router.post('/refresh-token', refreshToken);
+
+// ─── Protected routes ─────────────────────────────────────────────────────────
+
+/**
+ * @route   GET /api/v1/auth/user
+ * @desc    Get current authenticated user
  * @access  Private
  */
-router.delete('/logout', authService.logout);
+router.get('/user', authMiddleware, getUser);
+
+// ─── OTP: Credential account verification ────────────────────────────────────
 
 /**
- * @desc    Preview OTP verification for credential account
- * @route   POST /auth/credential-account/preview
- * @access  Public
+ * @route   POST /api/v1/auth/credential-account/preview
+ * @desc    Preview user info before OTP entry
  */
-router.post(
-  '/credential-account/preview',
-  validate({ body: OTPSchema }),
-  authService.otpVerificationForCredentialAccountPreviewData,
-);
+router.post('/credential-account/preview', validate({ body: OTPSchema }), otpPreview);
 
 /**
- * @desc    Verify OTP for credential account
- * @route   POST /auth/credential-account/verify
- * @access  Public
+ * @route   POST /api/v1/auth/credential-account/verify
+ * @desc    Verify OTP and activate account
  */
-router.post(
-  '/credential-account/verify',
-  validate({ body: OTPVerifySchema }),
-  authService.otpVerificationForCredentialAccount,
-);
+router.post('/credential-account/verify', validate({ body: OTPVerifySchema }), otpVerify);
 
 /**
- * @desc    Resend OTP for credential account
- * @route   POST /auth/credential-account/resend
- * @access  Public
+ * @route   POST /api/v1/auth/credential-account/resend
+ * @desc    Resend OTP for account verification
  */
-router.post(
-  '/credential-account/resend',
-  validate({ body: OTPSchema }),
-  authService.otpResendForCredentialAccount,
-);
+router.post('/credential-account/resend', validate({ body: OTPSchema }), otpResend);
+
+// ─── Forgot password flow ─────────────────────────────────────────────────────
 
 /**
- * @desc    Initiate forgot password
- * @route   POST /auth/forgot-password/initiate
- * @access  Public
+ * @route   POST /api/v1/auth/forgot-password/initiate
+ * @desc    Send OTP to phone to begin password reset
  */
 router.post(
   '/forgot-password/initiate',
   validate({ body: PhoneNumberSchema }),
-  authService.forgotPasswordForCredentialAccountTokenGenerate,
+  forgotPasswordInitiate,
 );
 
 /**
- * @desc    Preview forgot password
- * @route   POST /auth/forgot-password/preview
- * @access  Public
+ * @route   POST /api/v1/auth/forgot-password/preview
+ * @desc    Validate reset token before showing reset form
  */
-router.post(
-  '/forgot-password/preview',
-  validate({ body: OTPSchema }),
-  authService.forgotPasswordForCredentialAccountPreviewData,
-);
+router.post('/forgot-password/preview', validate({ body: OTPSchema }), forgotPasswordPreview);
 
 /**
- * @desc    Resend forgot password
- * @route   POST /auth/forgot-password/resend
- * @access  Public
+ * @route   POST /api/v1/auth/forgot-password/resend
+ * @desc    Resend OTP for password reset
  */
-router.post(
-  '/forgot-password/resend',
-  validate({ body: OTPSchema }),
-  authService.forgotPasswordForCredentialAccountTokenResend,
-);
+router.post('/forgot-password/resend', validate({ body: OTPSchema }), forgotPasswordResend);
 
 /**
- * @desc    Verify forgot password
- * @route   POST /auth/forgot-password/verify
- * @access  Public
+ * @route   POST /api/v1/auth/forgot-password/verify
+ * @desc    Verify OTP for password reset
  */
-router.post(
-  '/forgot-password/verify',
-  validate({ body: OTPVerifySchema }),
-  authService.forgotPasswordForCredentialAccountOtpVerification,
-);
+router.post('/forgot-password/verify', validate({ body: OTPVerifySchema }), forgotPasswordVerify);
 
 /**
- * @desc    Reset password
- * @route   POST /auth/forgot-password/reset
- * @access  Public
+ * @route   POST /api/v1/auth/forgot-password/reset
+ * @desc    Reset the password after OTP verification
  */
-router.post(
-  '/forgot-password/reset',
-  validate({ body: ResetPasswordSchema }),
-  authService.resetPasswordForCredentialAccount,
-);
-
-/**
- * @desc    Get user
- * @route   GET /auth/user
- * @access  Public
- */
-router.get('/user', authService.authenticate, authService.getUser);
-
-/**
- * @desc    Refresh token
- * @route   POST /auth/refresh-token
- * @access  Public
- */
-router.post('/refresh-token', authService.getNewAccessTokenUsingRefreshToken);
+router.post('/forgot-password/reset', validate({ body: ResetPasswordSchema }), forgotPasswordReset);
 
 export { router as authRouter };

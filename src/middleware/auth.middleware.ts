@@ -1,19 +1,13 @@
-// middlewares/auth.middleware.ts
+import type { NextFunction, Request, Response } from 'express';
+import { authService } from '~/service/auth/auth.service';
 
-import jwt from 'jsonwebtoken';
-
-export const authMiddleware = (req, res, next) => {
-  const token = req.headers.authorization?.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ message: 'No token' });
-  }
-
-  try {
-    const decoded = jwt.verify(token, 'SECRET_KEY');
-    req.user = decoded;
-    next();
-  } catch {
-    return res.status(401).json({ message: 'Invalid token' });
-  }
-};
+/**
+ * Verifies the user's access token / refresh token.
+ * Attaches `req.user` (UserPayloadDAO) on success.
+ * Returns 401 Unauthorized on failure.
+ *
+ * Usage:
+ *   router.get('/protected', authMiddleware, handler);
+ */
+export const authMiddleware = (req: Request, res: Response, next: NextFunction) =>
+  authService.authenticate(req, res, next);

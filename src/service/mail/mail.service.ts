@@ -4,7 +4,7 @@ import { meta } from '~/lib/meta';
 import { logger } from '~/lib/logger';
 import { AppError } from '~/lib/response';
 import { env } from '~/config/env.config';
-import { errorCodes } from '~/config/error.config';
+import { errorCodes } from '~/middleware/error.middleware';
 import type { MailOptions, MailServiceConfig, MailTransport } from './mail.types';
 import { debugForDev } from '~/lib/utils';
 
