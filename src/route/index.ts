@@ -8,6 +8,7 @@ import cmsRoutes from './cms/cms.routes';
 import { sellerRouter } from './seller.route';
 import contactRoutes from './contact.route';
 import adminRouter from './admin.route';
+import { cartRouter } from './cart.route';
 
 const router = express.Router();
 
@@ -29,6 +30,7 @@ router.use('/auth', authRouter);
 router.use('/cms', cmsRoutes);
 router.use('/seller', sellerRouter);
 router.use('/contact', contactRoutes);
+router.use('/cart', cartRouter);
 router.use('/', adminRouter); // Mounted at root as it has prefix in admin.route.ts
 
 /**

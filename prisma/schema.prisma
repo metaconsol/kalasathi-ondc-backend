@@ -286,6 +286,7 @@ model Store {
 
     seller    User            @relation(fields: [sellerUserId], references: [id], onDelete: Cascade)
     locations StoreLocation[]
+    cartItems CartItem[]
 
     @@index([sellerUserId])
     @@index([sellerUserId, deletedAt])
@@ -318,6 +319,55 @@ model StoreLocation {
     @@index([storeId])
     @@index([storeId, locationType])
     @@map("store_locations")
+}
+
+// ─── Cart (aligned with production cart / cart_item tables) ───────────────
+
+enum CartStatus {
+    active
+    abandoned
+    converted
+}
+
+model Cart {
+    id        BigInt     @id @default(autoincrement()) @db.UnsignedBigInt
+    userId    BigInt?    @unique @map("user_id")
+    sessionId String?    @unique @map("session_id") @db.VarChar(100)
+    status    CartStatus @default(active) @map("status")
+    currency  String?    @default("INR") @map("currency") @db.Char(3)
+    createdAt DateTime   @default(now()) @map("created_at")
+    updatedAt DateTime   @updatedAt @map("updated_at")
+
+    items CartItem[]
+
+    @@index([userId])
+    @@index([sessionId])
+    @@map("carts")
+}
+
+model CartItem {
+    id               BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+    cartId           BigInt   @map("cart_id") @db.UnsignedBigInt
+    storeId          BigInt   @map("store_id") @db.UnsignedBigInt
+    productId        BigInt   @map("product_id") @db.UnsignedBigInt
+    /// `0` = no variant. Pricing/validation uses existing `products` / `product_variants` tables via SQL.
+    variantId        BigInt   @default(0) @map("variant_id") @db.UnsignedBigInt
+    qty              Int
+    priceSnapshot    Decimal  @map("price_snapshot") @db.Decimal(12, 2)
+    mrpSnapshot      Decimal? @map("mrp_snapshot") @db.Decimal(12, 2)
+    taxSnapshot      Decimal? @map("tax_snapshot") @db.Decimal(12, 2)
+    discountSnapshot Decimal? @map("discount_snapshot") @db.Decimal(12, 2)
+    createdAt        DateTime @default(now()) @map("created_at")
+    updatedAt        DateTime @updatedAt @map("updated_at")
+
+    cart  Cart  @relation(fields: [cartId], references: [id], onDelete: Cascade)
+    store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+    @@index([cartId])
+    @@index([storeId])
+    @@index([productId])
+    @@index([variantId])
+    @@map("cart_items")
 }
 
 // ─── Blog Feature ───
