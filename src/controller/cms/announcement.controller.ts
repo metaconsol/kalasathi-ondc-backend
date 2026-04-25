@@ -13,11 +13,11 @@ export const createAnnouncement = async (req: Request, res: Response, next: Next
 
     const announcement = await announcementService.createAnnouncementService({
       text,
-      contactPhone: contactPhone || null,
-      contactEmail: contactEmail || null,
+      contactPhone: contactPhone || undefined,
+      contactEmail: contactEmail || undefined,
       isPublished: isPublished === 'true' || isPublished === true,
-      startAt: startAt ? new Date(startAt) : undefined,
-      endAt: endAt ? new Date(endAt) : undefined,
+      ...(startAt ? { startAt: new Date(startAt) } : {}),
+      ...(endAt ? { endAt: new Date(endAt) } : {}),
     });
 
     return ApiResponse.created(res, 'Announcement created successfully', announcement);

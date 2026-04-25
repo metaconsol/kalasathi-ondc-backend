@@ -48,7 +48,8 @@ import { authService } from '~/service/auth/auth.service';
  * Response (password login success):
  *   Sets Authorization header: Bearer <accessToken>
  *   Sets Cookie: refreshToken=<token>
- *   Body: { success: true, message: "Login successful", data: { user } }
+ *   Body: { success: true, message: "Login successful", data: { user, accessToken } }
+ *   (`accessToken` duplicates the JWT for clients that read JSON only.)
  *
  * Response (OTP login):
  *   Body: { success: true, message: "OTP sent...", data: { tokens: [...] } }

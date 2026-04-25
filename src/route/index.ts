@@ -6,6 +6,7 @@ import { ApiResponse } from '~/lib/response';
 // Unified CMS & Feature Routes
 import cmsRoutes from './cms/cms.routes';
 import { sellerRouter } from './seller.route';
+import uiProductRouter from './ui/product.route';
 import contactRoutes from './contact.route';
 import adminRouter from './admin.route';
 import { cartRouter } from './cart.route';
@@ -37,5 +38,7 @@ router.use('/', adminRouter); // Mounted at root as it has prefix in admin.route
  * Utilities & Testing
  */
 router.use('/test', testRouter);
+
+router.use('/ui/products', uiProductRouter);
 
 export default router;

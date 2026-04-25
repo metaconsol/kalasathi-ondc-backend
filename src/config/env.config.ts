@@ -13,6 +13,14 @@ export const env = {
   nodeEnv: process.env.NODE_ENV,
   isProduction: process.env.NODE_ENV === 'production',
 
+  /**
+   * When true (non-production), missing store/category rows used in seller product APIs
+   * are auto-created so local Postman tests work without seed data.
+   * Set DEV_BOOTSTRAP_STORE=false to disable.
+   */
+  devBootstrapStore:
+    process.env.NODE_ENV !== 'production' && process.env.DEV_BOOTSTRAP_STORE !== 'false',
+
   serverPort: parseInt(process.env.SERVER_PORT || '5000', 10),
   serverUrl: process.env.SERVER_URL || 'http://localhost:5000',
 

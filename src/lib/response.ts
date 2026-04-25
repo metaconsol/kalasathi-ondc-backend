@@ -1,4 +1,5 @@
 import type { NextFunction, Response, Request } from 'express';
+import { Decimal } from '@prisma/client/runtime/library';
 
 export interface IResponseData {
   success: boolean;
@@ -112,6 +113,20 @@ export class ApiResponse {
     return res.status(statusCode).json(response);
   }
 
+  // Server error (500) - alias for error
+  static serverError(
+    res: Response,
+    message: string = 'Internal server error',
+    error?: any,
+  ): Response {
+    const response: IResponseData = {
+      success: false,
+      message,
+      error: this.processError(error),
+    };
+    return res.status(500).json(response);
+  }
+
   // Custom status code response
   static custom(res: Response, message: string, statusCode: number = 500, data?: any): Response {
     const response: IResponseData = {
@@ -123,11 +138,34 @@ export class ApiResponse {
   }
 
   private static processData(data: any): any {
-    return data === '' || data === null || data === undefined ? undefined : data;
+    if (data === '' || data === null || data === undefined) return undefined;
+    try {
+      return JSON.parse(
+        JSON.stringify(data, (_key, value) => {
+          if (typeof value === 'bigint') return value.toString();
+          if (value instanceof Decimal) return value.toString();
+          return value;
+        }),
+      );
+    } catch {
+      return data;
+    }
   }
 
   private static processError(error: any): any {
-    return error === '' || error === null || error === undefined ? undefined : error;
+    if (error === '' || error === null || error === undefined) return undefined;
+    if (error instanceof Error) {
+      const anyErr = error as unknown as Record<string, unknown>;
+      return {
+        name: error.name,
+        message: error.message,
+        // Prisma errors often have useful enumerable fields (e.g. code, meta); preserve them.
+        ...anyErr,
+        // Stack can be large; keep it last so UI can ignore if needed.
+        stack: error.stack,
+      };
+    }
+    return error;
   }
 }
 

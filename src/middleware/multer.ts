@@ -3,22 +3,32 @@ import path from 'path';
 import fs from 'fs';
 import { ApiError } from '../lib/response';
 
-// Ensure uploads directory exists
-const uploadDir = path.join(process.cwd(), 'public', 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
+const uploadsRootDir = path.join(process.cwd(), 'public', 'uploads');
+const productImagesDir = path.join(uploadsRootDir, 'productImages');
+
+const ensureDir = (dirPath: string) => {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
+  }
+};
+
+ensureDir(uploadsRootDir);
+ensureDir(productImagesDir);
+
+const createDiskStorage = (destinationDir: string) =>
+  multer.diskStorage({
+    destination: (req, file, cb) => {
+      cb(null, destinationDir);
+    },
+    filename: (req, file, cb) => {
+      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+      cb(null, `${uniqueSuffix}-${file.originalname}`);
+    },
+  });
 
 // Storage configuration
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, `${uniqueSuffix}-${file.originalname}`);
-  },
-});
+const storage = createDiskStorage(uploadsRootDir);
+const productImageStorage = createDiskStorage(productImagesDir);
 
 // File filter (validate file type)
 const fileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
@@ -47,6 +57,13 @@ const fileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCa
 // Middleware setup — disk storage with type validation for the media feature.
 export const upload = multer({
   storage,
+  limits: {
+    fileSize: 15 * 1024 * 1024, // 15MB
+  },
+  fileFilter,
+});
+export const productImageUpload = multer({
+  storage: productImageStorage,
   limits: {
     fileSize: 15 * 1024 * 1024, // 15MB
   },

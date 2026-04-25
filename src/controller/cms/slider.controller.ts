@@ -19,7 +19,7 @@ async function saveFileBuffer(file: any, folderPath: string): Promise<string> {
 }
 
 // Function to format slider response with dynamic URLs
-const formatSliderResponse = (slider: any) => {
+const formatSliderResponse = (slider: any): any => {
   if (!slider) return null;
   if (Array.isArray(slider)) return slider.map(formatSliderResponse);
 

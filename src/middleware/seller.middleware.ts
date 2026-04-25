@@ -3,17 +3,19 @@ import { UserRole } from '~/generated/prisma/enums';
 import { ApiResponse } from '~/lib/response';
 import { authService } from '~/service/auth/auth.service';
 
+const SELLER_OR_ADMIN = new Set<string>([UserRole.SELLER, UserRole.ADMIN]);
+
 /**
- * One step for seller routes: valid session + role SELLER.
- * (Replaces chaining `authMiddleware` then `requireSeller`.)
+ * All `/seller/*` routes (except public onboarding handlers registered before this middleware)
+ * require a valid access token or refresh cookie, then **SELLER** or **ADMIN** role.
  */
 export const sellerAuthMiddleware = (req: Request, res: Response, next: NextFunction) => {
   authService.authenticate(req, res, () => {
     if (!req.user) {
       return ApiResponse.unauthorized(res, 'Unauthorized');
     }
-    if (req.user.role !== UserRole.SELLER) {
-      return ApiResponse.forbidden(res, 'Seller access required');
+    if (!SELLER_OR_ADMIN.has(req.user.role)) {
+      return ApiResponse.forbidden(res, 'Seller or admin access required');
     }
     return next();
   });

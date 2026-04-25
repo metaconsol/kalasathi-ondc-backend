@@ -29,6 +29,13 @@ import {
   onboardingStep3Store,
   onboardingStep4Pickup,
 } from '~/controller/seller.controller';
+import { sellerProductRouter } from './seller/product.route';
+import {
+  listCatalogCategories,
+  listCatalogCategoryTree,
+  uploadSellerProductImage,
+} from '~/controller/seller/product.controller';
+import { productImageUpload } from '~/middleware/multer';
 
 const router = express.Router();
 
@@ -38,7 +45,12 @@ router.post(
   onboardingStep1Register,
 );
 
+/** Bearer access token or refresh cookie; role must be SELLER or ADMIN */
 router.use(sellerAuthMiddleware);
+
+router.get('/categories', listCatalogCategories);
+router.get('/categories/tree', listCatalogCategoryTree);
+router.post('/product-images/upload', productImageUpload.single('file'), uploadSellerProductImage);
 
 router.get('/profile', getSellerProfileHandler);
 router.put('/profile', validate({ body: UpdateSellerProfileBodySchema }), putSellerProfileHandler);
@@ -91,5 +103,9 @@ router.post(
   validate({ body: OnboardingStep4BodySchema }),
   onboardingStep4Pickup,
 );
+
+/** Product CRUD & inventory (same auth as other seller routes) */
+router.use('/stores/:store_id/products', sellerProductRouter);
+router.use('/products', sellerProductRouter);
 
 export { router as sellerRouter };
