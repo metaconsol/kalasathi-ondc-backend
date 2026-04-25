@@ -37,6 +37,10 @@ const fileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCa
     'image/png',
     'image/gif',
     'image/webp',
+    // ✅ videos (ADD THESE)
+    'video/mp4',
+    'video/webm',
+    'video/ogg',
     'application/pdf',
     'application/msword',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -74,7 +78,7 @@ export const productImageUpload = multer({
 export const memoryUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit for sliders
+    fileSize: 50 * 1024 * 1024, // 5MB limit for sliders
   },
   fileFilter,
 });
