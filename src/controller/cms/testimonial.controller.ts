@@ -35,15 +35,18 @@ export const createTestimonial = async (req: Request, res: Response, next: NextF
       photoPath = await saveFileBuffer(file);
     }
 
-    const testimonial = await testimonialService.createTestimonial({
+    const payload: Parameters<typeof testimonialService.createTestimonial>[0] = {
       customerName,
-      location,
       testimonialText,
       rating: numericRating,
-      productOrService,
-      customerPhoto: photoPath || undefined,
       isPublished: isPublished === 'true' || isPublished === true,
-    });
+    };
+
+    if (location) payload.location = location;
+    if (productOrService) payload.productOrService = productOrService;
+    if (photoPath) payload.customerPhoto = photoPath;
+
+    const testimonial = await testimonialService.createTestimonial(payload);
 
     return ApiResponse.created(res, 'Testimonial created successfully', testimonial);
   } catch (error) {

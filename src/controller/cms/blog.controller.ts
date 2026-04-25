@@ -37,7 +37,7 @@ export const getAllBlogs = async (req: Request, res: Response, next: NextFunctio
     const { published, search, page, limit } = req.query;
 
     const result = await blogService.getAllBlogs({
-      onlyPublished: published === undefined ? true : published === 'true' || published === true,
+      onlyPublished: published === undefined ? true : String(published) === 'true',
       search: search as string,
       page: page ? Number(page) : 1,
       limit: limit ? Number(limit) : 10,
@@ -55,7 +55,7 @@ export const getAllBlogs = async (req: Request, res: Response, next: NextFunctio
 export const getBlog = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const blog = await blogService.getBlogByIdOrSlug(id);
+    const blog = await blogService.getBlogByIdOrSlug(id as string);
 
     if (!blog) {
       return ApiResponse.notFound(res, 'Blog post not found');
