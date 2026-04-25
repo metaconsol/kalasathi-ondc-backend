@@ -47,7 +47,11 @@ export function createApp(): Application {
       },
     }),
   );
-  app.use(helmet());
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
   app.use(compression());
 
   /**
