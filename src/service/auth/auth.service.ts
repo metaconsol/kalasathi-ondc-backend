@@ -72,6 +72,8 @@ class AuthService {
     res.cookie('refreshToken', refreshToken, AuthTokenUtil.getRefreshTokenCookieOptions());
     return ApiResponse.success(res, options.message, {
       user: userPayloadDTO,
+      /** Same JWT as `Authorization` response header (for clients / Postman that read JSON only). */
+      accessToken,
     });
   };
 
@@ -604,7 +606,9 @@ class AuthService {
       );
     }
 
-    return ApiResponse.success(res, 'New access token generated successfully');
+    return ApiResponse.success(res, 'New access token generated successfully', {
+      accessToken: newAccessToken,
+    });
   };
 
   public otpVerificationForCredentialAccountPreviewData = async (req: Request, res: Response) => {

@@ -71,6 +71,9 @@ router.post('/refresh-token', refreshToken);
  */
 router.get('/user', authMiddleware, getUser);
 
+/** Alias for clients expecting `/auth/me` (e.g. Mrignayanee-style collections). */
+router.get('/me', authMiddleware, getUser);
+
 // ─── OTP: Credential account verification ────────────────────────────────────
 
 /**

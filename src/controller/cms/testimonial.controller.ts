@@ -41,7 +41,7 @@ export const createTestimonial = async (req: Request, res: Response, next: NextF
       testimonialText,
       rating: numericRating,
       productOrService,
-      customerPhoto: photoPath || undefined,
+      ...(photoPath ? { customerPhoto: photoPath } : {}),
       isPublished: isPublished === 'true' || isPublished === true,
     });
 
