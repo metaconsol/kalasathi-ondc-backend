@@ -8,23 +8,22 @@ import { serializeBigInt } from '~/lib/utils';
 
 import type { CartOwner } from '~/service/cart/cart.types';
 
-const storeIsActive = { deletedAt: null, isActive: true } as const;
+const storeIsActive = { isActive: true } as const;
 
 /** Rows from your existing `products` / `product_variants` tables (not Prisma models). */
 type ProductRow = {
   id: bigint;
   store_id: bigint;
-  title: string;
-  base_price: unknown;
-  stock_qty: number;
+  product_name: string;
+  default_price: unknown;
+  stock: number;
 };
 
 type VariantRow = {
   id: bigint;
   product_id: bigint;
   price: unknown | null;
-  stock_qty: number;
-  name: string | null;
+  variant_name: string | null;
   sku: string | null;
 };
 
@@ -66,12 +65,11 @@ async function fetchProductRow(
   productId: bigint,
 ): Promise<ProductRow | null> {
   const rows = await client.$queryRaw<ProductRow[]>(Prisma.sql`
-    SELECT id, store_id, title, base_price, stock_qty
+    SELECT id, store_id, product_name, default_price, stock
     FROM products
     WHERE id = ${productId}
       AND store_id = ${storeId}
-      AND deleted_at IS NULL
-      AND is_active = 1
+      AND publish_status = 'publish'
     LIMIT 1
   `);
   return rows[0] ?? null;
@@ -83,11 +81,10 @@ async function fetchVariantRow(
   variantId: bigint,
 ): Promise<VariantRow | null> {
   const rows = await client.$queryRaw<VariantRow[]>(Prisma.sql`
-    SELECT id, product_id, price, stock_qty, name, sku
+    SELECT id, product_id, price, variant_name, sku
     FROM product_variants
     WHERE id = ${variantId}
       AND product_id = ${productId}
-      AND deleted_at IS NULL
       AND is_active = 1
     LIMIT 1
   `);
@@ -119,12 +116,16 @@ async function loadAndValidateCatalog(
   }
 
   const unitPrice =
-    variant?.price != null ? toPrismaDecimal(variant.price) : toPrismaDecimal(product.base_price);
+    variant?.price != null
+      ? toPrismaDecimal(variant.price)
+      : toPrismaDecimal(product.default_price);
   return { product, variant, unitPrice };
 }
 
 function availableStock(product: ProductRow, variant: VariantRow | null): number {
-  return variant ? variant.stock_qty : product.stock_qty;
+  // Since VariantRow no longer has stock_qty in the new schema, we fallback to product level stock
+  // or a high number if variants are managed purely by inventory table (not joined here).
+  return Number(product.stock);
 }
 
 async function findCartByOwner(owner: CartOwner): Promise<Cart | null> {
@@ -210,7 +211,7 @@ async function loadVariantMapForItems(
   const variantIds = [...new Set(items.map((i) => i.variantId).filter((id) => id !== 0n))];
   if (!variantIds.length) return variantById;
   const rows = await db.$queryRaw<VariantRow[]>(Prisma.sql`
-    SELECT id, product_id, price, stock_qty, name, sku
+    SELECT id, product_id, price, variant_name, sku
     FROM product_variants
     WHERE id IN (${Prisma.join(variantIds)})
   `);
@@ -222,17 +223,17 @@ async function loadVariantMapForItems(
 
 async function loadProductMapForItems(
   items: CartItem[],
-): Promise<Map<bigint, { id: bigint; title: string; store_id: bigint }>> {
-  const productById = new Map<bigint, { id: bigint; title: string; store_id: bigint }>();
+): Promise<Map<bigint, { id: bigint; product_name: string; store_id: bigint }>> {
+  const productById = new Map<bigint, { id: bigint; product_name: string; store_id: bigint }>();
   const productIds = [...new Set(items.map((i) => i.productId))];
   if (!productIds.length) return productById;
   const rows = await db.$queryRaw<ProductRow[]>(Prisma.sql`
-    SELECT id, store_id, title, base_price, stock_qty
+    SELECT id, store_id, product_name, default_price, stock
     FROM products
     WHERE id IN (${Prisma.join(productIds)})
   `);
   for (const p of rows) {
-    productById.set(p.id, { id: p.id, title: p.title, store_id: p.store_id });
+    productById.set(p.id, { id: p.id, product_name: p.product_name, store_id: p.store_id });
   }
   return productById;
 }
@@ -261,7 +262,7 @@ function mapCartItemRow(
     product: p
       ? {
           id: p.id.toString(),
-          title: p.title,
+          title: p.product_name,
           store_id: p.store_id.toString(),
         }
       : {
@@ -431,7 +432,9 @@ export async function updateCartItemQty(owner: CartOwner, itemId: bigint, qty: n
   }
 
   const unitPrice =
-    variant?.price != null ? toPrismaDecimal(variant.price) : toPrismaDecimal(product.base_price);
+    variant?.price != null
+      ? toPrismaDecimal(variant.price)
+      : toPrismaDecimal(product.default_price);
 
   const updated = await db.cartItem.update({
     where: { id: itemId },

@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 
-import type { FileType, StorageProvider } from '@prisma/client';
+import type { FileType, StorageProvider } from '~/generated/prisma/client';
 
 export class MediaService {
   /**
@@ -49,7 +49,7 @@ export class MediaService {
       const checksum = await this.generateChecksum(filePath);
 
       const fileType = this.determineFileType(file.mimetype);
-      const publicUrl = `/uploads/${file.filename}`;
+      const publicUrl = `/uploads/productImages/${file.filename}`;
 
       const savedMedia = await db.mediaFile.create({
         data: {

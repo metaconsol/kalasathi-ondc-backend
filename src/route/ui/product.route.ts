@@ -1,0 +1,68 @@
+import express from 'express';
+import { optionalAccessToken } from '~/middleware/optionalAccess.middleware';
+import {
+  listPublicProducts,
+  searchPublicProducts,
+  getPublicProductById,
+  getPublicProductBySlug,
+  getRelatedProducts,
+  listProductReviews,
+  getProductReviewStats,
+  checkProductPincode,
+  getVariantStock,
+  addProductReview,
+} from '~/controller/public/product.controller';
+
+const router = express.Router();
+
+/**
+ * GET /ui/products — catalog list (filters: page, limit, sort, categoryId, storeId, search, minPrice, maxPrice)
+ */
+router.get('/', listPublicProducts);
+
+/**
+ * GET /ui/products/search — same behavior as list (category / price filters)
+ */
+router.get('/search', searchPublicProducts);
+
+/**
+ * GET /ui/products/variants/:variant_id/stock
+ */
+router.get('/variants/:variant_id/stock', getVariantStock);
+
+/**
+ * GET /ui/products/slug/:slug
+ */
+router.get('/slug/:slug', getPublicProductBySlug);
+
+/**
+ * GET /ui/products/:product_id/reviews/stats
+ */
+router.get('/:product_id/reviews/stats', getProductReviewStats);
+
+/**
+ * GET /ui/products/:product_id/related
+ */
+router.get('/:product_id/related', getRelatedProducts);
+
+/**
+ * GET /ui/products/:product_id/check-pincode?pincode=
+ */
+router.get('/:product_id/check-pincode', checkProductPincode);
+
+/**
+ * GET /ui/products/:product_id/reviews
+ */
+router.get('/:product_id/reviews', listProductReviews);
+
+/**
+ * POST /ui/products/:product_id/reviews — optional Bearer token attaches review to user
+ */
+router.post('/:product_id/reviews', optionalAccessToken, addProductReview);
+
+/**
+ * GET /ui/products/:product_id
+ */
+router.get('/:product_id', getPublicProductById);
+
+export default router;
