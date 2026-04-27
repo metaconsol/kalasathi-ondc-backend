@@ -5,11 +5,9 @@ export const UNIT_TYPE_VALUES = [
   'unit',
   'gram',
   'kilogram',
+  'tonne',
   'millilitre',
   'litre',
-  'meter',
-  'piece',
-  'pair',
   'dozen',
 ] as const;
 
@@ -23,11 +21,9 @@ export const UNIT_TYPE_OPTIONS: ReadonlyArray<{
   { value: 'unit', label: 'Unit' },
   { value: 'gram', label: 'Gram' },
   { value: 'kilogram', label: 'Kilogram' },
+  { value: 'tonne', label: 'Tonne' },
   { value: 'millilitre', label: 'Millilitre' },
   { value: 'litre', label: 'Litre' },
-  { value: 'meter', label: 'Meter' },
-  { value: 'piece', label: 'Piece' },
-  { value: 'pair', label: 'Pair' },
   { value: 'dozen', label: 'Dozen' },
 ];
 
@@ -41,8 +37,11 @@ function aliasToCanonical(raw: string): string {
     g: 'gram',
     ml: 'millilitre',
     l: 'litre',
-    m: 'meter',
-    metre: 'meter',
+    m: 'unit',
+    meter: 'unit',
+    metre: 'unit',
+    piece: 'unit',
+    pair: 'unit',
   };
   return aliases[s] ?? s;
 }
@@ -57,3 +56,4 @@ export function normalizeUnitTypeInput(v: unknown): unknown {
   if (canonical === '') return undefined;
   return ALLOWED.has(canonical) ? canonical : canonical;
 }
+

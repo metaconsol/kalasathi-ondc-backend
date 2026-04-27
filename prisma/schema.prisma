@@ -4,8 +4,8 @@ generator client {
 }
 
 datasource db {
-  provider = "mysql"
-  url      = env("DATABASE_URL")
+    provider = "mysql"
+    url      = env("DATABASE_URL")
 }
 
 model User {
@@ -26,6 +26,7 @@ model User {
     profile       Profile?
     sellerProfile SellerProfile?
     stores        Store[]
+    orders        Order[]
 }
 
 enum UserRole {
@@ -193,18 +194,18 @@ model Announcement {
 
 // ─── Testimonials Feature ───
 model Testimonial {
-    id               Int      @id @default(autoincrement())
-    customerName     String   @db.VarChar(100)
-    location         String?  @db.VarChar(100)
-    testimonialText  String   @db.Text
-    rating           Int      @default(5)
-    customerPhoto    String?  @db.VarChar(255)
-    productOrService String?  @db.VarChar(100)
-    isPublished      Boolean  @default(false)
-    
-    createdAt        DateTime @default(now())
-    updatedAt        DateTime @updatedAt
-    deletedAt        DateTime?
+    id               Int     @id @default(autoincrement())
+    customerName     String  @db.VarChar(100)
+    location         String? @db.VarChar(100)
+    testimonialText  String  @db.Text
+    rating           Int     @default(5)
+    customerPhoto    String? @db.VarChar(255)
+    productOrService String? @db.VarChar(100)
+    isPublished      Boolean @default(false)
+
+    createdAt DateTime  @default(now())
+    updatedAt DateTime  @updatedAt
+    deletedAt DateTime?
 
     @@index([isPublished])
 }
@@ -235,7 +236,6 @@ enum ContactMessage_status {
     RESOLVED
     UNRESOLVED
 }
-
 
 // ─── Seller / Store (marketplace) ───────────────────────────────────────────
 
@@ -271,14 +271,14 @@ model SellerProfile {
 }
 
 model Store {
-    id           BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
-    sellerUserId Int     @map("seller_user_id")
-    storeName    String  @map("store_name") @db.VarChar(255)
-    storeSlug    String  @unique @map("store_slug") @db.VarChar(255)
-    description  String? @db.Text
-    supportEmail String? @map("support_email") @db.VarChar(255)
-    supportPhone String? @map("support_phone") @db.VarChar(20)
-    isActive     Boolean @default(true) @map("is_active")
+    id           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+    sellerUserId Int       @map("seller_user_id")
+    storeName    String    @map("store_name") @db.VarChar(255)
+    storeSlug    String    @unique @map("store_slug") @db.VarChar(255)
+    description  String?   @db.Text
+    supportEmail String?   @map("support_email") @db.VarChar(255)
+    supportPhone String?   @map("support_phone") @db.VarChar(20)
+    isActive     Boolean   @default(true) @map("is_active")
     deletedAt    DateTime? @map("deleted_at")
 
     createdAt DateTime @default(now()) @map("created_at")
@@ -389,7 +389,6 @@ model Blog {
     @@map("blogs")
 }
 
-
 // ─── Product Management Feature ───────────────────────────────────────────────
 
 /// Product / variant unit (MySQL ENUM; matches catalog spec).
@@ -446,84 +445,84 @@ enum TimeToShipUnit {
 }
 
 model Category {
-    id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-    parentId        BigInt?   @map("parent_id") @db.UnsignedBigInt
+    id         BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+    parentId   BigInt? @map("parent_id") @db.UnsignedBigInt
     /// ONDC / catalog domain code (diagram: domain enum)
-    domainCode      String?   @map("domain") @db.VarChar(100)
-    name            String    @db.VarChar(255)
-    slug            String    @unique @db.VarChar(255)
-    sortOrder       Int       @default(0) @map("sort_order")
-    isActive        Boolean   @default(true) @map("is_active")
+    domainCode String? @map("domain") @db.VarChar(100)
+    name       String  @db.VarChar(255)
+    slug       String  @unique @db.VarChar(255)
+    sortOrder  Int     @default(0) @map("sort_order")
+    isActive   Boolean @default(true) @map("is_active")
 
-    parent          Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-    children        Category[] @relation("CategoryTree")
-    products        Product[]
+    parent           Category?         @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+    children         Category[]        @relation("CategoryTree")
+    products         Product[]
     categoryMappings CategoryMapping[]
 
-    @@map("categories")
     @@index([parentId])
+    @@map("categories")
 }
 
 model Product {
-    id                      BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-    storeId                 BigInt    @map("store_id") @db.UnsignedBigInt
-    categoryId              BigInt    @map("category_id") @db.UnsignedBigInt
-    productName             String    @map("product_name") @db.VarChar(255)
-    district                String    @map("district") @db.VarChar(255)
-    description             String?   @db.Text
-    hsnSacCode              String?   @map("hsn_sac_code") @db.VarChar(255)
-    gstPercent              Int       @default(0) @map("gst_percent")
-    gtinEan                 String?   @map("gtin_ean") @db.VarChar(255)
-    stock                   BigInt    @default(0)
-    forceOutOfStock         Boolean   @default(false) @map("force_out_of_stock")
-    unitCount               Decimal?  @map("unit_count") @db.Decimal(10, 2)
-    unitType                UnitType? @map("unit_type")
-    brand                   String?   @db.VarChar(255)
-    manufacturingMonth      String?   @map("manufacturing_month") @db.VarChar(50)
-    expiryDate              DateTime? @map("expiry_date") @db.Date
-    countryOfOrigin         String?   @map("country_of_origin") @db.VarChar(100)
-    sortOrder               Int       @default(0) @map("sort_order")
-    returnDaysWindow        Int?      @map("return_days_window")
-    sellerPickupReturn      Boolean   @default(false) @map("seller_pickup_return")
-    isCodAvailable          Boolean   @default(true) @map("is_cod_available")
-    publishStatus           PublishStatus @default(draft) @map("publish_status")
-    isManufacturer          Boolean   @default(false) @map("is_manufacturer")
-    manufacturerName        String?   @map("manufacturer_name") @db.VarChar(255)
-    manufacturerAddress     String?   @map("manufacturer_address") @db.Text
-    currency                String    @default("INR") @db.Char(3)
-    defaultPrice            Decimal   @map("default_price") @db.Decimal(12, 2)
-    mrp                     Decimal   @db.Decimal(12, 2)
-    avgRating               Decimal   @default(0) @map("avg_rating") @db.Decimal(10, 2)
-    reviewCount             Int       @default(0) @map("review_count")
-    minPurchaseLimit        Int?      @default(1) @map("min_purchase_limit")
-    maxPurchaseLimit        Int?      @map("max_purchase_limit")
-    standardPackageQty      Int?      @map("standard_package_qty")
-    lowStockQty             Int?      @map("low_stock_qty")
-    orderMode               OrderMode @default(ONLINE) @map("order_mode")
-    visibility              Visibility @default(PUBLIC)
-    aliasSlug               String?   @unique @map("alias_slug") @db.VarChar(255)
-    seoTitle                String?   @map("seo_title") @db.VarChar(255)
-    seoDescription          String?   @map("seo_description") @db.VarChar(500)
-    seoKeywords             String?   @map("seo_keywords") @db.VarChar(500)
-    disableForBots          Boolean   @default(false) @map("disable_for_bots")
-    availabilityMode        AvailabilityMode @default(SELLER_DEFAULT) @map("availability_mode")
-    cancellable             Cancellable @default(DEFAULT) @map("cancellable")
-    returnable              Returnable @default(DEFAULT) @map("returnable")
-    timeToShipValue         Int?      @map("time_to_ship_value")
-    timeToShipUnit          TimeToShipUnit? @map("time_to_ship_unit")
-    instructions            String?   @db.Text
-    storageConditions       String?   @map("storage_conditions") @db.Text
-    includedItems           String?   @map("included_items") @db.Text
-    sizeChartUrl            String?   @map("size_chart_url") @db.VarChar(500)
-    giTag                   Boolean   @default(false) @map("gi_tag")
-    silkMark                Boolean   @default(false) @map("silk_mark")
-    noOfVariants            Int       @default(0) @map("no_of_variants")
-    haveOndcAttributes      Boolean   @default(false) @map("have_ondc_attributes")
-    createdAt               DateTime  @default(now()) @map("created_at")
-    updatedAt               DateTime  @updatedAt @map("updated_at")
+    id                  BigInt           @id @default(autoincrement()) @db.UnsignedBigInt
+    storeId             BigInt           @map("store_id") @db.UnsignedBigInt
+    categoryId          BigInt           @map("category_id") @db.UnsignedBigInt
+    productName         String           @map("product_name") @db.VarChar(255)
+    district            String           @map("district") @db.VarChar(255)
+    description         String?          @db.Text
+    hsnSacCode          String?          @map("hsn_sac_code") @db.VarChar(255)
+    gstPercent          Int              @default(0) @map("gst_percent")
+    gtinEan             String?          @map("gtin_ean") @db.VarChar(255)
+    stock               BigInt           @default(0)
+    forceOutOfStock     Boolean          @default(false) @map("force_out_of_stock")
+    unitCount           Decimal?         @map("unit_count") @db.Decimal(10, 2)
+    unitType            UnitType?        @map("unit_type")
+    brand               String?          @db.VarChar(255)
+    manufacturingMonth  String?          @map("manufacturing_month") @db.VarChar(50)
+    expiryDate          DateTime?        @map("expiry_date") @db.Date
+    countryOfOrigin     String?          @map("country_of_origin") @db.VarChar(100)
+    sortOrder           Int              @default(0) @map("sort_order")
+    returnDaysWindow    Int?             @map("return_days_window")
+    sellerPickupReturn  Boolean          @default(false) @map("seller_pickup_return")
+    isCodAvailable      Boolean          @default(true) @map("is_cod_available")
+    publishStatus       PublishStatus    @default(draft) @map("publish_status")
+    isManufacturer      Boolean          @default(false) @map("is_manufacturer")
+    manufacturerName    String?          @map("manufacturer_name") @db.VarChar(255)
+    manufacturerAddress String?          @map("manufacturer_address") @db.Text
+    currency            String           @default("INR") @db.Char(3)
+    defaultPrice        Decimal          @map("default_price") @db.Decimal(12, 2)
+    mrp                 Decimal          @db.Decimal(12, 2)
+    avgRating           Decimal          @default(0) @map("avg_rating") @db.Decimal(10, 2)
+    reviewCount         Int              @default(0) @map("review_count")
+    minPurchaseLimit    Int?             @default(1) @map("min_purchase_limit")
+    maxPurchaseLimit    Int?             @map("max_purchase_limit")
+    standardPackageQty  Int?             @map("standard_package_qty")
+    lowStockQty         Int?             @map("low_stock_qty")
+    orderMode           OrderMode        @default(ONLINE) @map("order_mode")
+    visibility          Visibility       @default(PUBLIC)
+    aliasSlug           String?          @unique @map("alias_slug") @db.VarChar(255)
+    seoTitle            String?          @map("seo_title") @db.VarChar(255)
+    seoDescription      String?          @map("seo_description") @db.VarChar(500)
+    seoKeywords         String?          @map("seo_keywords") @db.VarChar(500)
+    disableForBots      Boolean          @default(false) @map("disable_for_bots")
+    availabilityMode    AvailabilityMode @default(SELLER_DEFAULT) @map("availability_mode")
+    cancellable         Cancellable      @default(DEFAULT) @map("cancellable")
+    returnable          Returnable       @default(DEFAULT) @map("returnable")
+    timeToShipValue     Int?             @map("time_to_ship_value")
+    timeToShipUnit      TimeToShipUnit?  @map("time_to_ship_unit")
+    instructions        String?          @db.Text
+    storageConditions   String?          @map("storage_conditions") @db.Text
+    includedItems       String?          @map("included_items") @db.Text
+    sizeChartUrl        String?          @map("size_chart_url") @db.VarChar(500)
+    giTag               Boolean          @default(false) @map("gi_tag")
+    silkMark            Boolean          @default(false) @map("silk_mark")
+    noOfVariants        Int              @default(0) @map("no_of_variants")
+    haveOndcAttributes  Boolean          @default(false) @map("have_ondc_attributes")
+    createdAt           DateTime         @default(now()) @map("created_at")
+    updatedAt           DateTime         @updatedAt @map("updated_at")
 
-    store               Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
-    category            Category    @relation(fields: [categoryId], references: [id])
+    store               Store                       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+    category            Category                    @relation(fields: [categoryId], references: [id])
     variants            ProductVariant[]
     images              ProductImage[]
     attributes          ProductAttribute[]
@@ -533,10 +532,10 @@ model Product {
     serviceableCities   ProductServiceableCity[]
     serviceablePincodes ProductServiceablePincode[]
 
-    @@map("products")
     @@index([storeId])
     @@index([categoryId])
     @@index([publishStatus])
+    @@map("products")
 }
 
 model ProductVariant {
@@ -571,47 +570,47 @@ model ProductVariant {
     createdAt           DateTime  @default(now()) @map("created_at")
     updatedAt           DateTime  @updatedAt @map("updated_at")
 
-    product             Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
-    parentVariant       ProductVariant? @relation("VariantHierarchy", fields: [parentVariantId], references: [id], onDelete: SetNull)
-    childVariants       ProductVariant[] @relation("VariantHierarchy")
-    variantImages       VariantImage[]
-    ondcAttributes      ProductOndcAttribute[]
-    inventory           Inventory[]
+    product        Product                @relation(fields: [productId], references: [id], onDelete: Cascade)
+    parentVariant  ProductVariant?        @relation("VariantHierarchy", fields: [parentVariantId], references: [id], onDelete: SetNull)
+    childVariants  ProductVariant[]       @relation("VariantHierarchy")
+    variantImages  VariantImage[]
+    ondcAttributes ProductOndcAttribute[]
+    inventory      Inventory[]
 
-    @@map("product_variants")
-    @@index([productId])
     @@unique([productId, sku])
+    @@index([productId])
+    @@map("product_variants")
 }
 
 model ProductImage {
-    id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-    productId   BigInt    @map("product_id") @db.UnsignedBigInt
-    imageUrl    String    @map("image_url") @db.VarChar(500)
-    altText     String?   @map("alt_text") @db.VarChar(255)
-    sortOrder   Int       @default(0) @map("sort_order")
-    createdAt   DateTime  @default(now()) @map("created_at")
+    id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+    productId BigInt   @map("product_id") @db.UnsignedBigInt
+    imageUrl  String   @map("image_url") @db.VarChar(500)
+    altText   String?  @map("alt_text") @db.VarChar(255)
+    sortOrder Int      @default(0) @map("sort_order")
+    createdAt DateTime @default(now()) @map("created_at")
 
-    product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+    product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-    @@map("product_images")
     @@index([productId])
+    @@map("product_images")
 }
 
 model Inventory {
-    id                  BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-    storeLocationId     BigInt    @map("store_location_id") @db.UnsignedBigInt
-    variantId           BigInt    @map("variant_id") @db.UnsignedBigInt
-    qtyOnHand           Int       @default(0) @map("qty_on_hand")
-    qtyReserved         Int       @default(0) @map("qty_reserved")
-    updatedAt           DateTime  @updatedAt @map("updated_at")
+    id              BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+    storeLocationId BigInt   @map("store_location_id") @db.UnsignedBigInt
+    variantId       BigInt   @map("variant_id") @db.UnsignedBigInt
+    qtyOnHand       Int      @default(0) @map("qty_on_hand")
+    qtyReserved     Int      @default(0) @map("qty_reserved")
+    updatedAt       DateTime @updatedAt @map("updated_at")
 
-    storeLocation       StoreLocation @relation(fields: [storeLocationId], references: [id], onDelete: Cascade)
-    variant             ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
-    movements           InventoryMovement[]
+    storeLocation StoreLocation       @relation(fields: [storeLocationId], references: [id], onDelete: Cascade)
+    variant       ProductVariant      @relation(fields: [variantId], references: [id], onDelete: Cascade)
+    movements     InventoryMovement[]
 
-    @@map("inventory")
     @@unique([storeLocationId, variantId])
     @@index([variantId])
+    @@map("inventory")
 }
 
 enum MovementType {
@@ -622,50 +621,50 @@ enum MovementType {
 }
 
 model InventoryMovement {
-    id              BigInt      @id @default(autoincrement()) @db.UnsignedBigInt
-    inventoryId     BigInt      @map("inventory_id") @db.UnsignedBigInt
-    movementType    MovementType @map("movement_type")
-    qtyDelta        Int         @map("qty_delta")
-    referenceId     String?     @map("reference_id") @db.VarChar(255)
-    note            String?     @db.Text
-    createdAt       DateTime    @default(now()) @map("created_at")
+    id           BigInt       @id @default(autoincrement()) @db.UnsignedBigInt
+    inventoryId  BigInt       @map("inventory_id") @db.UnsignedBigInt
+    movementType MovementType @map("movement_type")
+    qtyDelta     Int          @map("qty_delta")
+    referenceId  String?      @map("reference_id") @db.VarChar(255)
+    note         String?      @db.Text
+    createdAt    DateTime     @default(now()) @map("created_at")
 
-    inventory       Inventory   @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+    inventory Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
 
-    @@map("inventory_movements")
     @@index([inventoryId])
+    @@map("inventory_movements")
 }
 
 model ProductReview {
-    id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-    productId   BigInt    @map("product_id") @db.UnsignedBigInt
-    userId      Int?      @map("user_id")
-    rating      Int       @default(5)
-    reviewText  String?   @map("review_text") @db.Text
-    createdAt   DateTime  @default(now()) @map("created_at")
-    updatedAt   DateTime  @updatedAt @map("updated_at")
+    id         BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+    productId  BigInt   @map("product_id") @db.UnsignedBigInt
+    userId     Int?     @map("user_id")
+    rating     Int      @default(5)
+    reviewText String?  @map("review_text") @db.Text
+    createdAt  DateTime @default(now()) @map("created_at")
+    updatedAt  DateTime @updatedAt @map("updated_at")
 
-    product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+    product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-    @@map("product_reviews")
     @@index([productId])
+    @@map("product_reviews")
 }
 
 model ProductServiceableCity {
-    productId   BigInt    @map("product_id") @db.UnsignedBigInt
-    city        String    @db.VarChar(255)
+    productId BigInt @map("product_id") @db.UnsignedBigInt
+    city      String @db.VarChar(255)
 
-    product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+    product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
     @@id([productId, city])
     @@map("product_serviceable_cities")
 }
 
 model ProductServiceablePincode {
-    productId   BigInt    @map("product_id") @db.UnsignedBigInt
-    pincode     String    @db.VarChar(20)
+    productId BigInt @map("product_id") @db.UnsignedBigInt
+    pincode   String @db.VarChar(20)
 
-    product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+    product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
     @@id([productId, pincode])
     @@map("product_serviceable_pincodes")
@@ -674,100 +673,234 @@ model ProductServiceablePincode {
 // ─── Diagram: ONDC & category graph ───────────────────────────────────────────
 
 model OndcCategory {
-    id               BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-    domainCode       String?   @map("domain") @db.VarChar(100)
-    ondcCategoryCode String    @map("ondc_category_code") @db.VarChar(255)
-    name             String    @db.VarChar(255)
-    parentId         BigInt?   @map("parent_id") @db.UnsignedBigInt
-    isActive         Boolean   @default(true) @map("is_active")
+    id               BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+    domainCode       String? @map("domain") @db.VarChar(100)
+    ondcCategoryCode String  @map("ondc_category_code") @db.VarChar(255)
+    name             String  @db.VarChar(255)
+    parentId         BigInt? @map("parent_id") @db.UnsignedBigInt
+    isActive         Boolean @default(true) @map("is_active")
 
-    parent           OndcCategory?  @relation("OndcCategoryTree", fields: [parentId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-    children         OndcCategory[] @relation("OndcCategoryTree")
+    parent           OndcCategory?         @relation("OndcCategoryTree", fields: [parentId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+    children         OndcCategory[]        @relation("OndcCategoryTree")
     categoryMappings CategoryMapping[]
     productMaps      OndcCategoryMapping[]
 
-    @@map("ondc_categories")
     @@index([parentId])
+    @@map("ondc_categories")
 }
 
 model CategoryMapping {
-    id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-    categoryId      BigInt    @map("category_id") @db.UnsignedBigInt
-    ondcCategoryId  BigInt    @map("ondc_category_id") @db.UnsignedBigInt
-    domainCode      String?   @map("domain") @db.VarChar(100)
-    isDefault       Boolean   @default(false) @map("is_default")
-    confidence      String?   @map("confidence") @db.VarChar(50)
-    notes           String?   @db.VarChar(255)
+    id             BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+    categoryId     BigInt  @map("category_id") @db.UnsignedBigInt
+    ondcCategoryId BigInt  @map("ondc_category_id") @db.UnsignedBigInt
+    domainCode     String? @map("domain") @db.VarChar(100)
+    isDefault      Boolean @default(false) @map("is_default")
+    confidence     String? @map("confidence") @db.VarChar(50)
+    notes          String? @db.VarChar(255)
 
-    category        Category      @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-    ondcCategory    OndcCategory  @relation(fields: [ondcCategoryId], references: [id], onDelete: Cascade)
+    category     Category     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+    ondcCategory OndcCategory @relation(fields: [ondcCategoryId], references: [id], onDelete: Cascade)
 
-    @@map("category_mappings")
     @@index([categoryId])
     @@index([ondcCategoryId])
+    @@map("category_mappings")
 }
 
 model OndcCategoryMapping {
-    id               BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-    productId        BigInt    @map("product_id") @db.UnsignedBigInt
-    domainCode       String?   @map("domain") @db.VarChar(100)
-    domainName       String?   @map("domain_name") @db.VarChar(100)
-    categoryLabel    String?   @map("category") @db.VarChar(255)
-    ondcCategoryId   BigInt?   @map("ondc_category_id") @db.UnsignedBigInt
-    createdAt        DateTime  @default(now()) @map("created_at")
-    updatedAt        DateTime  @updatedAt @map("updated_at")
+    id             BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+    productId      BigInt   @map("product_id") @db.UnsignedBigInt
+    domainCode     String?  @map("domain") @db.VarChar(100)
+    domainName     String?  @map("domain_name") @db.VarChar(100)
+    categoryLabel  String?  @map("category") @db.VarChar(255)
+    ondcCategoryId BigInt?  @map("ondc_category_id") @db.UnsignedBigInt
+    createdAt      DateTime @default(now()) @map("created_at")
+    updatedAt      DateTime @updatedAt @map("updated_at")
 
-    product          Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
-    ondcCategory     OndcCategory? @relation(fields: [ondcCategoryId], references: [id], onDelete: SetNull)
+    product      Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+    ondcCategory OndcCategory? @relation(fields: [ondcCategoryId], references: [id], onDelete: SetNull)
 
-    @@map("ondc_category_mappings")
     @@index([productId])
+    @@map("ondc_category_mappings")
 }
 
 // ─── Diagram: product attributes & media ─────────────────────────────────────
 
 model ProductAttribute {
-    id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-    productId       BigInt    @map("product_id") @db.UnsignedBigInt
-    attributeKey    String    @map("attribute_key") @db.VarChar(255)
-    attributeValue  String?   @map("attribute_value") @db.Text
-    createdAt       DateTime  @default(now()) @map("created_at")
+    id             BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+    productId      BigInt   @map("product_id") @db.UnsignedBigInt
+    attributeKey   String   @map("attribute_key") @db.VarChar(255)
+    attributeValue String?  @map("attribute_value") @db.Text
+    createdAt      DateTime @default(now()) @map("created_at")
 
-    product         Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+    product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-    @@map("product_attributes")
     @@index([productId])
+    @@map("product_attributes")
 }
 
 model ProductOndcAttribute {
-    id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-    productId       BigInt    @map("product_id") @db.UnsignedBigInt
-    variantId       BigInt?   @map("variant_id") @db.UnsignedBigInt
-    attributeKey    String    @map("attribute_key") @db.VarChar(255)
-    attributeValue  String?   @map("attribute_value") @db.Text
-    colorName       String?   @map("color_name") @db.VarChar(255)
-    sortOrder       Int       @default(0) @map("sort_order")
-    createdAt       DateTime  @default(now()) @map("created_at")
-    updatedAt       DateTime  @updatedAt @map("updated_at")
+    id             BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+    productId      BigInt   @map("product_id") @db.UnsignedBigInt
+    variantId      BigInt?  @map("variant_id") @db.UnsignedBigInt
+    attributeKey   String   @map("attribute_key") @db.VarChar(255)
+    attributeValue String?  @map("attribute_value") @db.Text
+    colorName      String?  @map("color_name") @db.VarChar(255)
+    sortOrder      Int      @default(0) @map("sort_order")
+    createdAt      DateTime @default(now()) @map("created_at")
+    updatedAt      DateTime @updatedAt @map("updated_at")
 
-    product         Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
-    variant         ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+    product Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+    variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
 
-    @@map("product_ondc_attributes")
     @@index([productId])
     @@index([variantId])
+    @@map("product_ondc_attributes")
 }
 
 model VariantImage {
-    id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-    variantId   BigInt    @map("variant_id") @db.UnsignedBigInt
-    imageUrl    String    @map("image_url") @db.VarChar(500)
-    sortOrder   Int       @default(0) @map("sort_order")
-    createdAt   DateTime  @default(now()) @map("created_at")
+    id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+    variantId BigInt   @map("variant_id") @db.UnsignedBigInt
+    imageUrl  String   @map("image_url") @db.VarChar(500)
+    sortOrder Int      @default(0) @map("sort_order")
+    createdAt DateTime @default(now()) @map("created_at")
 
-    variant     ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+    variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
 
-    @@map("variant_images")
     @@index([variantId])
+    @@map("variant_images")
 }
 
+// ─── Order Feature (Buyer) ───
+
+enum OrderStatus {
+    pending
+    confirmed
+    processing
+    shipped
+    delivered
+    cancelled
+}
+
+enum PaymentStatus {
+    pending
+    paid
+    failed
+    refunded
+}
+
+enum OrderItemStatus {
+    pending
+    confirmed
+    processing
+    shipped
+    delivered
+    cancelled
+    returned
+}
+
+enum RefundMode {
+    original
+    bank_transfer
+    wallet
+    store_credit
+}
+
+enum ReturnStatus {
+    pending
+    approved
+    rejected
+    refunded
+}
+
+enum OrderAddressType {
+    billing
+    shipping
+}
+
+model Order {
+    id             BigInt        @id @default(autoincrement()) @db.UnsignedBigInt
+    order_no       String        @unique @db.VarChar(50)
+    user_id        Int
+    cart_id        BigInt        @db.UnsignedBigInt
+    status         OrderStatus   @default(pending)
+    payment_status PaymentStatus @default(pending)
+    currency       String        @default("INR") @db.Char(3)
+    total_amount   Decimal       @db.Decimal(12, 2)
+    created_at     DateTime      @default(now())
+    updated_at     DateTime      @updatedAt
+
+    user         User           @relation(fields: [user_id], references: [id])
+    items        OrderItem[]
+    addresses    OrderAddress[]
+    returns      Return[]
+    seller_units SellerUnit[]
+
+    @@map("orders")
+}
+
+model OrderItem {
+    id          BigInt          @id @default(autoincrement()) @db.UnsignedBigInt
+    order_id    BigInt          @db.UnsignedBigInt
+    product_id  BigInt          @db.UnsignedBigInt
+    variant_id  BigInt          @default(0) @db.UnsignedBigInt
+    qty         Int
+    price       Decimal         @db.Decimal(12, 2)
+    total       Decimal         @db.Decimal(12, 2)
+    item_status OrderItemStatus @default(pending)
+
+    order   Order    @relation(fields: [order_id], references: [id], onDelete: Cascade)
+    returns Return[]
+
+    @@map("order_items")
+}
+
+model OrderAddress {
+    id            BigInt           @id @default(autoincrement()) @db.UnsignedBigInt
+    order_id      BigInt           @db.UnsignedBigInt
+    type          OrderAddressType
+    full_name     String           @db.VarChar(255)
+    phone         String           @db.VarChar(20)
+    address_line1 String           @db.VarChar(255)
+    address_line2 String?          @db.VarChar(255)
+    city          String           @db.VarChar(120)
+    state         String           @db.VarChar(120)
+    country       String           @db.VarChar(120)
+    pincode       String           @db.VarChar(20)
+
+    order Order @relation(fields: [order_id], references: [id], onDelete: Cascade)
+
+    @@map("order_addresses")
+}
+
+model Return {
+    id            BigInt       @id @default(autoincrement()) @db.UnsignedBigInt
+    order_id      BigInt       @db.UnsignedBigInt
+    order_item_id BigInt       @db.UnsignedBigInt
+    reason        String       @db.Text
+    refund_amount Decimal      @db.Decimal(12, 2)
+    refund_mode   RefundMode
+    status        ReturnStatus @default(pending)
+    created_at    DateTime     @default(now())
+    updated_at    DateTime     @updatedAt
+
+    order      Order     @relation(fields: [order_id], references: [id], onDelete: Cascade)
+    order_item OrderItem @relation(fields: [order_item_id], references: [id], onDelete: Cascade)
+
+    @@map("returns")
+}
+
+model SellerUnit {
+    id                 BigInt      @id @default(autoincrement()) @db.UnsignedBigInt
+    order_id           BigInt      @db.UnsignedBigInt
+    seller_id          Int
+    store_id           BigInt      @db.UnsignedBigInt
+    status             OrderStatus @default(pending)
+    tracking_no        String?     @db.VarChar(100)
+    logistics_provider String?     @db.VarChar(100)
+    created_at         DateTime    @default(now())
+    updated_at         DateTime    @updatedAt
+
+    order Order @relation(fields: [order_id], references: [id], onDelete: Cascade)
+
+    @@map("seller_units")
+}

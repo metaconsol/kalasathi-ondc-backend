@@ -5,8 +5,7 @@ import { env as appEnv } from './src/config/env.config';
 export default defineConfig({
   schema: 'prisma/schema.prisma',
   migrations: {
-    path: 'prisma/migrations',
-    seed: 'npx tsx ./prisma/seed.ts',
+    path: 'prisma/migrations'
   },
   engine: 'classic',
   datasource: {

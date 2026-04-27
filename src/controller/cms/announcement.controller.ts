@@ -11,14 +11,17 @@ export const createAnnouncement = async (req: Request, res: Response, next: Next
   try {
     const { text, contactPhone, contactEmail, isPublished, startAt, endAt } = req.body;
 
-    const announcement = await announcementService.createAnnouncementService({
+    const payload: Parameters<typeof announcementService.createAnnouncementService>[0] = {
       text,
-      contactPhone: contactPhone || undefined,
-      contactEmail: contactEmail || undefined,
       isPublished: isPublished === 'true' || isPublished === true,
-      ...(startAt ? { startAt: new Date(startAt) } : {}),
-      ...(endAt ? { endAt: new Date(endAt) } : {}),
-    });
+    };
+
+    if (contactPhone) payload.contactPhone = contactPhone;
+    if (contactEmail) payload.contactEmail = contactEmail;
+    if (startAt) payload.startAt = new Date(startAt);
+    if (endAt) payload.endAt = new Date(endAt);
+
+    const announcement = await announcementService.createAnnouncementService(payload);
 
     return ApiResponse.created(res, 'Announcement created successfully', announcement);
   } catch (error) {
