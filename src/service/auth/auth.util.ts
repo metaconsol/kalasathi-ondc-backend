@@ -36,7 +36,6 @@ export class AuthUtil {
   ): T {
     const result: Partial<T> = {};
     const targetKeys = Object.keys({} as T) as (keyof T)[];
-    console.log('targetKeys ', targetKeys);
     for (const key of targetKeys) {
       if (key in source) {
         result[key] = source[key] as T[keyof T];

@@ -811,7 +811,8 @@ class ProductService {
 
       if (removeVariantIds && removeVariantIds.length > 0 && !replaceVariantTree) {
         const vcount = await db.productVariant.count({ where: { productId } });
-        if (vcount - removeVariantIds.length < 1) {
+        const newVariantsCount = variants ? variants.filter((v) => !isVariantUpdateItem(v)).length : 0;
+        if (vcount - removeVariantIds.length + newVariantsCount < 1) {
           return ApiResponse.badRequest(res, 'A product must have at least one variant');
         }
         for (const rid of removeVariantIds) {
@@ -1013,8 +1014,9 @@ class ProductService {
         }
 
         const n = await tx.productVariant.count({ where: { productId } });
-        if (n < 1) {
-          throw new Error('PRODUCT_HAS_NO_VARIANTS');
+        const hasModifiedVariants = replaceVariantTree || (removeVariantIds && removeVariantIds.length > 0);
+        if (hasModifiedVariants || (variants && variants.length > 0)) {
+          if (n < 1) throw new Error('PRODUCT_HAS_NO_VARIANTS');
         }
         await tx.product.update({ where: { id: productId }, data: { noOfVariants: n } });
 

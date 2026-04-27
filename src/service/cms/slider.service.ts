@@ -12,8 +12,6 @@ export const createSlider = async (data: {
   sortOrder?: number;
   isActive?: boolean;
 }) => {
-  console.log('Incoming data:', JSON.stringify(data, null, 2));
-
   const createData = {
     image: data.image ?? null,
     imageMobile: data.imageMobile ?? null,
@@ -28,8 +26,6 @@ export const createSlider = async (data: {
     sortOrder: typeof data.sortOrder === 'number' && !isNaN(data.sortOrder) ? data.sortOrder : 0,
     isActive: data.isActive === false ? false : true,
   };
-
-  console.log('Prisma createData:', JSON.stringify(createData, null, 2));
 
   return await db.cmsSlider.create({
     data: createData,

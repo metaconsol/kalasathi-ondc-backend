@@ -379,7 +379,7 @@ const productAttributesPayloadSchema = z
 // Core product row (no nested images/variants in DB sense)
 const productCoreSchema = z.object({
   productName: z.string().min(1, 'Product name is required').max(255),
-  district: z.string().min(1, 'District is required').max(255),
+  district: z.string().max(255).optional().default('Unspecified'),
   categoryId: z.coerce.bigint().positive('Category ID must be a positive number'),
   defaultPrice: z.coerce.number().positive('Default price must be positive'),
   mrp: z.coerce.number().positive('MRP must be positive'),
@@ -440,9 +440,8 @@ export const createProductSchema = productCoreSchema.extend({
   attributes: productAttributesPayloadSchema.optional(),
 });
 
-const updateVariantInPayload = z
-  .object({ id: z.coerce.bigint() })
-  .and(updateVariantSchema)
+const updateVariantInPayload = flatVariantCreateSchema.partial()
+  .extend({ id: z.coerce.bigint() })
   .refine((d) => d.id > 0n, { path: ['id'], message: 'id must be a positive BigInt' });
 
 const variantItemForUpdateSchema = z.union([
