@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { env } from '~/config/env.config';
-import { productService } from '~/service/product/product.service';
+import { productService } from '~/service/product/product.sql.service';
 import {
   createProductSchema,
   updateProductSchema,

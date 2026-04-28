@@ -1,14 +1,31 @@
-import type { Cart, CartItem } from '~/generated/prisma/client';
-import { Prisma } from '~/generated/prisma/client';
-import { CartStatus } from '~/generated/prisma/enums';
-
-import { db } from '~/lib/db';
+import { sqlExec, sqlQuery, type SqlTx, withSqlTransaction } from '~/lib/sql';
 import { ApiError } from '~/lib/response';
 import { serializeBigInt } from '~/lib/utils';
 
 import type { CartOwner } from '~/service/cart/cart.types';
 
-const storeIsActive = { isActive: true } as const;
+type CartStatus = 'active' | 'abandoned' | 'converted';
+
+type CartRow = {
+  id: bigint;
+  user_id: bigint | null;
+  session_id: string | null;
+  status: CartStatus;
+  currency: string | null;
+};
+
+type CartItemRow = {
+  id: bigint;
+  cart_id: bigint;
+  store_id: bigint;
+  product_id: bigint;
+  variant_id: bigint;
+  qty: number;
+  price_snapshot: any;
+  mrp_snapshot: any | null;
+  tax_snapshot: any | null;
+  discount_snapshot: any | null;
+};
 
 /** Rows from your existing `products` / `product_variants` tables (not Prisma models). */
 type ProductRow = {
@@ -26,14 +43,6 @@ type VariantRow = {
   variant_name: string | null;
   sku: string | null;
 };
-
-function toPrismaDecimal(v: unknown): Prisma.Decimal {
-  const s =
-    typeof v === 'object' && v !== null && 'toString' in v
-      ? (v as { toString: () => string }).toString()
-      : String(v);
-  return new Prisma.Decimal(s);
-}
 
 function toDecimalString(value: unknown): string {
   if (value == null) return '0';
@@ -60,56 +69,53 @@ function bodyVariantToDbKey(variant_id: number | null | undefined): bigint {
 }
 
 async function fetchProductRow(
-  client: typeof db | Prisma.TransactionClient,
+  tx: SqlTx | undefined,
   storeId: bigint,
   productId: bigint,
 ): Promise<ProductRow | null> {
-  const rows = await client.$queryRaw<ProductRow[]>(Prisma.sql`
-    SELECT id, store_id, product_name, default_price, stock
-    FROM products
-    WHERE id = ${productId}
-      AND store_id = ${storeId}
-      AND publish_status = 'publish'
-    LIMIT 1
-  `);
+  const rows = await sqlQuery<ProductRow>(
+    'SELECT id, store_id, product_name, default_price, stock FROM products WHERE id = ? AND store_id = ? AND publish_status = ? LIMIT 1',
+    [productId, storeId, 'publish'],
+    tx,
+  );
   return rows[0] ?? null;
 }
 
 async function fetchVariantRow(
-  client: typeof db | Prisma.TransactionClient,
+  tx: SqlTx | undefined,
   productId: bigint,
   variantId: bigint,
 ): Promise<VariantRow | null> {
-  const rows = await client.$queryRaw<VariantRow[]>(Prisma.sql`
-    SELECT id, product_id, price, variant_name, sku
-    FROM product_variants
-    WHERE id = ${variantId}
-      AND product_id = ${productId}
-      AND is_active = 1
-    LIMIT 1
-  `);
+  const rows = await sqlQuery<VariantRow>(
+    'SELECT id, product_id, price, variant_name, sku FROM product_variants WHERE id = ? AND product_id = ? AND is_active = 1 LIMIT 1',
+    [variantId, productId],
+    tx,
+  );
   return rows[0] ?? null;
 }
 
 async function loadAndValidateCatalog(
-  client: typeof db | Prisma.TransactionClient,
+  tx: SqlTx | undefined,
   params: { storeId: bigint; productId: bigint; variantId: bigint },
-): Promise<{ product: ProductRow; variant: VariantRow | null; unitPrice: Prisma.Decimal }> {
-  const store = await client.store.findFirst({
-    where: { id: params.storeId, ...storeIsActive },
-  });
+): Promise<{ product: ProductRow; variant: VariantRow | null; unitPrice: string }> {
+  const stores = await sqlQuery<{ id: bigint }>(
+    'SELECT id FROM stores WHERE id = ? AND is_active = 1 AND deleted_at IS NULL LIMIT 1',
+    [params.storeId],
+    tx,
+  );
+  const store = stores[0] ?? null;
   if (!store) {
     throw ApiError.NOT_FOUND('Store not found or inactive');
   }
 
-  const product = await fetchProductRow(client, params.storeId, params.productId);
+  const product = await fetchProductRow(tx, params.storeId, params.productId);
   if (!product) {
     throw ApiError.NOT_FOUND('Product not found for this store');
   }
 
   let variant: VariantRow | null = null;
   if (params.variantId !== 0n) {
-    variant = await fetchVariantRow(client, params.productId, params.variantId);
+    variant = await fetchVariantRow(tx, params.productId, params.variantId);
     if (!variant) {
       throw ApiError.BAD_REQUEST('Invalid product variant');
     }
@@ -117,8 +123,8 @@ async function loadAndValidateCatalog(
 
   const unitPrice =
     variant?.price != null
-      ? toPrismaDecimal(variant.price)
-      : toPrismaDecimal(product.default_price);
+      ? toDecimalString(variant.price)
+      : toDecimalString(product.default_price);
   return { product, variant, unitPrice };
 }
 
@@ -128,36 +134,48 @@ function availableStock(product: ProductRow, variant: VariantRow | null): number
   return Number(product.stock);
 }
 
-async function findCartByOwner(owner: CartOwner): Promise<Cart | null> {
+async function findCartByOwner(owner: CartOwner, tx?: SqlTx): Promise<CartRow | null> {
   if ('userId' in owner && owner.userId != null) {
-    return db.cart.findUnique({ where: { userId: BigInt(owner.userId) } });
+    const rows = await sqlQuery<CartRow>(
+      'SELECT * FROM `carts` WHERE `user_id` = ? LIMIT 1',
+      [BigInt(owner.userId)],
+      tx,
+    );
+    return rows[0] ?? null;
   }
   if ('sessionId' in owner && owner.sessionId) {
-    return db.cart.findUnique({ where: { sessionId: owner.sessionId } });
+    const rows = await sqlQuery<CartRow>(
+      'SELECT * FROM `carts` WHERE `session_id` = ? LIMIT 1',
+      [owner.sessionId],
+      tx,
+    );
+    return rows[0] ?? null;
   }
   return null;
 }
 
-async function findOrCreateCart(owner: CartOwner): Promise<Cart> {
+async function findOrCreateCart(owner: CartOwner): Promise<CartRow> {
   const existing = await findCartByOwner(owner);
   if (existing) return existing;
   if ('userId' in owner && owner.userId != null) {
-    return db.cart.create({
-      data: {
-        userId: BigInt(owner.userId),
-        status: CartStatus.active,
-        currency: 'INR',
-      },
-    });
+    const res = await sqlExec(
+      'INSERT INTO `carts` (`user_id`, `status`, `currency`) VALUES (?, ?, ?)',
+      [BigInt(owner.userId), 'active', 'INR'],
+    );
+    const rows = await sqlQuery<CartRow>('SELECT * FROM `carts` WHERE `id` = ? LIMIT 1', [
+      BigInt(res.insertId as any),
+    ]);
+    return rows[0]!;
   }
   if ('sessionId' in owner && owner.sessionId) {
-    return db.cart.create({
-      data: {
-        sessionId: owner.sessionId,
-        status: CartStatus.active,
-        currency: 'INR',
-      },
-    });
+    const res = await sqlExec(
+      'INSERT INTO `carts` (`session_id`, `status`, `currency`) VALUES (?, ?, ?)',
+      [owner.sessionId, 'active', 'INR'],
+    );
+    const rows = await sqlQuery<CartRow>('SELECT * FROM `carts` WHERE `id` = ? LIMIT 1', [
+      BigInt(res.insertId as any),
+    ]);
+    return rows[0]!;
   }
   throw ApiError.BAD_REQUEST('Invalid cart owner');
 }
@@ -165,11 +183,15 @@ async function findOrCreateCart(owner: CartOwner): Promise<Cart> {
 const CART_ITEM_OWNER_HINT =
   'Use the same Authorization Bearer or X-Cart-Session as when you added the item. PATCH /cart/items/:id expects the line id from GET /cart (items[].id), not product_id.';
 
-async function assertCartItemOwned(itemId: bigint, owner: CartOwner): Promise<CartItem> {
-  const item = await db.cartItem.findUnique({
-    where: { id: itemId },
-    include: { cart: true },
-  });
+async function assertCartItemOwned(
+  itemId: bigint,
+  owner: CartOwner,
+): Promise<CartItemRow & { cart: CartRow }> {
+  const rows = await sqlQuery<any>(
+    'SELECT ci.*, c.`user_id`, c.`session_id` FROM `cart_items` ci JOIN `carts` c ON c.`id` = ci.`cart_id` WHERE ci.`id` = ? LIMIT 1',
+    [itemId],
+  );
+  const item = rows[0] ?? null;
   if (!item) {
     throw ApiError.NOT_FOUND('Cart item not found');
   }
@@ -177,11 +199,29 @@ async function assertCartItemOwned(itemId: bigint, owner: CartOwner): Promise<Ca
   const userOwner = 'userId' in owner && owner.userId != null ? BigInt(owner.userId) : null;
   const sessionOwner = 'sessionId' in owner && owner.sessionId ? owner.sessionId : null;
 
-  if (userOwner != null && item.cart.userId != null && item.cart.userId === userOwner) {
-    return item;
+  if (userOwner != null && item.user_id != null && BigInt(item.user_id) === userOwner) {
+    return {
+      ...(item as any),
+      cart: {
+        id: item.cart_id,
+        user_id: item.user_id,
+        session_id: item.session_id,
+        status: 'active',
+        currency: 'INR',
+      },
+    };
   }
-  if (sessionOwner != null && item.cart.sessionId === sessionOwner) {
-    return item;
+  if (sessionOwner != null && item.session_id === sessionOwner) {
+    return {
+      ...(item as any),
+      cart: {
+        id: item.cart_id,
+        user_id: item.user_id,
+        session_id: item.session_id,
+        status: 'active',
+        currency: 'INR',
+      },
+    };
   }
 
   throw ApiError.FORBIDDEN(`This line item is not in your cart. ${CART_ITEM_OWNER_HINT}`);
@@ -200,38 +240,40 @@ function sameLine(
   return a.productId === b.productId && a.variantId === b.variantId;
 }
 
-const cartItemInclude = {
-  store: { select: { id: true, storeName: true, storeSlug: true } },
-} as const;
+function inPlaceholders(n: number): string {
+  return Array.from({ length: n }, () => '?').join(',');
+}
 
 async function loadVariantMapForItems(
-  items: CartItem[],
+  items: Array<{ variant_id: bigint }>,
 ): Promise<Map<bigint, { id: bigint; name: string | null; sku: string | null }>> {
   const variantById = new Map<bigint, { id: bigint; name: string | null; sku: string | null }>();
-  const variantIds = [...new Set(items.map((i) => i.variantId).filter((id) => id !== 0n))];
+  const variantIds = [...new Set(items.map((i) => i.variant_id).filter((id) => id !== 0n))];
   if (!variantIds.length) return variantById;
-  const rows = await db.$queryRaw<VariantRow[]>(Prisma.sql`
-    SELECT id, product_id, price, variant_name, sku
-    FROM product_variants
-    WHERE id IN (${Prisma.join(variantIds)})
-  `);
+  const rows = await sqlQuery<VariantRow>(
+    `SELECT id, product_id, price, variant_name, sku FROM product_variants WHERE id IN (${inPlaceholders(
+      variantIds.length,
+    )})`,
+    variantIds,
+  );
   for (const v of rows) {
-    variantById.set(v.id, { id: v.id, name: v.name, sku: v.sku });
+    variantById.set(v.id, { id: v.id, name: v.variant_name, sku: v.sku });
   }
   return variantById;
 }
 
 async function loadProductMapForItems(
-  items: CartItem[],
+  items: Array<{ product_id: bigint }>,
 ): Promise<Map<bigint, { id: bigint; product_name: string; store_id: bigint }>> {
   const productById = new Map<bigint, { id: bigint; product_name: string; store_id: bigint }>();
-  const productIds = [...new Set(items.map((i) => i.productId))];
+  const productIds = [...new Set(items.map((i) => i.product_id))];
   if (!productIds.length) return productById;
-  const rows = await db.$queryRaw<ProductRow[]>(Prisma.sql`
-    SELECT id, store_id, product_name, default_price, stock
-    FROM products
-    WHERE id IN (${Prisma.join(productIds)})
-  `);
+  const rows = await sqlQuery<ProductRow>(
+    `SELECT id, store_id, product_name, default_price, stock FROM products WHERE id IN (${inPlaceholders(
+      productIds.length,
+    )})`,
+    productIds,
+  );
   for (const p of rows) {
     productById.set(p.id, { id: p.id, product_name: p.product_name, store_id: p.store_id });
   }
@@ -239,25 +281,25 @@ async function loadProductMapForItems(
 }
 
 function mapCartItemRow(
-  item: CartItem & { store: any },
+  item: CartItemRow & { store_name: string | null; store_slug: string | null },
   variantById: Map<bigint, { id: bigint; name: string | null; sku: string | null }>,
   productById: Map<bigint, { id: bigint; title: string; store_id: bigint }>,
 ) {
-  const lineSubtotal = Number(item.priceSnapshot) * item.qty;
-  const v = item.variantId !== 0n ? variantById.get(item.variantId) : undefined;
-  const p = productById.get(item.productId);
+  const lineSubtotal = Number(item.price_snapshot) * item.qty;
+  const v = item.variant_id !== 0n ? variantById.get(item.variant_id) : undefined;
+  const p = productById.get(item.product_id);
   return {
     id: item.id.toString(),
-    cart_id: item.cartId.toString(),
-    store_id: item.storeId.toString(),
-    product_id: item.productId.toString(),
-    variant_id: item.variantId.toString(),
+    cart_id: item.cart_id.toString(),
+    store_id: item.store_id.toString(),
+    product_id: item.product_id.toString(),
+    variant_id: item.variant_id.toString(),
     qty: item.qty,
-    price_snapshot: toDecimalString(item.priceSnapshot),
-    mrp_snapshot: item.mrpSnapshot != null ? toDecimalString(item.mrpSnapshot) : null,
-    tax_snapshot: item.taxSnapshot != null ? toDecimalString(item.taxSnapshot) : null,
+    price_snapshot: toDecimalString(item.price_snapshot),
+    mrp_snapshot: item.mrp_snapshot != null ? toDecimalString(item.mrp_snapshot) : null,
+    tax_snapshot: item.tax_snapshot != null ? toDecimalString(item.tax_snapshot) : null,
     discount_snapshot:
-      item.discountSnapshot != null ? toDecimalString(item.discountSnapshot) : null,
+      item.discount_snapshot != null ? toDecimalString(item.discount_snapshot) : null,
     line_subtotal: lineSubtotal,
     product: p
       ? {
@@ -266,9 +308,9 @@ function mapCartItemRow(
           store_id: p.store_id.toString(),
         }
       : {
-          id: item.productId.toString(),
+          id: item.product_id.toString(),
           title: null as string | null,
-          store_id: item.storeId.toString(),
+          store_id: item.store_id.toString(),
         },
     variant: v
       ? {
@@ -277,13 +319,11 @@ function mapCartItemRow(
           sku: v.sku,
         }
       : null,
-    store: item.store
-      ? {
-          id: item.store.id.toString(),
-          store_name: item.store.storeName,
-          store_slug: item.store.storeSlug,
-        }
-      : null,
+    store: {
+      id: item.store_id.toString(),
+      store_name: item.store_name,
+      store_slug: item.store_slug,
+    },
   };
 }
 
@@ -296,7 +336,7 @@ export async function addCartItem(
   const productId = toBigIntStrict(body.product_id, 'product_id');
   const variantKey = bodyVariantToDbKey(body.variant_id);
 
-  const { product, variant, unitPrice } = await loadAndValidateCatalog(db, {
+  const { product, variant, unitPrice } = await loadAndValidateCatalog(undefined, {
     storeId,
     productId,
     variantId: variantKey,
@@ -309,17 +349,22 @@ export async function addCartItem(
 
   const cart = await findOrCreateCart(owner);
 
-  const existing = await db.cartItem.findMany({
-    where: { cartId: cart.id },
-    select: { id: true, productId: true, variantId: true, qty: true },
-  });
-  const line = existing.find((row) => sameLine(row, { productId, variantId: variantKey }));
+  const existing = await sqlQuery<any>(
+    'SELECT `id`, `product_id` as productId, `variant_id` as variantId, `qty` FROM `cart_items` WHERE `cart_id` = ?',
+    [cart.id],
+  );
+  const line = existing.find((row: any) =>
+    sameLine(
+      { productId: BigInt(row.productId), variantId: BigInt(row.variantId) },
+      { productId, variantId: variantKey },
+    ),
+  );
 
   const snapshotData = {
-    priceSnapshot: unitPrice,
-    mrpSnapshot: null,
-    taxSnapshot: null,
-    discountSnapshot: null,
+    price_snapshot: unitPrice,
+    mrp_snapshot: null,
+    tax_snapshot: null,
+    discount_snapshot: null,
   };
 
   if (line) {
@@ -327,36 +372,52 @@ export async function addCartItem(
     if (stock < newQty) {
       throw ApiError.BAD_REQUEST('Insufficient stock for requested quantity');
     }
-    const updated = await db.cartItem.update({
-      where: { id: line.id },
-      data: {
-        qty: newQty,
-        ...snapshotData,
+    await sqlExec(
+      'UPDATE `cart_items` SET `qty` = ?, `price_snapshot` = ?, `mrp_snapshot` = ?, `tax_snapshot` = ?, `discount_snapshot` = ?, `store_id` = ?, `product_id` = ?, `variant_id` = ? WHERE `id` = ?',
+      [
+        newQty,
+        snapshotData.price_snapshot,
+        snapshotData.mrp_snapshot,
+        snapshotData.tax_snapshot,
+        snapshotData.discount_snapshot,
         storeId,
         productId,
-        variantId: variantKey,
-      },
-      include: cartItemInclude,
-    });
-    const variantById = await loadVariantMapForItems([updated as CartItem]);
-    const productById = await loadProductMapForItems([updated as CartItem]);
-    return serializeBigInt(mapCartItemRow(updated as any, variantById, productById));
+        variantKey,
+        BigInt(line.id),
+      ],
+    );
+    const updatedRows = await sqlQuery<any>(
+      'SELECT ci.*, s.`store_name`, s.`store_slug` FROM `cart_items` ci JOIN `stores` s ON s.`id` = ci.`store_id` WHERE ci.`id` = ? LIMIT 1',
+      [BigInt(line.id)],
+    );
+    const updated = updatedRows[0] as any;
+    const variantById = await loadVariantMapForItems([updated]);
+    const productById = await loadProductMapForItems([updated]);
+    return serializeBigInt(mapCartItemRow(updated, variantById, productById));
   }
 
-  const created = await db.cartItem.create({
-    data: {
-      cartId: cart.id,
+  const res = await sqlExec(
+    'INSERT INTO `cart_items` (`cart_id`, `store_id`, `product_id`, `variant_id`, `qty`, `price_snapshot`, `mrp_snapshot`, `tax_snapshot`, `discount_snapshot`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [
+      cart.id,
       storeId,
       productId,
-      variantId: variantKey,
-      qty: body.qty,
-      ...snapshotData,
-    },
-    include: cartItemInclude,
-  });
-  const variantById = await loadVariantMapForItems([created as CartItem]);
-  const productById = await loadProductMapForItems([created as CartItem]);
-  return serializeBigInt(mapCartItemRow(created as any, variantById, productById));
+      variantKey,
+      body.qty,
+      snapshotData.price_snapshot,
+      snapshotData.mrp_snapshot,
+      snapshotData.tax_snapshot,
+      snapshotData.discount_snapshot,
+    ],
+  );
+  const createdRows = await sqlQuery<any>(
+    'SELECT ci.*, s.`store_name`, s.`store_slug` FROM `cart_items` ci JOIN `stores` s ON s.`id` = ci.`store_id` WHERE ci.`id` = ? LIMIT 1',
+    [BigInt(res.insertId as any)],
+  );
+  const created = createdRows[0] as any;
+  const variantById = await loadVariantMapForItems([created]);
+  const productById = await loadProductMapForItems([created]);
+  return serializeBigInt(mapCartItemRow(created, variantById, productById));
 }
 
 async function loadCartWithItems(owner: CartOwner) {
@@ -364,13 +425,12 @@ async function loadCartWithItems(owner: CartOwner) {
   if (!cart) {
     return { cart: null, items: [] as any[], variantById: new Map(), productById: new Map() };
   }
-  const items = await db.cartItem.findMany({
-    where: { cartId: cart.id },
-    include: cartItemInclude,
-    orderBy: { id: 'asc' },
-  });
-  const variantById = await loadVariantMapForItems(items as CartItem[]);
-  const productById = await loadProductMapForItems(items as CartItem[]);
+  const items = await sqlQuery<any>(
+    'SELECT ci.*, s.`store_name`, s.`store_slug` FROM `cart_items` ci JOIN `stores` s ON s.`id` = ci.`store_id` WHERE ci.`cart_id` = ? ORDER BY ci.`id` ASC',
+    [cart.id],
+  );
+  const variantById = await loadVariantMapForItems(items);
+  const productById = await loadProductMapForItems(items);
   return { cart, items, variantById, productById };
 }
 
@@ -378,7 +438,8 @@ function computeTotals(items: { qty: number; priceSnapshot: unknown }[]) {
   let subtotal = 0;
   let totalItems = 0;
   for (const row of items) {
-    subtotal += Number(row.priceSnapshot) * row.qty;
+    // cart_items column is `price_snapshot`
+    subtotal += Number((row as any).price_snapshot ?? (row as any).priceSnapshot) * row.qty;
     totalItems += row.qty;
   }
   return { subtotal, total_items: totalItems };
@@ -416,14 +477,14 @@ export async function updateCartItemQty(owner: CartOwner, itemId: bigint, qty: n
   const row = await assertCartItemOwned(itemId, owner);
 
   if (qty === 0) {
-    await db.cartItem.delete({ where: { id: itemId } });
+    await sqlExec('DELETE FROM `cart_items` WHERE `id` = ?', [itemId]);
     return serializeBigInt({ removed: true, id: itemId.toString() });
   }
 
-  const { product, variant } = await loadAndValidateCatalog(db, {
-    storeId: row.storeId,
-    productId: row.productId,
-    variantId: row.variantId,
+  const { product, variant } = await loadAndValidateCatalog(undefined, {
+    storeId: BigInt(row.store_id),
+    productId: BigInt(row.product_id),
+    variantId: BigInt(row.variant_id),
   });
 
   const stock = availableStock(product, variant);
@@ -433,31 +494,33 @@ export async function updateCartItemQty(owner: CartOwner, itemId: bigint, qty: n
 
   const unitPrice =
     variant?.price != null
-      ? toPrismaDecimal(variant.price)
-      : toPrismaDecimal(product.default_price);
+      ? toDecimalString(variant.price)
+      : toDecimalString(product.default_price);
 
-  const updated = await db.cartItem.update({
-    where: { id: itemId },
-    data: {
-      qty,
-      priceSnapshot: unitPrice,
-    },
-    include: cartItemInclude,
-  });
-  const variantById = await loadVariantMapForItems([updated as CartItem]);
-  const productById = await loadProductMapForItems([updated as CartItem]);
-  return serializeBigInt(mapCartItemRow(updated as any, variantById, productById));
+  await sqlExec('UPDATE `cart_items` SET `qty` = ?, `price_snapshot` = ? WHERE `id` = ?', [
+    qty,
+    unitPrice,
+    itemId,
+  ]);
+  const updatedRows = await sqlQuery<any>(
+    'SELECT ci.*, s.`store_name`, s.`store_slug` FROM `cart_items` ci JOIN `stores` s ON s.`id` = ci.`store_id` WHERE ci.`id` = ? LIMIT 1',
+    [itemId],
+  );
+  const updated = updatedRows[0] as any;
+  const variantById = await loadVariantMapForItems([updated]);
+  const productById = await loadProductMapForItems([updated]);
+  return serializeBigInt(mapCartItemRow(updated, variantById, productById));
 }
 
 export async function removeCartItem(owner: CartOwner, itemId: bigint) {
   await assertCartItemOwned(itemId, owner);
-  await db.cartItem.delete({ where: { id: itemId } });
+  await sqlExec('DELETE FROM `cart_items` WHERE `id` = ?', [itemId]);
 }
 
 export async function clearCart(owner: CartOwner) {
   const cart = await findCartByOwner(owner);
   if (!cart) return;
-  await db.cart.delete({ where: { id: cart.id } });
+  await sqlExec('DELETE FROM `carts` WHERE `id` = ?', [cart.id]);
 }
 
 export async function mergeGuestIntoUser(userId: number, guestSessionId: string) {
@@ -466,12 +529,11 @@ export async function mergeGuestIntoUser(userId: number, guestSessionId: string)
     throw ApiError.BAD_REQUEST('session_id is required');
   }
 
-  const guestCart = await db.cart.findUnique({
-    where: { sessionId: trimmed },
-    include: {
-      items: true,
-    },
-  });
+  const guestCartRows = await sqlQuery<CartRow>(
+    'SELECT * FROM `carts` WHERE `session_id` = ? LIMIT 1',
+    [trimmed],
+  );
+  const guestCart = guestCartRows[0] ?? null;
 
   if (!guestCart) {
     throw ApiError.NOT_FOUND(
@@ -479,79 +541,95 @@ export async function mergeGuestIntoUser(userId: number, guestSessionId: string)
     );
   }
 
-  if (!guestCart.items.length) {
-    await db.cart.delete({ where: { id: guestCart.id } });
+  const guestItems = await sqlQuery<CartItemRow>(
+    'SELECT * FROM `cart_items` WHERE `cart_id` = ? ORDER BY `id` ASC',
+    [guestCart.id],
+  );
+  if (!guestItems.length) {
+    await sqlExec('DELETE FROM `carts` WHERE `id` = ?', [guestCart.id]);
     return serializeBigInt({ merged_items: 0, message: 'Guest cart was empty' });
   }
 
-  let userCart = await db.cart.findUnique({ where: { userId: BigInt(userId) } });
-  if (!userCart) {
-    userCart = await db.cart.create({
-      data: {
-        userId: BigInt(userId),
-        status: CartStatus.active,
-        currency: 'INR',
-      },
-    });
-  }
+  await withSqlTransaction(async (tx) => {
+    const userCartRows = await sqlQuery<CartRow>(
+      'SELECT * FROM `carts` WHERE `user_id` = ? LIMIT 1',
+      [BigInt(userId)],
+      tx,
+    );
+    let userCart = userCartRows[0] ?? null;
+    if (!userCart) {
+      const res = await sqlExec(
+        'INSERT INTO `carts` (`user_id`, `status`, `currency`) VALUES (?, ?, ?)',
+        [BigInt(userId), 'active', 'INR'],
+        tx,
+      );
+      const rows = await sqlQuery<CartRow>(
+        'SELECT * FROM `carts` WHERE `id` = ? LIMIT 1',
+        [BigInt(res.insertId as any)],
+        tx,
+      );
+      userCart = rows[0]!;
+    }
 
-  await db.$transaction(async (tx) => {
-    for (const guestLine of guestCart.items) {
+    for (const guestLine of guestItems) {
       const catalog = await loadAndValidateCatalog(tx, {
-        storeId: guestLine.storeId,
-        productId: guestLine.productId,
-        variantId: guestLine.variantId,
+        storeId: guestLine.store_id,
+        productId: guestLine.product_id,
+        variantId: guestLine.variant_id,
       });
       const stock = availableStock(catalog.product, catalog.variant);
 
-      const match = await tx.cartItem.findFirst({
-        where: {
-          cartId: userCart!.id,
-          productId: guestLine.productId,
-          variantId: guestLine.variantId,
-        },
-      });
+      const matchRows = await sqlQuery<any>(
+        'SELECT * FROM `cart_items` WHERE `cart_id` = ? AND `product_id` = ? AND `variant_id` = ? LIMIT 1',
+        [userCart.id, guestLine.product_id, guestLine.variant_id],
+        tx,
+      );
+      const match = matchRows[0] ?? null;
 
       if (match) {
         const newQty = match.qty + guestLine.qty;
         if (stock < newQty) {
           throw ApiError.BAD_REQUEST(
-            `Insufficient stock when merging line for product ${guestLine.productId.toString()}`,
+            `Insufficient stock when merging line for product ${guestLine.product_id.toString()}`,
           );
         }
-        await tx.cartItem.update({
-          where: { id: match.id },
-          data: {
-            qty: newQty,
-            priceSnapshot: catalog.unitPrice,
-            storeId: guestLine.storeId,
-            productId: guestLine.productId,
-            variantId: guestLine.variantId,
-          },
-        });
+        await sqlExec(
+          'UPDATE `cart_items` SET `qty` = ?, `price_snapshot` = ?, `store_id` = ?, `product_id` = ?, `variant_id` = ? WHERE `id` = ?',
+          [
+            newQty,
+            catalog.unitPrice,
+            guestLine.store_id,
+            guestLine.product_id,
+            guestLine.variant_id,
+            match.id,
+          ],
+          tx,
+        );
       } else {
         if (stock < guestLine.qty) {
           throw ApiError.BAD_REQUEST(
-            `Insufficient stock when merging line for product ${guestLine.productId.toString()}`,
+            `Insufficient stock when merging line for product ${guestLine.product_id.toString()}`,
           );
         }
-        await tx.cartItem.create({
-          data: {
-            cartId: userCart!.id,
-            storeId: guestLine.storeId,
-            productId: guestLine.productId,
-            variantId: guestLine.variantId,
-            qty: guestLine.qty,
-            priceSnapshot: catalog.unitPrice,
-            mrpSnapshot: null,
-            taxSnapshot: null,
-            discountSnapshot: null,
-          },
-        });
+        await sqlExec(
+          'INSERT INTO `cart_items` (`cart_id`, `store_id`, `product_id`, `variant_id`, `qty`, `price_snapshot`, `mrp_snapshot`, `tax_snapshot`, `discount_snapshot`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [
+            userCart.id,
+            guestLine.store_id,
+            guestLine.product_id,
+            guestLine.variant_id,
+            guestLine.qty,
+            catalog.unitPrice,
+            null,
+            null,
+            null,
+          ],
+          tx,
+        );
       }
     }
 
-    await tx.cart.delete({ where: { id: guestCart.id } });
+    await sqlExec('DELETE FROM `carts` WHERE `id` = ?', [guestCart.id], tx);
   });
 
   const mergedOwner: CartOwner = { userId };

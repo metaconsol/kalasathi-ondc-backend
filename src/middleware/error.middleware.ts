@@ -31,15 +31,21 @@ export const globalErrorHandler = (
   }
 
   // Log error
-  logger.error({
-    message: error.message,
-    code: error.code,
-    type: error.type,
-    name: error.name,
-    url: req.url,
-    method: req.method,
-    stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
-  });
+  const sql = (error as any)?.query;
+  const sqlParams = (error as any)?.params;
+  const extras =
+    sql != null
+      ? `\nSQL: ${String(sql)}\nSQL params: ${(() => {
+          try {
+            return JSON.stringify(sqlParams);
+          } catch {
+            return String(sqlParams);
+          }
+        })()}`
+      : '';
+  logger.error(
+    `${error.message}${extras}\n${req.method} ${req.url}${process.env.NODE_ENV === 'development' ? `\n${error.stack ?? ''}` : ''}`,
+  );
 
   // Prisma errors
   if (error.code === 'P2002')

@@ -1,4 +1,4 @@
-import { db } from '~/lib/db';
+import { sqlExec, sqlQuery, type SqlTx, withSqlTransaction } from '~/lib/sql';
 import { logger } from '~/lib/logger';
 import { debugForDev } from '~/lib/utils';
 import { AppError } from '~/lib/response';
@@ -6,9 +6,9 @@ import { OTPTemplate } from './otp.template';
 import { authConstants } from '~/lib/constant';
 import { smsService } from '../sms/sms.service';
 import { errorCodes } from '~/middleware/error.middleware';
-import type { Prisma } from '~/generated/prisma/client';
 import { AuthTokenType } from '~/generated/prisma/enums';
 import { mailServiceAsync } from '~/service/mail/mail.service';
+import { randomUUID } from 'crypto';
 
 type SendOTPType = {
   phoneNumber: string;
@@ -55,44 +55,36 @@ class OTPService {
   private createAuthTokenAndOtpRow = async (
     data: SendOTPType,
     expiresAtMs: number,
-    client: Prisma.TransactionClient,
+    tx: SqlTx,
   ): Promise<{ token: string; code: string }> => {
-    const tokenRow = await client.authToken.create({
-      data: {
-        phoneNumber: data.phoneNumber,
-        expiresAt: new Date(expiresAtMs),
-        type: data.tokenType,
-      },
-      select: { token: true },
-    });
-
-    if (!tokenRow?.token) {
-      throw new AppError('Failed to create token', 500, true, errorCodes.OTP_CREATE_FAILURE);
-    }
+    const token = randomUUID();
 
     const code = this.generateOTP();
 
-    await client.otp.create({
-      data: {
-        phoneNumber: data.phoneNumber,
-        code,
-        expiresAt: new Date(expiresAtMs),
-        authToken: tokenRow.token,
-      },
-    });
+    const tokenRes = await sqlExec(
+      'INSERT INTO `AuthToken` (`token`, `phoneNumber`, `expiresAt`, `type`) VALUES (?, ?, ?, ?)',
+      [token, data.phoneNumber, new Date(expiresAtMs), data.tokenType],
+      tx,
+    );
+    if (!tokenRes?.affectedRows) {
+      throw new AppError('Failed to create token', 500, true, errorCodes.OTP_CREATE_FAILURE);
+    }
 
-    return { token: tokenRow.token, code };
+    await sqlExec(
+      'INSERT INTO `Otp` (`phoneNumber`, `code`, `expiresAt`, `authToken`) VALUES (?, ?, ?, ?)',
+      [data.phoneNumber, code, new Date(expiresAtMs), token],
+      tx,
+    );
+
+    return { token, code };
   };
 
-  public sendOTP = async (
-    data: SendOTPType,
-    dbTransaction?: Prisma.TransactionClient,
-  ): Promise<string> => {
+  public sendOTP = async (data: SendOTPType, dbTransaction?: SqlTx): Promise<string> => {
     const expiresAtMs = Date.now() + authConstants.OTP_EXPIRATION_TIME;
 
     const { token: tokenStr, code } = dbTransaction
       ? await this.createAuthTokenAndOtpRow(data, expiresAtMs, dbTransaction)
-      : await db.$transaction((tx) => this.createAuthTokenAndOtpRow(data, expiresAtMs, tx));
+      : await withSqlTransaction((tx) => this.createAuthTokenAndOtpRow(data, expiresAtMs, tx));
 
     const smsResponse = await smsService.sendSMS({
       phoneNumber: data.phoneNumber,
@@ -115,26 +107,8 @@ class OTPService {
 
   private updateUsedOtp = async (otpId: number, token: string): Promise<void> => {
     try {
-      await db.otp.update({
-        where: {
-          id: otpId,
-        },
-        data: {
-          usedAt: new Date(),
-        },
-        select: {
-          expiresAt: true,
-        },
-      });
-
-      await db.authToken.update({
-        where: {
-          token: token,
-        },
-        data: {
-          usedAt: new Date(),
-        },
-      });
+      await sqlExec('UPDATE `Otp` SET `usedAt` = NOW() WHERE `id` = ?', [otpId]);
+      await sqlExec('UPDATE `AuthToken` SET `usedAt` = NOW() WHERE `token` = ?', [token]);
     } catch (error) {
       logger.error('Error updating used OTP:', error);
     }
@@ -148,14 +122,11 @@ class OTPService {
       new Set([submittedToken, submittedToken.toLowerCase(), submittedToken.toUpperCase()]),
     );
 
-    const user = await db.user.findUnique({
-      where: {
-        phoneNumber: normalizedPhone,
-      },
-      select: {
-        id: true,
-      },
-    });
+    const users = await sqlQuery<{ id: number }>(
+      'SELECT `id` FROM `User` WHERE `phoneNumber` = ? LIMIT 1',
+      [normalizedPhone],
+    );
+    const user = users[0] ?? null;
 
     if (!user || !user.id) {
       return {
@@ -166,15 +137,26 @@ class OTPService {
 
     // Use DB-canonical token for Otp.authToken: MySQL often matches AuthToken.token case-insensitively
     // while Otp.authToken compares case-sensitively, so the client string can find AuthToken but miss Otp.
-    const authSession = await db.authToken.findFirst({
-      where: { token: { in: tokenLookupVariants } },
-      select: {
-        token: true,
-        phoneNumber: true,
-        expiresAt: true,
-        usedAt: true,
-      },
-    });
+    const tokenList = tokenLookupVariants
+      .slice(0, 3)
+      .filter((t) => t && String(t).trim().length > 0);
+    if (tokenList.length === 0) {
+      return {
+        success: false,
+        message: 'Invalid verification session. Token is required.',
+      };
+    }
+    const inList = tokenList.map(() => '?').join(', ');
+    const sessions = await sqlQuery<{
+      token: string;
+      phoneNumber: string;
+      expiresAt: Date;
+      usedAt: Date | null;
+    }>(
+      `SELECT \`token\`, \`phoneNumber\`, \`expiresAt\`, \`usedAt\` FROM \`AuthToken\` WHERE \`token\` IN (${inList}) LIMIT 1`,
+      tokenList,
+    );
+    const authSession = sessions[0] ?? null;
 
     if (!authSession) {
       return {
@@ -208,34 +190,26 @@ class OTPService {
     }
 
     // Resolve OTP by canonical FK value stored with the row (see dbToken / collation note above).
-    const otp = await db.otp.findFirst({
-      where: {
-        authToken: dbToken,
-      },
-      select: {
-        id: true,
-        phoneNumber: true,
-        code: true,
-        expiresAt: true,
-        usedAt: true,
-        authTokenRef: {
-          select: {
-            type: true,
-            usedAt: true,
-          },
-        },
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
+    const otps = await sqlQuery<{
+      id: number;
+      phoneNumber: string;
+      code: string;
+      expiresAt: Date;
+      usedAt: Date | null;
+      authTokenType: AuthTokenType;
+      authTokenUsedAt: Date | null;
+    }>(
+      'SELECT o.`id`, o.`phoneNumber`, o.`code`, o.`expiresAt`, o.`usedAt`, a.`type` as authTokenType, a.`usedAt` as authTokenUsedAt FROM `Otp` o LEFT JOIN `AuthToken` a ON a.`token` = o.`authToken` WHERE o.`authToken` = ? ORDER BY o.`createdAt` DESC LIMIT 1',
+      [dbToken],
+    );
+    const otp = otps[0] ?? null;
 
     if (!otp) {
       logger.warn(
         `verifyOTP: AuthToken exists but no Otp row (stale/orphan session), dbToken=${dbToken}; removing token so a new OTP can be requested.`,
       );
       try {
-        await db.authToken.delete({ where: { token: dbToken } });
+        await sqlExec('DELETE FROM `AuthToken` WHERE `token` = ?', [dbToken]);
       } catch {
         // ignore (e.g. concurrent delete)
       }
@@ -246,7 +220,7 @@ class OTPService {
       };
     }
 
-    if (otp.usedAt || otp.authTokenRef?.usedAt) {
+    if (otp.usedAt || otp.authTokenUsedAt) {
       return {
         success: false,
         message: 'OTP has already been used',
