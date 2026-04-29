@@ -251,7 +251,9 @@ class PublicProductService {
            FROM products p
            JOIN stores s ON s.id = p.store_id
            JOIN categories c ON c.id = p.category_id
+           JOIN product_verification v ON v.product_id = p.id  -- ✅ ADDED
            WHERE ${where.whereSql}
+            AND v.approval_status = 'approved'    -- ✅ ADDED
            ORDER BY ${orderBy}
            LIMIT ? OFFSET ?`,
           [...where.args, limit, skip],
@@ -261,7 +263,9 @@ class PublicProductService {
            FROM products p
            JOIN stores s ON s.id = p.store_id
            JOIN categories c ON c.id = p.category_id
-           WHERE ${where.whereSql}`,
+           JOIN product_verification v ON v.product_id = p.id   -- ADD THIS
+           WHERE ${where.whereSql}
+          AND v.approval_status = 'approved'`,
           where.args,
         ),
       ]);
@@ -315,7 +319,9 @@ class PublicProductService {
          FROM products p
          JOIN stores s ON s.id = p.store_id
          JOIN categories c ON c.id = p.category_id
+           JOIN product_verification v ON v.product_id = p.id 
          WHERE p.id = ? AND p.publish_status = 'publish' AND p.visibility = 'PUBLIC' AND s.is_active = 1 AND s.deleted_at IS NULL AND c.is_active = 1
+             AND v.approval_status = 'approved'
          LIMIT 1`,
         [id],
       );
@@ -356,6 +362,7 @@ class PublicProductService {
   public getBySlug = async (req: Request, res: Response) => {
     try {
       const slug = slugParam(req.params.slug).trim();
+
       if (!slug) {
         return ApiResponse.badRequest(res, 'Invalid slug');
       }
@@ -364,10 +371,12 @@ class PublicProductService {
         `SELECT p.*, 
             s.id as store_id_join, s.store_name, s.store_slug, s.description as store_description, s.support_email, s.support_phone, s.is_active as store_is_active,
             c.id as category_id_join, c.name as category_name, c.slug as category_slug, c.domain as category_domain, c.is_active as category_is_active
-         FROM products p
+         FROM products p  
          JOIN stores s ON s.id = p.store_id
          JOIN categories c ON c.id = p.category_id
+         JOIN product_verification v ON v.product_id = p.id
          WHERE p.alias_slug = ? AND p.publish_status = 'publish' AND p.visibility = 'PUBLIC' AND s.is_active = 1 AND s.deleted_at IS NULL AND c.is_active = 1
+          AND v.approval_status = 'approved'
          LIMIT 1`,
         [slug],
       );
@@ -422,7 +431,9 @@ class PublicProductService {
         `SELECT p.id, p.category_id FROM products p
          JOIN stores s ON s.id = p.store_id
          JOIN categories c ON c.id = p.category_id
+          JOIN product_verification v ON v.product_id = p.id
          WHERE p.id = ? AND p.publish_status = 'publish' AND p.visibility = 'PUBLIC' AND s.is_active = 1 AND s.deleted_at IS NULL AND c.is_active = 1
+           AND v.approval_status = 'approved'
          LIMIT 1`,
         [id],
       );
@@ -439,7 +450,9 @@ class PublicProductService {
          FROM products p
          JOIN stores s ON s.id = p.store_id
          JOIN categories c ON c.id = p.category_id
+         JOIN product_verification v ON v.product_id = p.id
          WHERE p.publish_status = 'publish' AND p.visibility = 'PUBLIC' AND s.is_active = 1 AND s.deleted_at IS NULL AND c.is_active = 1
+            AND v.approval_status = 'approved'
            AND p.id <> ?
            AND p.category_id = ?
          ORDER BY p.sort_order ASC, p.created_at DESC
@@ -553,7 +566,9 @@ class PublicProductService {
         `SELECT p.id, p.avg_rating, p.review_count FROM products p
          JOIN stores s ON s.id = p.store_id
          JOIN categories c ON c.id = p.category_id
+        JOIN product_verification v ON v.product_id = p.id
          WHERE p.id = ? AND p.publish_status = 'publish' AND p.visibility = 'PUBLIC' AND s.is_active = 1 AND s.deleted_at IS NULL AND c.is_active = 1
+            AND v.approval_status = 'approved'
          LIMIT 1`,
         [productId],
       );
@@ -606,7 +621,9 @@ class PublicProductService {
          FROM products p
          JOIN stores s ON s.id = p.store_id
          JOIN categories c ON c.id = p.category_id
+            JOIN product_verification v ON v.product_id = p.id
          WHERE p.id = ? AND p.publish_status = 'publish' AND p.visibility = 'PUBLIC' AND s.is_active = 1 AND s.deleted_at IS NULL AND c.is_active = 1
+             AND v.approval_status = 'approved'
          LIMIT 1`,
         [productId],
       );
@@ -686,7 +703,9 @@ class PublicProductService {
          JOIN products p ON p.id = pv.product_id
          JOIN stores s ON s.id = p.store_id
          JOIN categories c ON c.id = p.category_id
+            JOIN product_verification v ON v.product_id = p.id
          WHERE pv.id = ? AND pv.is_active = 1 AND p.publish_status = 'publish' AND p.visibility = 'PUBLIC' AND s.is_active = 1 AND s.deleted_at IS NULL AND c.is_active = 1
+           AND v.approval_status = 'approved'
          LIMIT 1`,
         [variantId],
       );
@@ -734,7 +753,9 @@ class PublicProductService {
         `SELECT p.id FROM products p
          JOIN stores s ON s.id = p.store_id
          JOIN categories c ON c.id = p.category_id
+          JOIN product_verification v ON v.product_id = p.id
          WHERE p.id = ? AND p.publish_status = 'publish' AND p.visibility = 'PUBLIC' AND s.is_active = 1 AND s.deleted_at IS NULL AND c.is_active = 1
+          AND v.approval_status = 'approved'
          LIMIT 1`,
         [productId],
       );

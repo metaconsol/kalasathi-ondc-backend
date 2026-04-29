@@ -147,6 +147,37 @@ export const createProduct = async (req: Request, res: Response) => {
   }
 };
 
+export const approveProduct = async (req: Request, res: Response) => {
+  try {
+    const { productId } = req.params;
+
+    // ✅ FIX: validate productId
+    if (!productId || Array.isArray(productId)) {
+      return ApiResponse.badRequest(res, 'Invalid productId');
+    }
+
+    return productService.approveProduct(res, BigInt(productId));
+  } catch (error) {
+    return ApiResponse.serverError(res, 'Error approving product', error);
+  }
+};
+
+export const rejectProduct = async (req: Request, res: Response) => {
+  try {
+    const { productId } = req.params;
+    const { reason } = req.body;
+
+    // ✅ FIX: validate productId
+    if (!productId || Array.isArray(productId)) {
+      return ApiResponse.badRequest(res, 'Invalid productId');
+    }
+
+    return productService.rejectProduct(res, BigInt(productId), reason);
+  } catch (error) {
+    return ApiResponse.serverError(res, 'Error rejecting product', error);
+  }
+};
+
 /**
  * @desc    Update a product
  * @route   PATCH/PUT /api/v1/seller/products/:product_id
