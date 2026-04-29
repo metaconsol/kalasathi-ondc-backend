@@ -60,22 +60,37 @@ export async function assertStoreOwnedBySeller(storeId: bigint, sellerUserId: nu
   return store;
 }
 
-export function serializeLocation(loc: {
-  id: bigint;
-  storeId: bigint;
-  radiusKm: bigint | null;
-  latitude?: unknown;
-  longitude?: unknown;
-  [key: string]: unknown;
-}) {
-  const { id, storeId, radiusKm, latitude, longitude, ...rest } = loc;
+// export function serializeLocation(loc: {
+//   id: bigint;
+//   storeId: bigint;
+//   radiusKm: bigint | null;
+//   latitude?: unknown;
+//   longitude?: unknown;
+//   [key: string]: unknown;
+// }) {
+//   const { id, storeId, radiusKm, latitude, longitude, ...rest } = loc;
+//   return {
+//     ...rest,
+//     id: id.toString(),
+//     storeId: storeId.toString(),
+//     radiusKm: radiusKm !== null ? radiusKm.toString() : null,
+//     latitude: latitude != null ? String(latitude) : null,
+//     longitude: longitude != null ? String(longitude) : null,
+//   };
+// }
+
+export function serializeLocation(loc: any) {
   return {
-    ...rest,
-    id: id.toString(),
-    storeId: storeId.toString(),
-    radiusKm: radiusKm !== null ? radiusKm.toString() : null,
-    latitude: latitude != null ? String(latitude) : null,
-    longitude: longitude != null ? String(longitude) : null,
+    ...loc,
+
+    id: loc.id ? loc.id.toString() : null,
+
+    storeId: loc.storeId ? loc.storeId.toString() : loc.store_id ? loc.store_id.toString() : null,
+
+    radiusKm: loc.radiusKm ? loc.radiusKm.toString() : loc.radius ? loc.radius.toString() : null,
+
+    latitude: loc.latitude != null ? String(loc.latitude) : null,
+    longitude: loc.longitude != null ? String(loc.longitude) : null,
   };
 }
 
