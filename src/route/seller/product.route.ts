@@ -10,6 +10,8 @@ import {
   reorderProductImages,
   updateInventory,
   setServiceability,
+  approveProduct,
+  rejectProduct,
 } from '~/controller/seller/product.controller';
 
 const router = express.Router({ mergeParams: true });
@@ -37,6 +39,8 @@ router.get('/:product_id', getProduct);
  * Optional `variants` to create a multi-variant product; omit for a single default variant.
  */
 router.post('/', uploadMany, createProduct);
+router.patch('/:productId/approve', approveProduct);
+router.patch('/:productId/reject', rejectProduct);
 
 // ─── Product routes (also under /seller/products) ────────────────────────────
 // update/delete are mounted at /seller/stores/:store_id/products/:product_id and /seller/products/:product_id

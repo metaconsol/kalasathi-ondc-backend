@@ -431,6 +431,18 @@ class ProductSqlService {
           }
         }
 
+        // ============================================================
+        // ✅ ADDED: Product Verification Insert
+        // ============================================================
+        await sqlExec(
+          `INSERT INTO product_verification 
+         (product_id, store_id, approval_status)
+         VALUES (?, ?, 'pending')`,
+          [pid, storeId],
+          tx,
+        );
+        // ============================================================
+
         return pid;
       });
 
@@ -441,6 +453,56 @@ class ProductSqlService {
     }
   };
 
+  // aprovel of product by admin
+  public approveProduct = async (res: Response, productId: bigint) => {
+    try {
+      await withSqlTransaction(async (tx) => {
+        // ✅ Update ONLY product_verification table
+        const result = await sqlExec(
+          `UPDATE product_verification 
+         SET approval_status = 'approved',
+             reason = NULL
+         WHERE product_id = ?`,
+          [productId],
+          tx,
+        );
+
+        // ✅ OPTIONAL: safety check (recommended)
+        if ((result as any).affectedRows === 0) {
+          throw new Error('Product not found in verification table');
+        }
+      });
+
+      return ApiResponse.success(res, 'Product approved successfully');
+    } catch (error) {
+      return ApiResponse.serverError(res, 'Error approving product', error);
+    }
+  };
+  // Rejection of product by admin witrh reason
+  public rejectProduct = async (res: Response, productId: bigint, reason: string) => {
+    try {
+      await withSqlTransaction(async (tx) => {
+        // ✅ Update ONLY product_verification table
+        const result = await sqlExec(
+          `UPDATE product_verification 
+         SET approval_status = 'rejected',
+             reason = ?
+         WHERE product_id = ?`,
+          [reason, productId],
+          tx,
+        );
+
+        // ✅ Optional safety check
+        if ((result as any).affectedRows === 0) {
+          throw new Error('Product not found in verification table');
+        }
+      });
+
+      return ApiResponse.success(res, 'Product rejected successfully');
+    } catch (error) {
+      return ApiResponse.serverError(res, 'Error rejecting product', error);
+    }
+  };
   public updateProduct = async (
     _req: Request,
     res: Response,
