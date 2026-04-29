@@ -1,5 +1,4 @@
 import type { NextFunction, Response, Request } from 'express';
-import { Decimal } from '@prisma/client/runtime/library';
 
 export interface IResponseData {
   success: boolean;
@@ -143,7 +142,16 @@ export class ApiResponse {
       return JSON.parse(
         JSON.stringify(data, (_key, value) => {
           if (typeof value === 'bigint') return value.toString();
-          if (value instanceof Decimal) return value.toString();
+          // Decimal values can come from MySQL drivers / libs as objects; stringify safely.
+          if (
+            value &&
+            typeof value === 'object' &&
+            typeof (value as any).toString === 'function' &&
+            ((value as any).constructor?.name === 'Decimal' ||
+              (value as any).constructor?.name === 'BigNumber')
+          ) {
+            return (value as any).toString();
+          }
           return value;
         }),
       );
@@ -156,11 +164,32 @@ export class ApiResponse {
     if (error === '' || error === null || error === undefined) return undefined;
     if (error instanceof Error) {
       const anyErr = error as unknown as Record<string, unknown>;
+      const safeExtras = (() => {
+        try {
+          return JSON.parse(
+            JSON.stringify(anyErr, (_key, value) => {
+              if (typeof value === 'bigint') return value.toString();
+              if (
+                value &&
+                typeof value === 'object' &&
+                typeof (value as any).toString === 'function' &&
+                ((value as any).constructor?.name === 'Decimal' ||
+                  (value as any).constructor?.name === 'BigNumber')
+              ) {
+                return (value as any).toString();
+              }
+              return value;
+            }),
+          ) as Record<string, unknown>;
+        } catch {
+          return {};
+        }
+      })();
       return {
         name: error.name,
         message: error.message,
         // Prisma errors often have useful enumerable fields (e.g. code, meta); preserve them.
-        ...anyErr,
+        ...safeExtras,
         // Stack can be large; keep it last so UI can ignore if needed.
         stack: error.stack,
       };

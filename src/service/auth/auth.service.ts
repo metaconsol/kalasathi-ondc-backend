@@ -5,12 +5,13 @@ import {
   AuthTokenType,
   AccountProvider,
 } from '~/generated/prisma/enums';
-import { db } from '../../lib/db';
+import { sqlExec, sqlQuery, type SqlTx, withSqlTransaction } from '~/lib/sql';
 import { AuthUtil } from './auth.util';
 import { AuthTokenUtil } from './jwt.util';
 import { authConstants } from '~/lib/constant';
 import { otpService } from '../otp/otp.service';
 import { ApiError, ApiResponse } from '~/lib/response';
+import { randomUUID } from 'crypto';
 
 import type { NextFunction, Request, Response } from 'express';
 import type { UserPayloadDAO, UserPayloadDTO } from './auth.types';
@@ -30,11 +31,17 @@ class AuthService {
       rememberMe?: boolean;
     },
   ) => {
-    const user = await db.user.findUnique({
-      where: {
-        id: options.userId!,
-      },
-    });
+    const users = await sqlQuery<{
+      id: number;
+      name: string;
+      phoneNumber: string;
+      email: string | null;
+      username: string;
+      avatar: string | null;
+      role: UserRole;
+      isTwoFactorEnabled: 0 | 1;
+    }>('SELECT * FROM `User` WHERE `id` = ? LIMIT 1', [options.userId!]);
+    const user = users[0] ?? null;
     if (!user) {
       return ApiResponse.notFound(res, 'User not found');
     }
@@ -47,7 +54,7 @@ class AuthService {
       username: user.username,
       avatar: user.avatar,
       role: user.role,
-      isTwoFactorEnabled: user.isTwoFactorEnabled,
+      isTwoFactorEnabled: Boolean(user.isTwoFactorEnabled),
       isRememberMe: options.rememberMe ?? false,
     };
 
@@ -58,7 +65,7 @@ class AuthService {
       username: user.username,
       avatar: user.avatar,
       role: user.role,
-      isTwoFactorEnabled: user.isTwoFactorEnabled,
+      isTwoFactorEnabled: Boolean(user.isTwoFactorEnabled),
       isRememberMe: options.rememberMe ?? false,
     };
 
@@ -80,59 +87,49 @@ class AuthService {
   public register = async (req: Request, res: Response) => {
     const { fullName: name, email, phoneNumber, password } = req.body;
 
-    const isExist = await db.user.findUnique({
-      select: {
-        id: true,
-      },
-      where: {
-        phoneNumber: phoneNumber,
-      },
-    });
+    const existing = await sqlQuery<{ id: number }>(
+      'SELECT `id` FROM `User` WHERE `phoneNumber` = ? LIMIT 1',
+      [phoneNumber],
+    );
+    const isExist = existing[0] ?? null;
 
     if (isExist && isExist?.id) {
       return ApiResponse.badRequest(res, 'Phone number is already registered');
     }
 
     const hashedPassword: string = await AuthUtil.getHashedPassword(password);
-    const token = await db.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          email: email ?? null,
-          name: name,
-          phoneNumber: phoneNumber,
-          password: hashedPassword,
-          role: UserRole.USER,
-          profile: {
-            create: {},
-          },
-        },
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          phoneNumber: true,
-        },
-      });
-      await tx.account.create({
-        data: {
-          userId: user.id,
-          type: AccountType.CREDENTIALS,
-          provider: AccountProvider.CREDENTIALS,
-          providerAccountId: user.id.toString(),
-          status: AccountStatus.PENDING,
-        },
-      });
-
-      if (!user) {
+    const token = await withSqlTransaction(async (tx) => {
+      const username = randomUUID();
+      const userRes = await sqlExec(
+        'INSERT INTO `User` (`username`, `name`, `email`, `phoneNumber`, `password`, `role`) VALUES (?, ?, ?, ?, ?, ?)',
+        [username, name, email ?? null, phoneNumber, hashedPassword, UserRole.USER],
+        tx,
+      );
+      const userId = Number(userRes.insertId);
+      if (!userId) {
         throw ApiError.INTERNAL_SERVER_ERROR('Failed to user create');
       }
 
-      // sendOTP creates AuthToken + Otp in this tx and returns the session UUID (do not create another AuthToken).
+      await sqlExec('INSERT INTO `Profile` (`userId`) VALUES (?)', [userId], tx);
+
+      await sqlExec(
+        'INSERT INTO `Account` (`id`, `userId`, `type`, `provider`, `providerAccountId`, `status`) VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          randomUUID(),
+          userId,
+          AccountType.CREDENTIALS,
+          AccountProvider.CREDENTIALS,
+          userId.toString(),
+          AccountStatus.PENDING,
+        ],
+        tx,
+      );
+
       const verificationToken = await otpService.sendOTP(
         {
-          name: user.name,
-          email: user.email,
-          phoneNumber: user.phoneNumber,
+          name,
+          email: email ?? null,
+          phoneNumber,
           tokenType: AuthTokenType.VERIFICATION,
         },
         tx,
@@ -158,56 +155,51 @@ class AuthService {
   public registerSeller = async (req: Request, res: Response) => {
     const { fullName: name, email, phoneNumber, password } = req.body;
 
-    const isExist = await db.user.findUnique({
-      select: { id: true },
-      where: { phoneNumber },
-    });
+    const existing = await sqlQuery<{ id: number }>(
+      'SELECT `id` FROM `User` WHERE `phoneNumber` = ? LIMIT 1',
+      [phoneNumber],
+    );
+    const isExist = existing[0] ?? null;
 
     if (isExist?.id) {
       return ApiResponse.badRequest(res, 'Phone number is already registered');
     }
 
     const hashedPassword: string = await AuthUtil.getHashedPassword(password);
-    const token = await db.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          email: email ?? null,
-          name,
-          phoneNumber,
-          password: hashedPassword,
-          role: UserRole.SELLER,
-          profile: { create: {} },
-        },
-        select: {
-          id: true,
-          email: true,
-          name: true,
-          phoneNumber: true,
-        },
-      });
-      await tx.account.create({
-        data: {
-          userId: user.id,
-          type: AccountType.CREDENTIALS,
-          provider: AccountProvider.CREDENTIALS,
-          providerAccountId: user.id.toString(),
-          status: AccountStatus.PENDING,
-        },
-      });
+    const token = await withSqlTransaction(async (tx) => {
+      const username = randomUUID();
+      const userRes = await sqlExec(
+        'INSERT INTO `User` (`username`, `name`, `email`, `phoneNumber`, `password`, `role`) VALUES (?, ?, ?, ?, ?, ?)',
+        [username, name, email ?? null, phoneNumber, hashedPassword, UserRole.SELLER],
+        tx,
+      );
+      const userId = Number(userRes.insertId);
+      if (!userId) {
+        throw ApiError.INTERNAL_SERVER_ERROR('Failed to create user');
+      }
+
+      await sqlExec('INSERT INTO `Profile` (`userId`) VALUES (?)', [userId], tx);
+
+      await sqlExec(
+        'INSERT INTO `Account` (`id`, `userId`, `type`, `provider`, `providerAccountId`, `status`) VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          randomUUID(),
+          userId,
+          AccountType.CREDENTIALS,
+          AccountProvider.CREDENTIALS,
+          userId.toString(),
+          AccountStatus.PENDING,
+        ],
+        tx,
+      );
 
       const verificationToken = await otpService.sendOTP(
-        {
-          name: user.name,
-          email: user.email,
-          phoneNumber: user.phoneNumber,
-          tokenType: AuthTokenType.VERIFICATION,
-        },
+        { name, email: email ?? null, phoneNumber, tokenType: AuthTokenType.VERIFICATION },
         tx,
       );
       if (!verificationToken) {
         throw ApiError.INTERNAL_SERVER_ERROR('Failed to send OTP');
       }
-
       return verificationToken;
     });
 
@@ -233,26 +225,18 @@ class AuthService {
     } = req.body;
 
     if (isLoginWithPassword) {
-      const user = await db.user.findUnique({
-        where: {
-          phoneNumber: phoneNumber,
-        },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          password: true,
-          role: true,
-          isTwoFactorEnabled: true,
-          accounts: {
-            select: {
-              provider: true,
-              providerAccountId: true,
-              status: true,
-            },
-          },
-        },
-      });
+      const users = await sqlQuery<{
+        id: number;
+        name: string;
+        email: string | null;
+        password: string | null;
+        role: UserRole;
+        isTwoFactorEnabled: 0 | 1;
+      }>(
+        'SELECT `id`, `name`, `email`, `password`, `role`, `isTwoFactorEnabled` FROM `User` WHERE `phoneNumber` = ? LIMIT 1',
+        [phoneNumber],
+      );
+      const user = users[0] ?? null;
       if (!user || !user.password) {
         return ApiResponse.notFound(res, 'User not found');
       }
@@ -261,9 +245,14 @@ class AuthService {
         return ApiResponse.unauthorized(res, 'Invalid credentials');
       }
 
-      const credentialsAccount = user.accounts.find(
-        (account) => account.provider === AccountProvider.CREDENTIALS,
-      );
+      const accounts = await sqlQuery<{
+        provider: AccountProvider;
+        providerAccountId: string;
+        status: AccountStatus;
+      }>('SELECT `provider`, `providerAccountId`, `status` FROM `Account` WHERE `userId` = ?', [
+        user.id,
+      ]);
+      const credentialsAccount = accounts.find((a) => a.provider === AccountProvider.CREDENTIALS);
       if (!credentialsAccount) {
         return ApiResponse.notFound(res, 'User not found');
       }
@@ -312,57 +301,50 @@ class AuthService {
         phoneNumber: string;
       } | null;
 
-      const user: User = await db.user.findUnique({
-        where: {
-          phoneNumber: phoneNumber,
-        },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          phoneNumber: true,
-        },
-      });
+      const users = await sqlQuery<{
+        id: number;
+        name: string;
+        email: string | null;
+        phoneNumber: string;
+      }>(
+        'SELECT `id`, `name`, `email`, `phoneNumber` FROM `User` WHERE `phoneNumber` = ? LIMIT 1',
+        [phoneNumber],
+      );
+      const user: User = (users[0] as any) ?? null;
 
       let token: string | null = null;
       if (!user) {
-        token = await db.$transaction(async (tx) => {
-          const createdUser = await tx.user.create({
-            data: {
-              phoneNumber: phoneNumber,
-              email: email,
-              name: phoneNumber.toString(),
-              role: UserRole.USER,
-              profile: {
-                create: {},
-              },
-            },
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              phoneNumber: true,
-            },
-          });
-          await tx.account.create({
-            data: {
-              userId: createdUser.id,
-              type: AccountType.CREDENTIALS,
-              provider: AccountProvider.CREDENTIALS,
-              providerAccountId: createdUser.id.toString(),
-              status: AccountStatus.PENDING,
-            },
-          });
-
-          if (!createdUser) {
+        token = await withSqlTransaction(async (tx) => {
+          const username = randomUUID();
+          const createdUserRes = await sqlExec(
+            'INSERT INTO `User` (`username`, `phoneNumber`, `email`, `name`, `role`) VALUES (?, ?, ?, ?, ?)',
+            [username, phoneNumber, email ?? null, phoneNumber.toString(), UserRole.USER],
+            tx,
+          );
+          const userId = Number(createdUserRes.insertId);
+          if (!userId) {
             throw ApiError.INTERNAL_SERVER_ERROR('Failed to create user');
           }
 
+          await sqlExec('INSERT INTO `Profile` (`userId`) VALUES (?)', [userId], tx);
+          await sqlExec(
+            'INSERT INTO `Account` (`id`, `userId`, `type`, `provider`, `providerAccountId`, `status`) VALUES (?, ?, ?, ?, ?, ?)',
+            [
+              randomUUID(),
+              userId,
+              AccountType.CREDENTIALS,
+              AccountProvider.CREDENTIALS,
+              userId.toString(),
+              AccountStatus.PENDING,
+            ],
+            tx,
+          );
+
           return await otpService.sendOTP(
             {
-              name: createdUser.name,
-              phoneNumber: createdUser.phoneNumber,
-              email: createdUser?.email,
+              name: phoneNumber.toString(),
+              phoneNumber,
+              email: email ?? null,
               tokenType: AuthTokenType.VERIFICATION,
             },
             tx,
@@ -624,16 +606,14 @@ class AuthService {
       return ApiResponse.badRequest(res, 'Verification token not found');
     }
 
-    const authToken = await db.authToken.findUnique({
-      where: {
-        token: token as string,
-      },
-      select: {
-        phoneNumber: true,
-        expiresAt: true,
-        usedAt: true,
-      },
-    });
+    const authTokens = await sqlQuery<{
+      phoneNumber: string;
+      expiresAt: Date;
+      usedAt: Date | null;
+    }>('SELECT `phoneNumber`, `expiresAt`, `usedAt` FROM `AuthToken` WHERE `token` = ? LIMIT 1', [
+      token as string,
+    ]);
+    const authToken = authTokens[0] ?? null;
 
     if (!authToken) {
       return ApiResponse.notFound(res, 'Invalid token');
@@ -647,15 +627,11 @@ class AuthService {
       return ApiResponse.notFound(res, 'Token has already been used');
     }
 
-    const user = await db.user.findUnique({
-      where: {
-        phoneNumber: authToken.phoneNumber,
-      },
-      select: {
-        id: true,
-        name: true,
-      },
-    });
+    const users = await sqlQuery<{ id: number; name: string }>(
+      'SELECT `id`, `name` FROM `User` WHERE `phoneNumber` = ? LIMIT 1',
+      [authToken.phoneNumber],
+    );
+    const user = users[0] ?? null;
 
     if (!user) {
       return ApiResponse.notFound(res, 'User not found');
@@ -689,17 +665,10 @@ class AuthService {
       return ApiResponse.badRequest(res, verifyOTPResponse.message);
     }
 
-    await db.account.update({
-      where: {
-        provider_providerAccountId: {
-          provider: AccountProvider.CREDENTIALS,
-          providerAccountId: verifyOTPResponse.userId.toString(),
-        },
-      },
-      data: {
-        status: AccountStatus.ACTIVE,
-      },
-    });
+    await sqlExec(
+      'UPDATE `Account` SET `status` = ? WHERE `provider` = ? AND `providerAccountId` = ?',
+      [AccountStatus.ACTIVE, AccountProvider.CREDENTIALS, verifyOTPResponse.userId.toString()],
+    );
 
     return this.newAuthenticatedResponse(res, {
       userId: verifyOTPResponse.userId,
@@ -719,17 +688,15 @@ class AuthService {
       return ApiResponse.badRequest(res, 'Verification token not found');
     }
 
-    const data = await db.authToken.findUnique({
-      where: {
-        token: token,
-        phoneNumber: phoneNumber,
-      },
-      select: {
-        phoneNumber: true,
-        expiresAt: true,
-        usedAt: true,
-      },
-    });
+    const authTokens = await sqlQuery<{
+      phoneNumber: string;
+      expiresAt: Date;
+      usedAt: Date | null;
+    }>(
+      'SELECT `phoneNumber`, `expiresAt`, `usedAt` FROM `AuthToken` WHERE `token` = ? AND `phoneNumber` = ? LIMIT 1',
+      [token, phoneNumber],
+    );
+    const data = authTokens[0] ?? null;
 
     if (!data) {
       return ApiResponse.notFound(res, 'Invalid token');
@@ -739,23 +706,13 @@ class AuthService {
       return ApiResponse.notFound(res, 'Token has already been used');
     }
 
-    await db.authToken.update({
-      where: {
-        token: token,
-      },
-      data: {
-        usedAt: new Date(),
-      },
-    });
+    await sqlExec('UPDATE `AuthToken` SET `usedAt` = NOW() WHERE `token` = ?', [token]);
 
-    const user = await db.user.findUnique({
-      where: {
-        phoneNumber: data.phoneNumber,
-      },
-      select: {
-        name: true,
-      },
-    });
+    const users = await sqlQuery<{ name: string }>(
+      'SELECT `name` FROM `User` WHERE `phoneNumber` = ? LIMIT 1',
+      [data.phoneNumber],
+    );
+    const user = users[0] ?? null;
 
     if (!user) {
       return ApiResponse.notFound(res, 'User not found');
@@ -781,11 +738,11 @@ class AuthService {
   public forgotPasswordForCredentialAccountTokenGenerate = async (req: Request, res: Response) => {
     const { phoneNumber } = req.body;
 
-    const data = await db.user.findUnique({
-      where: {
-        phoneNumber: phoneNumber,
-      },
-    });
+    const users = await sqlQuery<{ name: string }>(
+      'SELECT `name` FROM `User` WHERE `phoneNumber` = ? LIMIT 1',
+      [phoneNumber],
+    );
+    const data = users[0] ?? null;
 
     if (!data) {
       return ApiResponse.notFound(res, 'User not found');
@@ -818,17 +775,15 @@ class AuthService {
       return ApiResponse.badRequest(res, 'Token is required');
     }
 
-    const data = await db.authToken.findUnique({
-      where: {
-        token: token,
-        phoneNumber: phoneNumber,
-      },
-      select: {
-        phoneNumber: true,
-        expiresAt: true,
-        usedAt: true,
-      },
-    });
+    const authTokens = await sqlQuery<{
+      phoneNumber: string;
+      expiresAt: Date;
+      usedAt: Date | null;
+    }>(
+      'SELECT `phoneNumber`, `expiresAt`, `usedAt` FROM `AuthToken` WHERE `token` = ? AND `phoneNumber` = ? LIMIT 1',
+      [token, phoneNumber],
+    );
+    const data = authTokens[0] ?? null;
 
     if (!data || data.usedAt) {
       return ApiResponse.badRequest(res, 'Invalid token');
@@ -838,14 +793,11 @@ class AuthService {
       return ApiResponse.badRequest(res, 'Token has expired');
     }
 
-    const user = await db.user.findUnique({
-      where: {
-        phoneNumber: data.phoneNumber,
-      },
-      select: {
-        name: true,
-      },
-    });
+    const users = await sqlQuery<{ name: string }>(
+      'SELECT `name` FROM `User` WHERE `phoneNumber` = ? LIMIT 1',
+      [data.phoneNumber],
+    );
+    const user = users[0] ?? null;
 
     if (!user) {
       return ApiResponse.notFound(res, 'User not found');
@@ -871,28 +823,20 @@ class AuthService {
       return ApiResponse.badRequest(res, 'Token is required');
     }
 
-    const data = await db.authToken.findUnique({
-      where: {
-        token: token,
-        phoneNumber: phoneNumber,
-      },
-      select: {
-        phoneNumber: true,
-        expiresAt: true,
-      },
-    });
+    const authTokens = await sqlQuery<{ phoneNumber: string; expiresAt: Date }>(
+      'SELECT `phoneNumber`, `expiresAt` FROM `AuthToken` WHERE `token` = ? AND `phoneNumber` = ? LIMIT 1',
+      [token, phoneNumber],
+    );
+    const data = authTokens[0] ?? null;
     if (!data) {
       return ApiResponse.notFound(res, 'Invalid token');
     }
 
-    const user = await db.user.findUnique({
-      where: {
-        phoneNumber: data.phoneNumber,
-      },
-      select: {
-        name: true,
-      },
-    });
+    const users = await sqlQuery<{ name: string }>(
+      'SELECT `name` FROM `User` WHERE `phoneNumber` = ? LIMIT 1',
+      [data.phoneNumber],
+    );
+    const user = users[0] ?? null;
     if (!user) {
       return ApiResponse.notFound(res, 'User not found');
     }
@@ -932,14 +876,17 @@ class AuthService {
       return ApiResponse.badRequest(res, verifyOTPResponse.message);
     }
 
-    const newToken = await db.authToken.create({
-      data: {
-        phoneNumber: phoneNumber,
-        expiresAt: new Date(Date.now() + authConstants.RESET_PASSWORD_EXPIRATION_TIME),
-        type: AuthTokenType.RESET_PASSWORD,
-      },
-    });
-    if (!newToken) {
+    const resetToken = randomUUID();
+    const inserted = await sqlExec(
+      'INSERT INTO `AuthToken` (`token`, `phoneNumber`, `expiresAt`, `type`) VALUES (?, ?, ?, ?)',
+      [
+        resetToken,
+        phoneNumber,
+        new Date(Date.now() + authConstants.RESET_PASSWORD_EXPIRATION_TIME),
+        AuthTokenType.RESET_PASSWORD,
+      ],
+    );
+    if (!inserted?.affectedRows) {
       throw ApiError.BAD_REQUEST('Failed to create token');
     }
 
@@ -947,7 +894,7 @@ class AuthService {
       tokens: [
         {
           key: AuthTokenType.RESET_PASSWORD,
-          value: newToken,
+          value: resetToken,
         },
       ],
     });
@@ -965,61 +912,44 @@ class AuthService {
       return ApiResponse.badRequest(res, 'Token is required');
     }
 
-    const data = await db.authToken.findUnique({
-      where: {
-        token: token,
-        phoneNumber: phoneNumber,
-      },
-      select: {
-        expiresAt: true,
-        usedAt: true,
-      },
-    });
+    const authTokens = await sqlQuery<{ expiresAt: Date; usedAt: Date | null }>(
+      'SELECT `expiresAt`, `usedAt` FROM `AuthToken` WHERE `token` = ? AND `phoneNumber` = ? LIMIT 1',
+      [token, phoneNumber],
+    );
+    const data = authTokens[0] ?? null;
 
     if (!data || data?.usedAt) {
       return ApiResponse.badRequest(res, 'Invalid token');
     }
 
-    await db.authToken.update({
-      where: {
-        token: token,
-      },
-      data: {
-        usedAt: new Date(),
-      },
-    });
+    await sqlExec('UPDATE `AuthToken` SET `usedAt` = NOW() WHERE `token` = ?', [token]);
 
     if (data.expiresAt < new Date()) {
       return ApiResponse.badRequest(res, 'Token has expired');
     }
 
-    const userId = await db.$transaction(async (tx) => {
+    const userId = await withSqlTransaction(async (tx) => {
       const hashedPassword = await AuthUtil.getHashedPassword(password);
-      const user = await tx.user.update({
-        where: {
-          phoneNumber: phoneNumber,
-        },
-        data: {
-          password: hashedPassword,
-        },
-      });
-
-      if (!user) {
+      const users = await sqlQuery<{ id: number }>(
+        'SELECT `id` FROM `User` WHERE `phoneNumber` = ? LIMIT 1',
+        [phoneNumber],
+        tx,
+      );
+      const user = users[0] ?? null;
+      if (!user?.id) {
         return null;
       }
 
-      await tx.account.update({
-        where: {
-          provider_providerAccountId: {
-            provider: AccountProvider.CREDENTIALS,
-            providerAccountId: user.id.toString(),
-          },
-        },
-        data: {
-          status: AccountStatus.ACTIVE,
-        },
-      });
-
+      await sqlExec(
+        'UPDATE `User` SET `password` = ? WHERE `id` = ?',
+        [hashedPassword, user.id],
+        tx,
+      );
+      await sqlExec(
+        'UPDATE `Account` SET `status` = ? WHERE `provider` = ? AND `providerAccountId` = ?',
+        [AccountStatus.ACTIVE, AccountProvider.CREDENTIALS, user.id.toString()],
+        tx,
+      );
       return user.id;
     });
 

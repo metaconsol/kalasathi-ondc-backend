@@ -1,5 +1,5 @@
 import type { Request } from 'express';
-import { db } from '~/lib/db';
+import { sqlQuery } from '~/lib/sql';
 
 /** Express 5 may type params as string | string[] */
 export function parseRequiredBigintParam(raw: string | string[] | undefined): bigint | null {
@@ -36,10 +36,11 @@ export async function resolveSellerStoreContext(
         : undefined;
 
   if (opts.productId !== undefined) {
-    const product = await db.product.findUnique({
-      where: { id: opts.productId },
-      select: { storeId: true },
-    });
+    const rows = await sqlQuery<{ storeId: bigint }>(
+      'SELECT `store_id` as storeId FROM `products` WHERE `id` = ? LIMIT 1',
+      [opts.productId],
+    );
+    const product = rows[0] ?? null;
     if (!product) {
       return { ok: false, status: 404, message: 'Product not found' };
     }
