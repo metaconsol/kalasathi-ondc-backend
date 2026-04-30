@@ -50,7 +50,7 @@ export const createOrder = async (userId: number, data: any) => {
   const result = await withSqlTransaction(async (tx) => {
     // 1. Create Order with temp order_no
     const orderRes = await sqlExec(
-      'INSERT INTO `orders` (`order_no`, `user_id`, `cart_id`, `status`, `payment_status`, `currency`, `total_amount`) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO `orders` (`order_no`, `user_id`, `cart_id`, `status`, `payment_status`, `currency`, `total_amount`, `created_at`, `updated_at`) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
       [temp_order_no, userId, parsedCartId, 'pending', 'pending', currency, totalAmount],
       tx,
     );
@@ -59,7 +59,7 @@ export const createOrder = async (userId: number, data: any) => {
     // 2. Update final order_no
     const final_order_no = `${prefix}${String(orderId).padStart(4, '0')}`;
     await sqlExec(
-      'UPDATE `orders` SET `order_no` = ? WHERE `id` = ?',
+      'UPDATE `orders` SET `order_no` = ?, `updated_at` = NOW() WHERE `id` = ?',
       [final_order_no, orderId],
       tx,
     );
@@ -67,7 +67,7 @@ export const createOrder = async (userId: number, data: any) => {
     // 3. Create OrderItems
     for (const item of items) {
       await sqlExec(
-        'INSERT INTO `order_items` (`order_id`, `product_id`, `variant_id`, `qty`, `price`, `total`, `item_status`) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO `order_items` (`order_id`, `product_id`, `variant_id`, `qty`, `price`, `total`, `item_status`, `created_at`, `updated_at`) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
         [
           orderId,
           item.product_id,
@@ -84,7 +84,7 @@ export const createOrder = async (userId: number, data: any) => {
     // 4. Create Addresses
     for (const addr of [billingAddress, shippingAddress]) {
       await sqlExec(
-        'INSERT INTO `order_addresses` (`order_id`, `type`, `full_name`, `phone`, `address_line1`, `address_line2`, `city`, `district_id`, `state`, `state_id`, `country`, `pincode`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO `order_addresses` (`order_id`, `type`, `full_name`, `phone`, `address_line1`, `address_line2`, `city`, `district_id`, `state`, `state_id`, `country`, `pincode`, `created_at`, `updated_at`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
         [
           orderId,
           addr.type,
@@ -116,7 +116,7 @@ export const createOrder = async (userId: number, data: any) => {
       const storeMap = new Map(storeRows.map((s: any) => [String(s.id), s.sellerUserId]));
       for (const sid of storeIds) {
         await sqlExec(
-          'INSERT INTO `seller_units` (`order_id`, `store_id`, `seller_id`, `status`) VALUES (?, ?, ?, ?)',
+          'INSERT INTO `seller_units` (`order_id`, `store_id`, `seller_id`, `status`, `created_at`, `updated_at`) VALUES (?, ?, ?, ?, NOW(), NOW())',
           [orderId, BigInt(sid), storeMap.get(sid) ?? 0, 'pending'],
           tx,
         );
@@ -126,7 +126,7 @@ export const createOrder = async (userId: number, data: any) => {
     // 6. Clear cart
     await sqlExec('DELETE FROM `cart_items` WHERE `cart_id` = ?', [parsedCartId], tx);
     await sqlExec(
-      'UPDATE `carts` SET `status` = ? WHERE `id` = ?',
+      'UPDATE `carts` SET `status` = ?, `updated_at` = NOW() WHERE `id` = ?',
       ['converted', parsedCartId],
       tx,
     );
@@ -227,14 +227,18 @@ export const cancelOrder = async (userId: number, id: string, note?: string) => 
   }
 
   const result = await withSqlTransaction(async (tx) => {
-    await sqlExec('UPDATE `orders` SET `status` = ? WHERE `id` = ?', ['cancelled', order.id], tx);
     await sqlExec(
-      'UPDATE `order_items` SET `item_status` = ? WHERE `order_id` = ?',
+      'UPDATE `orders` SET `status` = ?, `updated_at` = NOW() WHERE `id` = ?',
       ['cancelled', order.id],
       tx,
     );
     await sqlExec(
-      'UPDATE `seller_units` SET `status` = ? WHERE `order_id` = ?',
+      'UPDATE `order_items` SET `item_status` = ?, `updated_at` = NOW() WHERE `order_id` = ?',
+      ['cancelled', order.id],
+      tx,
+    );
+    await sqlExec(
+      'UPDATE `seller_units` SET `status` = ?, `updated_at` = NOW() WHERE `order_id` = ?',
       ['cancelled', order.id],
       tx,
     );
@@ -336,12 +340,12 @@ export const requestReturn = async (userId: number, id: string, data: any) => {
 
   const result = await withSqlTransaction(async (tx) => {
     const res = await sqlExec(
-      'INSERT INTO `returns` (`order_id`, `order_item_id`, `reason`, `refund_amount`, `refund_mode`, `status`) VALUES (?, ?, ?, ?, ?, ?)',
+      'INSERT INTO `returns` (`order_id`, `order_item_id`, `reason`, `refund_amount`, `refund_mode`, `status`, `created_at`, `updated_at`) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())',
       [order.id, orderItem.id, reason, Number(refund_amount), refund_mode, 'pending'],
       tx,
     );
     await sqlExec(
-      'UPDATE `order_items` SET `item_status` = ? WHERE `id` = ?',
+      'UPDATE `order_items` SET `item_status` = ?, `updated_at` = NOW() WHERE `id` = ?',
       ['returned', orderItem.id],
       tx,
     );
