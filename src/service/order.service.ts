@@ -21,7 +21,9 @@ export const createOrder = async (userId: number, data: any) => {
   }
 
   if (cart.userId !== null && cart.userId !== BigInt(userId)) {
-    throw new Error('Cart belongs to a different user');
+    throw new Error(
+      `Cart belongs to a different user. cart.userId=${cart.userId}, userId=${userId}, cartId=${parsedCartId}`,
+    );
   }
 
   if (cart.items.length === 0) {
@@ -97,7 +99,9 @@ export const createOrder = async (userId: number, data: any) => {
           address_line1: billingAddress.address_line1,
           address_line2: billingAddress.address_line2,
           city: billingAddress.city,
+          district_id: billingAddress.city_id,
           state: billingAddress.state,
+          state_id: billingAddress.state_id,
           country: billingAddress.country,
           pincode: billingAddress.pincode,
         },
@@ -109,7 +113,9 @@ export const createOrder = async (userId: number, data: any) => {
           address_line1: shippingAddress.address_line1,
           address_line2: shippingAddress.address_line2,
           city: shippingAddress.city,
+          district_id: shippingAddress.city_id,
           state: shippingAddress.state,
+          state_id: shippingAddress.state_id,
           country: shippingAddress.country,
           pincode: shippingAddress.pincode,
         },

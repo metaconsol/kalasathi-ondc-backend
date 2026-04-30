@@ -19,6 +19,11 @@ type ProductRow = {
   stock: number;
 };
 
+type ProductImageRow = {
+  product_id: bigint;
+  image_url: string;
+};
+
 type VariantRow = {
   id: bigint;
   product_id: bigint;
@@ -223,8 +228,13 @@ async function loadVariantMapForItems(
 
 async function loadProductMapForItems(
   items: CartItem[],
-): Promise<Map<bigint, { id: bigint; product_name: string; store_id: bigint }>> {
-  const productById = new Map<bigint, { id: bigint; product_name: string; store_id: bigint }>();
+): Promise<
+  Map<bigint, { id: bigint; product_name: string; store_id: bigint; image_url: string | null }>
+> {
+  const productById = new Map<
+    bigint,
+    { id: bigint; product_name: string; store_id: bigint; image_url: string | null }
+  >();
   const productIds = [...new Set(items.map((i) => i.productId))];
   if (!productIds.length) return productById;
   const rows = await db.$queryRaw<ProductRow[]>(Prisma.sql`
@@ -232,8 +242,25 @@ async function loadProductMapForItems(
     FROM products
     WHERE id IN (${Prisma.join(productIds)})
   `);
+  const imageRows = await db.$queryRaw<ProductImageRow[]>(Prisma.sql`
+    SELECT product_id, image_url
+    FROM product_images
+    WHERE product_id IN (${Prisma.join(productIds)})
+    ORDER BY product_id ASC, sort_order ASC, id ASC
+  `);
+  const imageByProductId = new Map<bigint, string>();
+  for (const imageRow of imageRows) {
+    if (!imageByProductId.has(imageRow.product_id)) {
+      imageByProductId.set(imageRow.product_id, imageRow.image_url);
+    }
+  }
   for (const p of rows) {
-    productById.set(p.id, { id: p.id, product_name: p.product_name, store_id: p.store_id });
+    productById.set(p.id, {
+      id: p.id,
+      product_name: p.product_name,
+      store_id: p.store_id,
+      image_url: imageByProductId.get(p.id) ?? null,
+    });
   }
   return productById;
 }
@@ -241,7 +268,10 @@ async function loadProductMapForItems(
 function mapCartItemRow(
   item: CartItem & { store: any },
   variantById: Map<bigint, { id: bigint; name: string | null; sku: string | null }>,
-  productById: Map<bigint, { id: bigint; title: string; store_id: bigint }>,
+  productById: Map<
+    bigint,
+    { id: bigint; product_name: string; store_id: bigint; image_url: string | null }
+  >,
 ) {
   const lineSubtotal = Number(item.priceSnapshot) * item.qty;
   const v = item.variantId !== 0n ? variantById.get(item.variantId) : undefined;
@@ -264,11 +294,13 @@ function mapCartItemRow(
           id: p.id.toString(),
           title: p.product_name,
           store_id: p.store_id.toString(),
+          image_url: p.image_url,
         }
       : {
           id: item.productId.toString(),
           title: null as string | null,
           store_id: item.storeId.toString(),
+          image_url: null as string | null,
         },
     variant: v
       ? {
@@ -385,9 +417,10 @@ function computeTotals(items: { qty: number; priceSnapshot: unknown }[]) {
 }
 
 export async function getCart(owner: CartOwner) {
-  const { items, variantById, productById } = await loadCartWithItems(owner);
+  const { cart, items, variantById, productById } = await loadCartWithItems(owner);
   const { subtotal, total_items } = computeTotals(items);
   return serializeBigInt({
+    id: cart?.id?.toString() ?? null,
     items: items.map((row) => mapCartItemRow(row as any, variantById, productById)),
     subtotal,
     total_items,

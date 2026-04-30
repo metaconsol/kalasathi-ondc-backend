@@ -7,7 +7,7 @@ const databaseConfigs = () => {
   const databaseUrl = env.databaseUrl;
   const databaseUrlObject = new URL(databaseUrl);
   return {
-    host: databaseUrlObject.hostname,
+    host: databaseUrlObject.hostname === 'localhost' ? '127.0.0.1' : databaseUrlObject.hostname,
     port: parseInt(databaseUrlObject.port, 10),
     user: databaseUrlObject.username,
     password: databaseUrlObject.password,
@@ -16,15 +16,28 @@ const databaseConfigs = () => {
   };
 };
 
-const adapter = new PrismaMariaDb({
-  host: databaseConfigs().host,
-  port: databaseConfigs().port,
-  user: databaseConfigs().user,
-  password: databaseConfigs().password,
-  database: databaseConfigs().database,
-  connectionLimit: databaseConfigs().connectionLimit,
-});
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined;
+};
 
-const db = new PrismaClient({ adapter });
+const createPrismaClient = () => {
+  const configs = databaseConfigs();
+  console.log(
+    `[Prisma] Initializing client with host: ${configs.host}, port: ${configs.port}, user: ${configs.user}, db: ${configs.database}`,
+  );
 
-export { db };
+  const adapter = new PrismaMariaDb({
+    host: configs.host,
+    port: configs.port,
+    user: configs.user,
+    password: configs.password,
+    database: configs.database,
+    connectionLimit: configs.connectionLimit,
+  });
+
+  return new PrismaClient({ adapter });
+};
+
+export const db = globalForPrisma.prisma ?? createPrismaClient();
+
+if (env.nodeEnv !== 'production') globalForPrisma.prisma = db;
