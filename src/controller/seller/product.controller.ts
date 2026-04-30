@@ -13,6 +13,7 @@ import {
 } from '~/service/product/product.schema';
 import { ApiResponse } from '~/lib/response';
 import { parseRequiredBigintParam, resolveSellerStoreContext } from './resolveSellerStore';
+import { buildObjectKey, isS3Enabled, putS3Object, resolveS3KeyToUrl } from '~/lib/s3';
 
 function sellerProductBodyFromRequest(req: Request): Record<string, unknown> {
   return normalizeProductNestedInBody(
@@ -20,17 +21,28 @@ function sellerProductBodyFromRequest(req: Request): Record<string, unknown> {
   );
 }
 
-function mergeProductImageFiles(
+async function mergeProductImageFiles(
   body: Record<string, unknown>,
   files: Express.Multer.File[] | undefined,
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   if (!files?.length) return body;
   const base = body.images;
   const existing = Array.isArray(base) ? base : [];
   const prefix = env.serverUrl.replace(/\/$/, '');
-  const fromFiles = files.map((f) => ({
-    imageUrl: `${prefix}/uploads/productImages/${f.filename}`,
-  }));
+  const fromFiles = await Promise.all(
+    files.map(async (f) => {
+      if (isS3Enabled()) {
+        const buf = f.buffer;
+        if (!buf?.length) {
+          throw new Error('S3 uploads require buffered file data (memory storage)');
+        }
+        const key = buildObjectKey('uploads/productImages', f.originalname);
+        await putS3Object(key, buf, f.mimetype);
+        return { imageUrl: `s3:${key}` };
+      }
+      return { imageUrl: `${prefix}/uploads/productImages/${f.filename}` };
+    }),
+  );
   return { ...body, images: [...existing, ...fromFiles] };
 }
 
@@ -89,9 +101,20 @@ export const uploadSellerProductImage = async (req: Request, res: Response) => {
     if (!f) {
       return ApiResponse.badRequest(res, 'file is required');
     }
+    if (isS3Enabled()) {
+      const buf = f.buffer;
+      if (!buf?.length) {
+        return ApiResponse.badRequest(res, 'empty file');
+      }
+      const key = buildObjectKey('uploads/productImages', f.originalname);
+      await putS3Object(key, buf, f.mimetype);
+      const storageRef = `s3:${key}`;
+      const imageUrl = await resolveS3KeyToUrl(key);
+      return ApiResponse.success(res, 'Uploaded', { imageUrl, storageRef });
+    }
     const prefix = env.serverUrl.replace(/\/$/, '');
     const imageUrl = `${prefix}/uploads/productImages/${f.filename}`;
-    return ApiResponse.success(res, 'Uploaded', { imageUrl });
+    return ApiResponse.success(res, 'Uploaded', { imageUrl, storageRef: imageUrl });
   } catch (error) {
     return ApiResponse.serverError(res, 'Error uploading image', error);
   }
@@ -131,7 +154,7 @@ export const createProduct = async (req: Request, res: Response) => {
       return ApiResponse.custom(res, resolved.message, resolved.status);
     }
 
-    const merged = mergeProductImageFiles(
+    const merged = await mergeProductImageFiles(
       sellerProductBodyFromRequest(req),
       req.files as Express.Multer.File[] | undefined,
     );
@@ -193,7 +216,7 @@ export const updateProduct = async (req: Request, res: Response) => {
       return ApiResponse.custom(res, resolved.message, resolved.status);
     }
 
-    const merged = mergeProductImageFiles(
+    const merged = await mergeProductImageFiles(
       sellerProductBodyFromRequest(req),
       req.files as Express.Multer.File[] | undefined,
     );
@@ -253,6 +276,44 @@ export const deleteProductImage = async (req: Request, res: Response) => {
     return productService.deleteProductImage(req, res, resolved.storeId, productId, imageId);
   } catch (error) {
     return ApiResponse.serverError(res, 'Error deleting product image', error);
+  }
+};
+
+/**
+ * @desc    Delete one variant gallery image (`variant_images`)
+ * @route   DELETE /api/v1/seller/.../products/:product_id/variants/:variant_id/images/:image_id
+ */
+export const deleteVariantImage = async (req: Request, res: Response) => {
+  try {
+    const productId = parseRequiredBigintParam(req.params.product_id);
+    if (productId === null) {
+      return ApiResponse.badRequest(res, 'Invalid product_id');
+    }
+    const resolved = await resolveSellerStoreContext(req, { productId });
+    if (!resolved.ok) {
+      return ApiResponse.custom(res, resolved.message, resolved.status);
+    }
+
+    const variantId = parseRequiredBigintParam(req.params.variant_id);
+    if (variantId === null) {
+      return ApiResponse.badRequest(res, 'Invalid variant_id');
+    }
+
+    const imageId = parseRequiredBigintParam(req.params.image_id);
+    if (imageId === null) {
+      return ApiResponse.badRequest(res, 'Invalid image_id');
+    }
+
+    return productService.deleteVariantImage(
+      req,
+      res,
+      resolved.storeId,
+      productId,
+      variantId,
+      imageId,
+    );
+  } catch (error) {
+    return ApiResponse.serverError(res, 'Error deleting variant image', error);
   }
 };
 

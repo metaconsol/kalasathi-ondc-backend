@@ -3,6 +3,8 @@ import { ApiError } from '~/lib/response';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { buildObjectKey, isS3Enabled, putS3Object } from '~/lib/s3';
+import { resolveStoredMediaUrl } from '~/lib/storageUrls';
 
 type FileType = 'IMAGE' | 'PDF' | 'DOC' | 'OTHER';
 type StorageProvider = 'LOCAL' | 'S3' | 'CDN';
@@ -22,8 +24,12 @@ export class MediaService {
     return 'OTHER';
   }
 
+  private static checksumBuffer(buf: Buffer): string {
+    return crypto.createHash('sha256').update(buf).digest('hex');
+  }
+
   /**
-   * Generate SHA-256 Checksum for a file
+   * Generate SHA-256 Checksum for a file on disk
    */
   private static generateChecksum(filePath: string): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -46,11 +52,28 @@ export class MediaService {
     const uploadedMedia = [];
 
     for (const file of files) {
-      const filePath = path.join(file.destination, file.filename);
-      const checksum = await this.generateChecksum(filePath);
-
       const fileType = this.determineFileType(file.mimetype);
-      const publicUrl = `/uploads/productImages/${file.filename}`;
+
+      let checksum: string;
+      let storagePath: string;
+      let publicUrl: string;
+
+      if (isS3Enabled()) {
+        const buf = file.buffer;
+        if (!buf?.length) {
+          throw ApiError.BAD_REQUEST('Empty upload buffer (S3 mode requires memory storage)');
+        }
+        checksum = this.checksumBuffer(buf);
+        const key = buildObjectKey('uploads/media', file.originalname);
+        await putS3Object(key, buf, file.mimetype);
+        storagePath = `s3:${key}`;
+        publicUrl = `s3:${key}`;
+      } else {
+        const filePath = path.join(file.destination, file.filename);
+        checksum = await this.generateChecksum(filePath);
+        storagePath = filePath;
+        publicUrl = `/uploads/productImages/${file.filename}`;
+      }
 
       const id = crypto.randomUUID();
       await sqlExec(
@@ -61,8 +84,8 @@ export class MediaService {
           file.originalname,
           file.mimetype,
           file.size,
-          'LOCAL' as StorageProvider,
-          filePath,
+          (isS3Enabled() ? 'S3' : 'LOCAL') as StorageProvider,
+          storagePath,
           publicUrl,
           checksum,
           uploadedBy ?? null,
@@ -74,7 +97,14 @@ export class MediaService {
       uploadedMedia.push(savedMedia);
     }
 
-    return uploadedMedia;
+    return Promise.all(
+      uploadedMedia.map(async (row) => {
+        const r = row as Record<string, unknown>;
+        const pu = r.public_url;
+        const resolved = typeof pu === 'string' ? await resolveStoredMediaUrl(pu) : pu;
+        return { ...r, public_url: resolved ?? pu };
+      }),
+    );
   }
 
   /**
@@ -99,8 +129,17 @@ export class MediaService {
 
     const totalPages = Math.ceil(total / limit);
 
+    const expanded = await Promise.all(
+      (mediaFiles as Record<string, unknown>[]).map(async (row) => {
+        const raw = row.public_url;
+        const resolved =
+          typeof raw === 'string' ? await resolveStoredMediaUrl(raw) : (raw as string | null);
+        return { ...row, public_url: resolved ?? raw };
+      }),
+    );
+
     return {
-      mediaFiles,
+      mediaFiles: expanded,
       meta: {
         page,
         limit,

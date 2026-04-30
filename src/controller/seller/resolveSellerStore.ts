@@ -1,6 +1,12 @@
 import type { Request } from 'express';
 import { sqlQuery } from '~/lib/sql';
 
+/** mysql2 often returns BIGINT as number; normalize so comparisons with BigInt() work. */
+function rowIdToBigInt(v: unknown): bigint {
+  if (typeof v === 'bigint') return v;
+  return BigInt(String(v));
+}
+
 /** Express 5 may type params as string | string[] */
 export function parseRequiredBigintParam(raw: string | string[] | undefined): bigint | null {
   const s = Array.isArray(raw) ? raw[0] : raw;
@@ -44,14 +50,15 @@ export async function resolveSellerStoreContext(
     if (!product) {
       return { ok: false, status: 404, message: 'Product not found' };
     }
+    const productStoreId = rowIdToBigInt(product.storeId);
     if (explicit !== undefined) {
       const want = BigInt(explicit);
-      if (want !== product.storeId) {
+      if (want !== productStoreId) {
         return { ok: false, status: 403, message: 'Store does not match this product' };
       }
       return { ok: true, storeId: want };
     }
-    return { ok: true, storeId: product.storeId };
+    return { ok: true, storeId: productStoreId };
   }
 
   if (explicit !== undefined) {
