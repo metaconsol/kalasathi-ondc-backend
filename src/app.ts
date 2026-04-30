@@ -38,7 +38,7 @@ export function createApp(): Application {
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       credentials: true,
       origin: (origin, callback) => {
-        if (!origin || env.clients.includes(origin)) {
+        if (!origin || env.nodeEnv === 'development' || env.clients.includes(origin)) {
           callback(null, true);
         } else {
           logger.warn('CORS origin not allowed', { origin });

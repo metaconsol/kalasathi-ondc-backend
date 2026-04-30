@@ -21,7 +21,8 @@
     "db:reset": "prisma migrate reset -f",
     "db:resolve": "prisma migrate resolve",
     "db:deploy": "prisma migrate deploy",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "seed:demo": "node --import tsx seed-dev.ts"
   },
   "keywords": [
     "odop"

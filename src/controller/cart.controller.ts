@@ -111,7 +111,7 @@ export const merge = async (req: Request, res: Response, next: NextFunction) => 
     if (!req.user?.id) {
       return ApiResponse.unauthorized(res, 'Authentication required to merge cart');
     }
-    const fromBody = (req.body ?? {}).session_id;
+    const fromBody = (req.body ?? {}).session_id ?? (req.body ?? {}).sessionId;
     const rawHeader = req.headers['x-cart-session'];
     const fromHeader =
       typeof rawHeader === 'string'

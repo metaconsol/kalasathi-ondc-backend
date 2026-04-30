@@ -1,24 +1,53 @@
 import type { Request, Response, NextFunction } from 'express';
 import * as orderService from '~/service/order.service';
 import { ApiResponse } from '~/lib/response';
+import { db } from '~/lib/db';
+import { UserRole } from '~/generated/prisma/enums';
+import * as fs from 'fs';
 
 export const createOrder = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const userId = (req as any).user?.id;
-    if (!userId) {
-      return ApiResponse.unauthorized(res, 'User not authenticated');
-    }
-
+    let userId = (req as any).user?.id;
     const orderData = req.body;
 
     if (!orderData.cart_id || !orderData.billing_address) {
       return ApiResponse.badRequest(res, 'cart_id and billing_address are required');
     }
 
+    // Handle Guest Checkout
+    if (!userId) {
+      const guestPhone = orderData.billing_address.phone;
+      if (!guestPhone) {
+        return ApiResponse.badRequest(res, 'Phone number is required for guest checkout');
+      }
+
+      // Find or create guest user
+      let user = await db.user.findUnique({
+        where: { phoneNumber: guestPhone },
+      });
+
+      if (!user) {
+        user = await db.user.create({
+          data: {
+            phoneNumber: guestPhone,
+            name: orderData.billing_address.full_name || 'Guest User',
+            email: orderData.billing_address.email || null,
+            role: UserRole.USER,
+          },
+        });
+      }
+      userId = user.id;
+    }
+
     const result = await orderService.createOrder(userId, orderData);
 
     return ApiResponse.created(res, 'Order created successfully', serializeBigInt(result));
   } catch (error: any) {
+    console.error('Create Order Error:', error);
+    fs.writeFileSync(
+      'last_error.log',
+      JSON.stringify({ message: error.message, stack: error.stack }, null, 2),
+    );
     if (error.message && error.message.includes('not found')) {
       return ApiResponse.notFound(res, error.message);
     }

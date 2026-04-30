@@ -27,6 +27,7 @@ model User {
     sellerProfile SellerProfile?
     stores        Store[]
     orders        Order[]
+    addresses     UserAddress[]
 }
 
 enum UserRole {
@@ -854,6 +855,24 @@ model OrderItem {
     @@map("order_items")
 }
 
+model State {
+    id        Int        @id @default(autoincrement())
+    name      String     @unique
+    code      String?    @unique
+    districts District[]
+
+    @@map("states")
+}
+
+model District {
+    id      Int    @id @default(autoincrement())
+    name    String
+    stateId Int
+    state   State  @relation(fields: [stateId], references: [id], onDelete: Cascade)
+
+    @@map("districts")
+}
+
 model OrderAddress {
     id            BigInt           @id @default(autoincrement()) @db.UnsignedBigInt
     order_id      BigInt           @db.UnsignedBigInt
@@ -864,12 +883,38 @@ model OrderAddress {
     address_line2 String?          @db.VarChar(255)
     city          String           @db.VarChar(120)
     state         String           @db.VarChar(120)
+    state_id      Int?             @map("state_id")
+    district_id   Int?             @map("district_id")
     country       String           @db.VarChar(120)
     pincode       String           @db.VarChar(20)
 
     order Order @relation(fields: [order_id], references: [id], onDelete: Cascade)
 
     @@map("order_addresses")
+}
+
+model UserAddress {
+    id           Int     @id @default(autoincrement())
+    userId       Int     @map("user_id")
+    fullName     String  @map("full_name") @db.VarChar(255)
+    phone        String  @db.VarChar(20)
+    email        String? @db.VarChar(255)
+    addressLine1 String  @map("address_line1") @db.VarChar(255)
+    addressLine2 String? @map("address_line2") @db.VarChar(255)
+    city         String  @db.VarChar(120)
+    state        String  @db.VarChar(120)
+    stateId      Int?    @map("state_id")
+    cityId       Int?    @map("city_id")
+    country      String  @default("India") @db.VarChar(120)
+    pincode      String  @db.VarChar(20)
+    isDefault    Boolean @default(false) @map("is_default")
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@map("user_addresses")
 }
 
 model Return {

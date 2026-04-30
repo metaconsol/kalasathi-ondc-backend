@@ -36,6 +36,11 @@ type ProductRow = {
   stock: number;
 };
 
+type ProductImageRow = {
+  product_id: bigint;
+  image_url: string;
+};
+
 type VariantRow = {
   id: bigint;
   product_id: bigint;
@@ -129,8 +134,6 @@ async function loadAndValidateCatalog(
 }
 
 function availableStock(product: ProductRow, variant: VariantRow | null): number {
-  // Since VariantRow no longer has stock_qty in the new schema, we fallback to product level stock
-  // or a high number if variants are managed purely by inventory table (not joined here).
   return Number(product.stock);
 }
 
@@ -264,18 +267,44 @@ async function loadVariantMapForItems(
 
 async function loadProductMapForItems(
   items: Array<{ product_id: bigint }>,
-): Promise<Map<bigint, { id: bigint; product_name: string; store_id: bigint }>> {
-  const productById = new Map<bigint, { id: bigint; product_name: string; store_id: bigint }>();
+): Promise<
+  Map<bigint, { id: bigint; product_name: string; store_id: bigint; image_url: string | null }>
+> {
+  const productById = new Map<
+    bigint,
+    { id: bigint; product_name: string; store_id: bigint; image_url: string | null }
+  >();
   const productIds = [...new Set(items.map((i) => i.product_id))];
   if (!productIds.length) return productById;
+
   const rows = await sqlQuery<ProductRow>(
     `SELECT id, store_id, product_name, default_price, stock FROM products WHERE id IN (${inPlaceholders(
       productIds.length,
     )})`,
     productIds,
   );
+
+  const imageRows = await sqlQuery<ProductImageRow>(
+    `SELECT product_id, image_url FROM product_images WHERE product_id IN (${inPlaceholders(
+      productIds.length,
+    )}) ORDER BY product_id ASC, sort_order ASC, id ASC`,
+    productIds,
+  );
+
+  const imageByProductId = new Map<bigint, string>();
+  for (const imageRow of imageRows) {
+    if (!imageByProductId.has(imageRow.product_id)) {
+      imageByProductId.set(imageRow.product_id, imageRow.image_url);
+    }
+  }
+
   for (const p of rows) {
-    productById.set(p.id, { id: p.id, product_name: p.product_name, store_id: p.store_id });
+    productById.set(p.id, {
+      id: p.id,
+      product_name: p.product_name,
+      store_id: p.store_id,
+      image_url: imageByProductId.get(p.id) ?? null,
+    });
   }
   return productById;
 }
@@ -283,7 +312,10 @@ async function loadProductMapForItems(
 function mapCartItemRow(
   item: CartItemRow & { store_name: string | null; store_slug: string | null },
   variantById: Map<bigint, { id: bigint; name: string | null; sku: string | null }>,
-  productById: Map<bigint, { id: bigint; title: string; store_id: bigint }>,
+  productById: Map<
+    bigint,
+    { id: bigint; product_name: string; store_id: bigint; image_url: string | null }
+  >,
 ) {
   const lineSubtotal = Number(item.price_snapshot) * item.qty;
   const v = item.variant_id !== 0n ? variantById.get(item.variant_id) : undefined;
@@ -306,11 +338,13 @@ function mapCartItemRow(
           id: p.id.toString(),
           title: p.product_name,
           store_id: p.store_id.toString(),
+          image_url: p.image_url,
         }
       : {
           id: item.product_id.toString(),
           title: null as string | null,
           store_id: item.store_id.toString(),
+          image_url: null as string | null,
         },
     variant: v
       ? {
@@ -434,21 +468,24 @@ async function loadCartWithItems(owner: CartOwner) {
   return { cart, items, variantById, productById };
 }
 
-function computeTotals(items: { qty: number; priceSnapshot: unknown }[]) {
+function computeTotals(
+  items: { qty: number; priceSnapshot?: unknown; price_snapshot?: unknown }[],
+) {
   let subtotal = 0;
   let totalItems = 0;
   for (const row of items) {
-    // cart_items column is `price_snapshot`
-    subtotal += Number((row as any).price_snapshot ?? (row as any).priceSnapshot) * row.qty;
+    const price = row.price_snapshot ?? row.priceSnapshot ?? 0;
+    subtotal += Number(price) * row.qty;
     totalItems += row.qty;
   }
   return { subtotal, total_items: totalItems };
 }
 
 export async function getCart(owner: CartOwner) {
-  const { items, variantById, productById } = await loadCartWithItems(owner);
+  const { cart, items, variantById, productById } = await loadCartWithItems(owner);
   const { subtotal, total_items } = computeTotals(items);
   return serializeBigInt({
+    id: cart?.id?.toString() ?? null,
     items: items.map((row) => mapCartItemRow(row as any, variantById, productById)),
     subtotal,
     total_items,
@@ -620,6 +657,7 @@ export async function mergeGuestIntoUser(userId: number, guestSessionId: string)
             guestLine.variant_id,
             guestLine.qty,
             catalog.unitPrice,
+            null,
             null,
             null,
             null,

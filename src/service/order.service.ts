@@ -30,7 +30,7 @@ export const createOrder = async (userId: number, data: any) => {
   // Calculate total amount
   let totalAmount = 0;
   items.forEach((item: any) => {
-    totalAmount += item.qty * Number(item.priceSnapshot);
+    totalAmount += item.qty * Number(item.price_snapshot);
   });
 
   // Determine the date prefix (e.g., ORD-20260425-)
@@ -84,7 +84,7 @@ export const createOrder = async (userId: number, data: any) => {
     // 4. Create Addresses
     for (const addr of [billingAddress, shippingAddress]) {
       await sqlExec(
-        'INSERT INTO `order_addresses` (`order_id`, `type`, `full_name`, `phone`, `address_line1`, `address_line2`, `city`, `state`, `country`, `pincode`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO `order_addresses` (`order_id`, `type`, `full_name`, `phone`, `address_line1`, `address_line2`, `city`, `district_id`, `state`, `state_id`, `country`, `pincode`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           orderId,
           addr.type,
@@ -93,7 +93,9 @@ export const createOrder = async (userId: number, data: any) => {
           addr.address_line1,
           addr.address_line2 ?? null,
           addr.city,
+          addr.city_id ?? null,
           addr.state,
+          addr.state_id ?? null,
           addr.country,
           addr.pincode,
         ],

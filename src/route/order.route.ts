@@ -7,7 +7,7 @@ const orderRouter = Router();
 // Order routes (Buyer)
 // Explicitly requiring authMiddleware for all buyer methods
 
-orderRouter.post('/', authMiddleware, orderController.createOrder);
+orderRouter.post('/', orderController.createOrder); // Auth not required for guest checkout
 orderRouter.get('/', authMiddleware, orderController.listOrders);
 orderRouter.get('/:id', authMiddleware, orderController.getOrderDetails);
 orderRouter.patch('/:id/cancel', authMiddleware, orderController.cancelOrder);
