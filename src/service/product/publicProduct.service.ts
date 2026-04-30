@@ -1,5 +1,6 @@
 import { sqlExec, sqlQuery, withSqlTransaction } from '~/lib/sql';
 import { ApiResponse } from '~/lib/response';
+import { expandS3RefsDeep } from '~/lib/storageUrls';
 import type { Request, Response } from 'express';
 import {
   publicCatalogQuerySchema,
@@ -156,7 +157,7 @@ async function hydrateProducts(
     pinByPid.set(k, list);
   }
 
-  return products.map((p) => {
+  const mapped = products.map((p) => {
     const pid = BigInt(p.id);
     const allVariants = varByPid.get(pid) ?? [];
     const limitedVariants =
@@ -173,6 +174,7 @@ async function hydrateProducts(
       serviceablePincodes: opts.withServiceability ? (pinByPid.get(pid) ?? []) : undefined,
     };
   });
+  return expandS3RefsDeep(mapped);
 }
 
 class PublicProductService {

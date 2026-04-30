@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { ApiResponse } from '~/lib/response';
-import { sqlExec, sqlQuery, withSqlTransaction } from '~/lib/sql';
+import { sqlExec, sqlQuery, withSqlTransaction, type SqlTx } from '~/lib/sql';
 import type {
   CreateProductDTO,
   UpdateProductDTO,
@@ -8,6 +8,8 @@ import type {
   SetServiceabilityDTO,
   ListProductsParams,
 } from './product.types';
+import { expandS3RefsDeep } from '~/lib/storageUrls';
+import { deleteS3Object } from '~/lib/s3';
 
 function decString(v: any): string {
   if (v == null) return '0';
@@ -17,6 +19,200 @@ function decString(v: any): string {
 
 function toBool(v: any): boolean {
   return v === true || v === 1 || v === '1' || v === 'true';
+}
+
+function toIntQty(v: unknown): number {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.floor(n);
+}
+
+/** Prefer active DELIVERY, then any active row, then any row (inventory must attach to a location). */
+async function resolvePrimaryStoreLocationId(storeId: bigint, tx?: SqlTx): Promise<bigint | null> {
+  const pick = async (sql: string) => {
+    const rows = await sqlQuery<{ id: bigint | string }>(sql, [storeId], tx);
+    const id = rows[0]?.id;
+    return id != null ? BigInt(String(id)) : null;
+  };
+  return (
+    (await pick(
+      `SELECT id FROM store_locations WHERE store_id = ? AND is_active = 1
+       ORDER BY (location_type = 'DELIVERY') DESC, id ASC LIMIT 1`,
+    )) ??
+    (await pick(
+      `SELECT id FROM store_locations WHERE store_id = ?
+       ORDER BY (location_type = 'DELIVERY') DESC, id ASC LIMIT 1`,
+    ))
+  );
+}
+
+/**
+ * Inventory rows require `store_location_id`. Many stores have no location yet — create a minimal DELIVERY row.
+ */
+async function ensureInventoryStoreLocationId(tx: SqlTx, storeId: bigint): Promise<bigint> {
+  const existing = await resolvePrimaryStoreLocationId(storeId, tx);
+  if (existing != null) return existing;
+
+  const storeRows = await sqlQuery<{ store_name: string | null }>(
+    'SELECT store_name FROM stores WHERE id = ? AND deleted_at IS NULL LIMIT 1',
+    [storeId],
+    tx,
+  );
+  const name = String(storeRows[0]?.store_name ?? 'Store').slice(0, 200);
+  const ins = await sqlExec(
+    `INSERT INTO store_locations (
+       store_id, location_type, address_line1, address_line2, city, state, country, pincode,
+       latitude, longitude, radius, opening_time, closing_time, serviceability, is_active, updated_at
+     ) VALUES (?, 'DELIVERY', ?, NULL, 'Unspecified', 'Unspecified', 'India', '000000',
+       NULL, NULL, NULL, NULL, NULL, 0, 1, CURRENT_TIMESTAMP(3))`,
+    [storeId, `Default warehouse — ${name}`],
+    tx,
+  );
+  return BigInt(String((ins as { insertId?: bigint | number | string }).insertId));
+}
+
+async function upsertInventoryForVariant(
+  tx: SqlTx | undefined,
+  storeLocationId: bigint,
+  variantId: bigint,
+  qtyOnHand: number,
+  qtyReserved = 0,
+): Promise<void> {
+  const existing = await sqlQuery<{ id: bigint | string }>(
+    'SELECT id FROM inventory WHERE store_location_id = ? AND variant_id = ? LIMIT 1',
+    [storeLocationId, variantId],
+    tx,
+  );
+  if (existing[0]) {
+    await sqlExec(
+      'UPDATE inventory SET qty_on_hand = ?, qty_reserved = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?',
+      [qtyOnHand, qtyReserved, existing[0].id],
+      tx,
+    );
+  } else {
+    await sqlExec(
+      'INSERT INTO inventory (store_location_id, variant_id, qty_on_hand, qty_reserved, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP(3))',
+      [storeLocationId, variantId, qtyOnHand, qtyReserved],
+      tx,
+    );
+  }
+}
+
+/**
+ * Inserts Mrignayanee-style variant tree rows and optional `inventory` for leaf SKUs.
+ */
+async function insertVariantTreeFromPayload(
+  tx: SqlTx,
+  storeId: bigint,
+  productId: bigint,
+  input: any[],
+): Promise<void> {
+  const storeLocationId = await ensureInventoryStoreLocationId(tx, storeId);
+
+  const idToDb = new Map<string, bigint>();
+  const pending = [...input];
+  const inserted = new Set<any>();
+
+  const insertOne = async (v: any, parentDbId: bigint | null) => {
+    const vres = await sqlExec(
+      'INSERT INTO product_variants (product_id, parent_variant_id, level_index, level_name, attribute_value, color_code, variant_name, sku, gtin_ean, price, mrp, unit_count, unit_type, product_weight_gm, product_length_cm, product_width_cm, product_height_cm, shipping_pkg_weight_gm, shipping_pkg_length_cm, shipping_pkg_width_cm, shipping_pkg_height_cm, min_purchase_limit, max_purchase_limit, standard_package_qty, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        productId,
+        parentDbId,
+        v.levelIndex ?? null,
+        v.levelName ?? null,
+        v.name ?? null,
+        v.colorCode ?? null,
+        (v.variantName && String(v.variantName).trim().length ? v.variantName : v.name) ?? '',
+        v.sku ?? null,
+        v.gtinEan ?? null,
+        v.price ?? null,
+        v.mrp ?? null,
+        v.unitCount ?? null,
+        v.unitType ?? null,
+        v.productWeightGm ?? null,
+        v.productLengthCm ?? null,
+        v.productWidthCm ?? null,
+        v.productHeightCm ?? null,
+        v.shippingPkgWeightGm ?? null,
+        v.shippingPkgLengthCm ?? null,
+        v.shippingPkgWidthCm ?? null,
+        v.shippingPkgHeightCm ?? null,
+        v.minPurchaseLimit ?? null,
+        v.maxPurchaseLimit ?? null,
+        v.standardPackageQty ?? null,
+        v.isActive ?? true,
+      ],
+      tx,
+    );
+    const vid = BigInt((vres as any).insertId);
+    if (typeof v.id === 'string' && v.id.length) {
+      idToDb.set(v.id, vid);
+    }
+    if (Array.isArray(v.images)) {
+      let j = 0;
+      for (const im of v.images) {
+        await sqlExec(
+          'INSERT INTO variant_images (variant_id, image_url, sort_order) VALUES (?, ?, ?)',
+          [vid, im.imageUrl, im.sortOrder ?? j],
+          tx,
+        );
+        j++;
+      }
+    }
+
+    const skuTrim = v.sku != null ? String(v.sku).trim() : '';
+    if (skuTrim.length > 0) {
+      const qtyRaw = v.stock ?? v.qtyOnHand ?? v.qty_on_hand;
+      const qty = toIntQty(qtyRaw);
+      await upsertInventoryForVariant(tx, storeLocationId, vid, qty, 0);
+    }
+
+    return vid;
+  };
+
+  for (let pass = 0; pass < 20 && pending.length; pass++) {
+    let progressed = false;
+    for (let i = 0; i < pending.length; ) {
+      const v = pending[i];
+      if (inserted.has(v)) {
+        pending.splice(i, 1);
+        continue;
+      }
+
+      const parentRaw = v.parentId ?? v.parent_id ?? null;
+      let parentDb: bigint | null = null;
+      if (parentRaw == null || parentRaw === '' || parentRaw === 0 || parentRaw === '0') {
+        parentDb = null;
+      } else if (typeof parentRaw === 'number' || typeof parentRaw === 'bigint') {
+        parentDb = BigInt(parentRaw);
+      } else {
+        const key = String(parentRaw);
+        parentDb = idToDb.get(key) ?? null;
+      }
+
+      if (
+        parentRaw != null &&
+        parentRaw !== '' &&
+        parentRaw !== 0 &&
+        parentRaw !== '0' &&
+        parentDb === null
+      ) {
+        i++;
+        continue;
+      }
+
+      await insertOne(v, parentDb);
+      inserted.add(v);
+      pending.splice(i, 1);
+      progressed = true;
+    }
+    if (!progressed) break;
+  }
+
+  for (const v of pending) {
+    await insertOne(v, null);
+  }
 }
 
 async function loadProductHydrated(storeId: bigint, productId: bigint) {
@@ -33,6 +229,8 @@ async function loadProductHydrated(storeId: bigint, productId: bigint) {
   );
   const p = base[0] ?? null;
   if (!p) return null;
+
+  const storeIdForInv = BigInt(p.store_id);
 
   const [images, attributes, variants, vimgs] = await Promise.all([
     sqlQuery<any>('SELECT * FROM product_images WHERE product_id = ? ORDER BY sort_order ASC', [
@@ -67,20 +265,53 @@ async function loadProductHydrated(storeId: bigint, productId: bigint) {
     vimgByVid.set(k, list);
   }
 
-  const variantsOut = variants.map((v) => ({
-    ...v,
-    id: v.id,
-    productId: v.product_id,
-    parentVariantId: v.parent_variant_id,
-    variantName: v.variant_name,
-    attributeValue: v.attribute_value,
-    colorCode: v.color_code,
-    isActive: !!v.is_active,
-    unitCount: v.unit_count != null ? decString(v.unit_count) : null,
-    price: v.price != null ? decString(v.price) : null,
-    mrp: v.mrp != null ? decString(v.mrp) : null,
-    variantImages: vimgByVid.get(String(v.id)) ?? [],
-  }));
+  const invByVid = new Map<string, { qtyOnHand: number; qtyReserved: number }>();
+  if (variants.length) {
+    const vids = variants.map((x: { id: unknown }) => x.id);
+    const ph = vids.map(() => '?').join(',');
+    const invRows = await sqlQuery<{
+      variant_id: bigint | string;
+      qty_on_hand: string | number | null;
+      qty_reserved: string | number | null;
+    }>(
+      `SELECT i.variant_id, SUM(i.qty_on_hand) AS qty_on_hand, SUM(i.qty_reserved) AS qty_reserved
+       FROM inventory i
+       INNER JOIN store_locations sl ON sl.id = i.store_location_id AND sl.store_id = ?
+       WHERE i.variant_id IN (${ph})
+       GROUP BY i.variant_id`,
+      [storeIdForInv, ...vids],
+    );
+    for (const row of invRows) {
+      invByVid.set(String(row.variant_id), {
+        qtyOnHand: Number(row.qty_on_hand ?? 0),
+        qtyReserved: Number(row.qty_reserved ?? 0),
+      });
+    }
+  }
+
+  const variantsOut = variants.map((v) => {
+    const inv = invByVid.get(String(v.id));
+    const qtyOnHand = inv?.qtyOnHand ?? 0;
+    const qtyReserved = inv?.qtyReserved ?? 0;
+    return {
+      ...v,
+      id: v.id,
+      productId: v.product_id,
+      parentVariantId: v.parent_variant_id,
+      variantName: v.variant_name,
+      attributeValue: v.attribute_value,
+      colorCode: v.color_code,
+      isActive: !!v.is_active,
+      unitCount: v.unit_count != null ? decString(v.unit_count) : null,
+      price: v.price != null ? decString(v.price) : null,
+      mrp: v.mrp != null ? decString(v.mrp) : null,
+      variantImages: vimgByVid.get(String(v.id)) ?? [],
+      stock: decString(qtyOnHand),
+      qtyOnHand,
+      qtyReserved,
+      inventory: { qtyOnHand, qtyReserved },
+    };
+  });
 
   return {
     ...p,
@@ -188,7 +419,11 @@ class ProductSqlService {
     try {
       const product = await loadProductHydrated(storeId, productId);
       if (!product) return ApiResponse.notFound(res, 'Product not found');
-      return ApiResponse.success(res, 'Product fetched successfully', product);
+      return ApiResponse.success(
+        res,
+        'Product fetched successfully',
+        await expandS3RefsDeep(product),
+      );
     } catch (error) {
       return ApiResponse.serverError(res, 'Error fetching product', error);
     }
@@ -218,8 +453,21 @@ class ProductSqlService {
       }
 
       const [rows, totalRows] = await Promise.all([
-        sqlQuery<any>(
-          `SELECT p.* FROM products p WHERE ${whereSql} ORDER BY p.created_at DESC LIMIT ? OFFSET ?`,
+        sqlQuery<{
+          id: bigint | number | string;
+          product_name: string;
+          brand: string | null;
+          district: string | null;
+          stock: bigint | number | string | null;
+          force_out_of_stock: boolean | number;
+          unit_count: unknown;
+          unit_type: string | null;
+          publish_status: string;
+          created_at: Date | string;
+        }>(
+          `SELECT p.id, p.product_name, p.brand, p.district, p.stock, p.force_out_of_stock,
+                  p.unit_count, p.unit_type, p.publish_status, p.created_at
+           FROM products p WHERE ${whereSql} ORDER BY p.created_at DESC LIMIT ? OFFSET ?`,
           [...args, limit, skip],
         ),
         sqlQuery<{ total: number }>(
@@ -229,12 +477,95 @@ class ProductSqlService {
       ]);
       const total = Number(totalRows?.[0]?.total ?? 0);
 
-      return ApiResponse.success(res, 'Products fetched successfully', rows, {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      });
+      const imgsByProductId = new Map<
+        string,
+        { id: unknown; imageUrl: string; altText: string | null; sortOrder: number }[]
+      >();
+      if (rows.length > 0) {
+        const ids = rows.map((r) => r.id);
+        const ph = ids.map(() => '?').join(', ');
+        const imgRows = await sqlQuery<{
+          product_id: bigint | number | string;
+          id: unknown;
+          image_url: string;
+          alt_text: string | null;
+          sort_order: number;
+        }>(
+          `SELECT product_id, id, image_url, alt_text, sort_order FROM product_images
+           WHERE product_id IN (${ph}) ORDER BY product_id ASC, sort_order ASC`,
+          ids as any[],
+        );
+        for (const im of imgRows) {
+          const k = String(im.product_id);
+          const list = imgsByProductId.get(k) ?? [];
+          list.push({
+            id: im.id,
+            imageUrl: im.image_url,
+            altText: im.alt_text,
+            sortOrder: im.sort_order,
+          });
+          imgsByProductId.set(k, list);
+        }
+
+        const productIdsWithoutCover = rows
+          .filter((r) => (imgsByProductId.get(String(r.id)) ?? []).length === 0)
+          .map((r) => r.id);
+        if (productIdsWithoutCover.length > 0) {
+          const ph2 = productIdsWithoutCover.map(() => '?').join(', ');
+          const variantImgRows = await sqlQuery<{
+            product_id: bigint | number | string;
+            id: unknown;
+            image_url: string;
+            sort_order: number;
+          }>(
+            `SELECT pv.product_id, vi.id, vi.image_url, vi.sort_order
+             FROM variant_images vi
+             INNER JOIN product_variants pv ON pv.id = vi.variant_id
+             WHERE pv.product_id IN (${ph2})
+             ORDER BY pv.product_id ASC, pv.id ASC, vi.sort_order ASC`,
+            productIdsWithoutCover as any[],
+          );
+          const coverSeen = new Set<string>();
+          for (const vim of variantImgRows) {
+            const pk = String(vim.product_id);
+            if (coverSeen.has(pk)) continue;
+            coverSeen.add(pk);
+            imgsByProductId.set(pk, [
+              {
+                id: vim.id,
+                imageUrl: vim.image_url,
+                altText: null,
+                sortOrder: vim.sort_order,
+              },
+            ]);
+          }
+        }
+      }
+
+      const snapshot = rows.map((p) => ({
+        id: p.id,
+        productName: p.product_name,
+        brand: p.brand,
+        district: p.district,
+        stock: decString(p.stock),
+        forceOutOfStock: !!p.force_out_of_stock,
+        unitCount: p.unit_count != null ? decString(p.unit_count) : null,
+        unitType: p.unit_type,
+        publishStatus: p.publish_status,
+        images: imgsByProductId.get(String(p.id)) ?? [],
+      }));
+
+      return ApiResponse.success(
+        res,
+        'Products fetched successfully',
+        await expandS3RefsDeep(snapshot),
+        {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      );
     } catch (error) {
       return ApiResponse.serverError(res, 'Error listing products', error);
     }
@@ -249,8 +580,8 @@ class ProductSqlService {
     try {
       const productId = await withSqlTransaction(async (tx) => {
         const ins = await sqlExec(
-          `INSERT INTO products (store_id, category_id, product_name, district, description, hsn_sac_code, gst_percent, gtin_ean, stock, force_out_of_stock, unit_count, unit_type, brand, manufacturing_month, expiry_date, country_of_origin, sort_order, return_days_window, seller_pickup_return, is_cod_available, publish_status, is_manufacturer, manufacturer_name, manufacturer_address, currency, default_price, mrp, visibility, alias_slug, seo_title, seo_description, seo_keywords, disable_for_bots, availability_mode, cancellable, returnable, time_to_ship_value, time_to_ship_unit, instructions, storage_conditions, included_items, size_chart_url, gi_tag, silk_mark, have_ondc_attributes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO products (store_id, category_id, product_name, district, description, hsn_sac_code, gst_percent, gtin_ean, stock, force_out_of_stock, unit_count, unit_type, brand, manufacturing_month, expiry_date, country_of_origin, sort_order, return_days_window, seller_pickup_return, is_cod_available, publish_status, is_manufacturer, manufacturer_name, manufacturer_address, currency, default_price, mrp, visibility, alias_slug, seo_title, seo_description, seo_keywords, disable_for_bots, availability_mode, cancellable, returnable, time_to_ship_value, time_to_ship_unit, instructions, storage_conditions, included_items, size_chart_url, gi_tag, silk_mark, have_ondc_attributes, product_weight_gm, product_length_cm, product_width_cm, product_height_cm, package_weight_gm, package_length_cm, package_width_cm, package_height_cm, ondc_subcategory)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             storeId,
             body.categoryId,
@@ -297,6 +628,15 @@ class ProductSqlService {
             toBool((body as any).giTag),
             toBool((body as any).silkMark),
             toBool((body as any).haveOndcAttributes),
+            (body as any).productWeightGm ?? null,
+            (body as any).productLengthCm ?? null,
+            (body as any).productWidthCm ?? null,
+            (body as any).productHeightCm ?? null,
+            (body as any).packageWeightGm ?? null,
+            (body as any).packageLengthCm ?? null,
+            (body as any).packageWidthCm ?? null,
+            (body as any).packageHeightCm ?? null,
+            (body as any).ondcSubcategory ?? null,
           ],
           tx,
         );
@@ -324,111 +664,7 @@ class ProductSqlService {
           }
         }
         if (Array.isArray((body as any).variants)) {
-          const input = (body as any).variants as any[];
-
-          // Tree payloads can use string ids for parent linking (e.g. "node-123").
-          // We must translate those to DB ids as we insert.
-          const idToDb = new Map<string, bigint>();
-          const pending = [...input];
-          const inserted = new Set<any>();
-
-          const insertOne = async (v: any, parentDbId: bigint | null) => {
-            const vres = await sqlExec(
-              'INSERT INTO product_variants (product_id, parent_variant_id, level_index, level_name, attribute_value, color_code, variant_name, sku, gtin_ean, price, mrp, unit_count, unit_type, product_weight_gm, product_length_cm, product_width_cm, product_height_cm, shipping_pkg_weight_gm, shipping_pkg_length_cm, shipping_pkg_width_cm, shipping_pkg_height_cm, min_purchase_limit, max_purchase_limit, standard_package_qty, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-              [
-                pid,
-                parentDbId,
-                v.levelIndex ?? null,
-                v.levelName ?? null,
-                v.name ?? null,
-                v.colorCode ?? null,
-                // keep name non-empty if client omits variantName on internal nodes
-                (v.variantName && String(v.variantName).trim().length ? v.variantName : v.name) ??
-                  '',
-                v.sku ?? null,
-                v.gtinEan ?? null,
-                v.price ?? null,
-                v.mrp ?? null,
-                v.unitCount ?? null,
-                v.unitType ?? null,
-                v.productWeightGm ?? null,
-                v.productLengthCm ?? null,
-                v.productWidthCm ?? null,
-                v.productHeightCm ?? null,
-                v.shippingPkgWeightGm ?? null,
-                v.shippingPkgLengthCm ?? null,
-                v.shippingPkgWidthCm ?? null,
-                v.shippingPkgHeightCm ?? null,
-                v.minPurchaseLimit ?? null,
-                v.maxPurchaseLimit ?? null,
-                v.standardPackageQty ?? null,
-                v.isActive ?? true,
-              ],
-              tx,
-            );
-            const vid = BigInt(vres.insertId as any);
-            if (typeof v.id === 'string' && v.id.length) {
-              idToDb.set(v.id, vid);
-            }
-            if (Array.isArray(v.images)) {
-              let j = 0;
-              for (const im of v.images) {
-                await sqlExec(
-                  'INSERT INTO variant_images (variant_id, image_url, sort_order) VALUES (?, ?, ?)',
-                  [vid, im.imageUrl, im.sortOrder ?? j],
-                  tx,
-                );
-                j++;
-              }
-            }
-            return vid;
-          };
-
-          // Multi-pass topological insert: insert roots first, then children once parent exists.
-          for (let pass = 0; pass < 20 && pending.length; pass++) {
-            let progressed = false;
-            for (let i = 0; i < pending.length; ) {
-              const v = pending[i];
-              if (inserted.has(v)) {
-                pending.splice(i, 1);
-                continue;
-              }
-
-              const parentRaw = v.parentId ?? v.parent_id ?? null;
-              let parentDb: bigint | null = null;
-              if (parentRaw == null || parentRaw === '' || parentRaw === 0 || parentRaw === '0') {
-                parentDb = null;
-              } else if (typeof parentRaw === 'number' || typeof parentRaw === 'bigint') {
-                parentDb = BigInt(parentRaw);
-              } else {
-                const key = String(parentRaw);
-                parentDb = idToDb.get(key) ?? null;
-              }
-
-              // If a parent is required but not yet inserted, skip for later pass.
-              if (
-                parentRaw != null &&
-                parentRaw !== '' &&
-                parentRaw !== 0 &&
-                parentRaw !== '0' &&
-                parentDb === null
-              ) {
-                i++;
-                continue;
-              }
-
-              await insertOne(v, parentDb);
-              inserted.add(v);
-              pending.splice(i, 1);
-              progressed = true;
-            }
-            if (!progressed) break;
-          }
-
-          // Any leftover variants with unresolved parent: insert as roots to avoid FK failure.
-          for (const v of pending) {
-            await insertOne(v, null);
-          }
+          await insertVariantTreeFromPayload(tx, storeId, pid, (body as any).variants as any[]);
         }
 
         // ============================================================
@@ -447,7 +683,11 @@ class ProductSqlService {
       });
 
       const product = await loadProductHydrated(storeId, productId);
-      return ApiResponse.created(res, 'Product created successfully', product);
+      return ApiResponse.created(
+        res,
+        'Product created successfully',
+        await expandS3RefsDeep(product),
+      );
     } catch (error) {
       return ApiResponse.serverError(res, 'Error creating product', error);
     }
@@ -540,6 +780,24 @@ class ProductSqlService {
         if ((body as any).stock !== undefined) set('stock', (body as any).stock);
         if ((body as any).forceOutOfStock !== undefined)
           set('force_out_of_stock', toBool((body as any).forceOutOfStock));
+        if ((body as any).productWeightGm !== undefined)
+          set('product_weight_gm', (body as any).productWeightGm ?? null);
+        if ((body as any).productLengthCm !== undefined)
+          set('product_length_cm', (body as any).productLengthCm ?? null);
+        if ((body as any).productWidthCm !== undefined)
+          set('product_width_cm', (body as any).productWidthCm ?? null);
+        if ((body as any).productHeightCm !== undefined)
+          set('product_height_cm', (body as any).productHeightCm ?? null);
+        if ((body as any).packageWeightGm !== undefined)
+          set('package_weight_gm', (body as any).packageWeightGm ?? null);
+        if ((body as any).packageLengthCm !== undefined)
+          set('package_length_cm', (body as any).packageLengthCm ?? null);
+        if ((body as any).packageWidthCm !== undefined)
+          set('package_width_cm', (body as any).packageWidthCm ?? null);
+        if ((body as any).packageHeightCm !== undefined)
+          set('package_height_cm', (body as any).packageHeightCm ?? null);
+        if ((body as any).ondcSubcategory !== undefined)
+          set('ondc_subcategory', (body as any).ondcSubcategory ?? null);
 
         if (fields.length) {
           await sqlExec(
@@ -572,11 +830,31 @@ class ProductSqlService {
             );
           }
         }
+
+        const replaceTree =
+          (body as any).replaceVariantTree === true || (body as any).replaceVariantTree === 'true';
+        if (
+          replaceTree &&
+          Array.isArray((body as any).variants) &&
+          (body as any).variants.length > 0
+        ) {
+          await sqlExec('DELETE FROM product_variants WHERE product_id = ?', [productId], tx);
+          await insertVariantTreeFromPayload(
+            tx,
+            storeId,
+            productId,
+            (body as any).variants as any[],
+          );
+        }
       });
 
       const product = await loadProductHydrated(storeId, productId);
       if (!product) return ApiResponse.notFound(res, 'Product not found');
-      return ApiResponse.success(res, 'Product updated successfully', product);
+      return ApiResponse.success(
+        res,
+        'Product updated successfully',
+        await expandS3RefsDeep(product),
+      );
     } catch (error: any) {
       if (String(error?.message) === 'NOT_FOUND')
         return ApiResponse.notFound(res, 'Product not found');
@@ -630,13 +908,70 @@ class ProductSqlService {
         [productId, storeId],
       );
       if (!p[0]) return ApiResponse.notFound(res, 'Product not found');
-      await sqlExec('DELETE FROM product_images WHERE id = ? AND product_id = ?', [
+      const rows = await sqlQuery<{ image_url: string }>(
+        'SELECT image_url FROM product_images WHERE id = ? AND product_id = ? LIMIT 1',
+        [imageId, productId],
+      );
+      if (!rows[0]) return ApiResponse.notFound(res, 'Product image not found');
+      const ref = String(rows[0].image_url ?? '');
+      const hdr = await sqlExec('DELETE FROM product_images WHERE id = ? AND product_id = ?', [
         imageId,
         productId,
       ]);
+      if (Number((hdr as { affectedRows?: number }).affectedRows ?? 0) === 0) {
+        return ApiResponse.notFound(res, 'Product image not found');
+      }
+      if (ref.startsWith('s3:')) {
+        await deleteS3Object(ref.slice(3)).catch(() => undefined);
+      }
       return ApiResponse.success(res, 'Image deleted successfully', { id: imageId.toString() });
     } catch (error) {
       return ApiResponse.serverError(res, 'Error deleting product image', error);
+    }
+  };
+
+  public deleteVariantImage = async (
+    _req: Request,
+    res: Response,
+    storeId: bigint,
+    productId: bigint,
+    variantId: bigint,
+    imageId: bigint,
+  ) => {
+    try {
+      const p = await sqlQuery<any>(
+        'SELECT id FROM products WHERE id = ? AND store_id = ? LIMIT 1',
+        [productId, storeId],
+      );
+      if (!p[0]) return ApiResponse.notFound(res, 'Product not found');
+      const vimRows = await sqlQuery<{ image_url: string }>(
+        `SELECT vi.image_url FROM variant_images vi
+         INNER JOIN product_variants pv ON pv.id = vi.variant_id
+         INNER JOIN products pr ON pr.id = pv.product_id
+         WHERE vi.id = ? AND vi.variant_id = ? AND pv.product_id = ? AND pr.store_id = ?
+         LIMIT 1`,
+        [imageId, variantId, productId, storeId],
+      );
+      if (!vimRows[0]) return ApiResponse.notFound(res, 'Variant image not found');
+      const ref = String(vimRows[0].image_url ?? '');
+      const hdr = await sqlExec(
+        `DELETE vi FROM variant_images vi
+         INNER JOIN product_variants pv ON pv.id = vi.variant_id
+         INNER JOIN products pr ON pr.id = pv.product_id
+         WHERE vi.id = ? AND vi.variant_id = ? AND pv.product_id = ? AND pr.store_id = ?`,
+        [imageId, variantId, productId, storeId],
+      );
+      if (Number((hdr as { affectedRows?: number }).affectedRows ?? 0) === 0) {
+        return ApiResponse.notFound(res, 'Variant image not found');
+      }
+      if (ref.startsWith('s3:')) {
+        await deleteS3Object(ref.slice(3)).catch(() => undefined);
+      }
+      return ApiResponse.success(res, 'Variant image deleted successfully', {
+        id: imageId.toString(),
+      });
+    } catch (error) {
+      return ApiResponse.serverError(res, 'Error deleting variant image', error);
     }
   };
 
@@ -666,7 +1001,11 @@ class ProductSqlService {
         'SELECT * FROM product_images WHERE product_id = ? ORDER BY sort_order ASC',
         [productId],
       );
-      return ApiResponse.success(res, 'Images reordered successfully', imgs);
+      return ApiResponse.success(
+        res,
+        'Images reordered successfully',
+        await expandS3RefsDeep(imgs),
+      );
     } catch (error) {
       return ApiResponse.serverError(res, 'Error reordering product images', error);
     }
@@ -693,13 +1032,13 @@ class ProductSqlService {
         );
         if (existing[0]) {
           await sqlExec(
-            'UPDATE inventory SET qty_on_hand = ?, qty_reserved = ? WHERE id = ?',
+            'UPDATE inventory SET qty_on_hand = ?, qty_reserved = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?',
             [body.qtyOnHand, body.qtyReserved ?? 0, existing[0].id],
             tx,
           );
         } else {
           await sqlExec(
-            'INSERT INTO inventory (store_location_id, variant_id, qty_on_hand, qty_reserved) VALUES (?, ?, ?, ?)',
+            'INSERT INTO inventory (store_location_id, variant_id, qty_on_hand, qty_reserved, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP(3))',
             [body.storeLocationId, body.variantId, body.qtyOnHand, body.qtyReserved ?? 0],
             tx,
           );
