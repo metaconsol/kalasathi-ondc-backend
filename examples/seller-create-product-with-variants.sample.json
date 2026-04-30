@@ -1,0 +1,56 @@
+{
+  "product_name": "Cotton Saree multi",
+  "category_id": 1,
+  "default_price": 1999,
+  "mrp": 2499,
+  "description": "With variants, product images, and per-variant images",
+  "publish_status": "draft",
+  "order_mode": "ONLINE",
+  "visibility": "PUBLIC",
+  "product_weight_gm": 420,
+  "product_length_cm": 550,
+  "product_width_cm": 120,
+  "product_height_cm": 3,
+  "package_weight_gm": 580,
+  "package_length_cm": 32,
+  "package_width_cm": 28,
+  "package_height_cm": 8,
+  "ondc_subcategory": "Handloom / Cotton Sarees",
+  "images": [
+    {
+      "imageUrl": "https://example.com/front.webp",
+      "altText": "Front view",
+      "sortOrder": 0
+    },
+    {
+      "image_url": "https://example.com/back.webp",
+      "alt_text": "Back",
+      "sort_order": 1
+    }
+  ],
+  "variants": [
+    {
+      "variant_name": "Red / Free size",
+      "sku": "SAR-RED-FS-001",
+      "price": 1999,
+      "mrp": 2499,
+      "unit_type": "piece",
+      "images": [
+        { "image_url": "https://example.com/red-1.webp", "sort_order": 0 },
+        { "imageUrl": "https://example.com/red-2.webp" }
+      ]
+    },
+    {
+      "variant_name": "Blue / Free size",
+      "sku": "SAR-BLU-FS-002",
+      "price": 2099,
+      "mrp": 2599,
+      "unit_type": "piece",
+      "images": [{ "image_url": "https://example.com/blue-1.webp" }]
+    }
+  ],
+  "attributes": [
+    { "attribute_key": "Material", "attribute_value": "Pure cotton" },
+    { "attributeKey": "Weave", "attributeValue": "Handloom" }
+  ]
+}

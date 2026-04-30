@@ -2,6 +2,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { ApiError } from '../lib/response';
+import { env } from '~/config/env.config';
 
 const uploadsRootDir = path.join(process.cwd(), 'public', 'uploads');
 const productImagesDir = path.join(uploadsRootDir, 'productImages');
@@ -26,9 +27,14 @@ const createDiskStorage = (destinationDir: string) =>
     },
   });
 
-// Storage configuration
+// Storage configuration — memory when S3 is configured so buffers can be uploaded without disk IO.
 const storage = createDiskStorage(uploadsRootDir);
-const productImageStorage = createDiskStorage(productImagesDir);
+const productImageStorage = env.isS3Configured
+  ? multer.memoryStorage()
+  : createDiskStorage(productImagesDir);
+const cmsUploadStorage = env.isS3Configured
+  ? multer.memoryStorage()
+  : createDiskStorage(uploadsRootDir);
 
 // File filter (validate file type)
 const fileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
@@ -66,6 +72,16 @@ export const upload = multer({
   },
   fileFilter,
 });
+
+/** CMS uploads (`upload.array`): disk locally, memory when S3 is enabled. */
+export const cmsUpload = multer({
+  storage: cmsUploadStorage,
+  limits: {
+    fileSize: 15 * 1024 * 1024, // 15MB
+  },
+  fileFilter,
+});
+
 export const productImageUpload = multer({
   storage: productImageStorage,
   limits: {

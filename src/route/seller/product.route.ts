@@ -7,6 +7,7 @@ import {
   updateProduct,
   deleteProduct,
   deleteProductImage,
+  deleteVariantImage,
   reorderProductImages,
   updateInventory,
   setServiceability,
@@ -58,6 +59,11 @@ router.put('/:product_id', uploadMany, updateProduct);
 router.delete('/:product_id', deleteProduct);
 
 // ─── Product images (dedicated) ─────────────────────────────────────────────
+
+/**
+ * DELETE /seller/.../products/:product_id/variants/:variant_id/images/:image_id
+ */
+router.delete('/:product_id/variants/:variant_id/images/:image_id', deleteVariantImage);
 
 /**
  * DELETE /seller/.../products/:product_id/images/:image_id

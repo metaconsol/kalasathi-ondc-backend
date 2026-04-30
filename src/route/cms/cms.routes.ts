@@ -1,5 +1,5 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
-import { upload, memoryUpload } from '~/middleware/multer';
+import { upload, memoryUpload, cmsUpload } from '~/middleware/multer';
 import { authMiddleware } from '~/middleware/auth.middleware';
 import { isAdmin } from '~/middleware/admin.middleware';
 import { asyncHandler } from '~/lib/response';
@@ -93,7 +93,7 @@ router.post(
   '/media/upload',
   authMiddleware,
   isAdmin,
-  upload.array('files', 10),
+  cmsUpload.array('files', 10),
   asyncHandler(mediaController.uploadMedia),
 );
 

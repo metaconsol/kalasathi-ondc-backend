@@ -58,4 +58,26 @@ export const env = {
   smsDltEntityId: process.env.SMS_DLT_ENTITY_ID || '',
   /** Template ID registered on DLT; required by many Indian routes if not in dashboard */
   smsDltTemplateId: process.env.SMS_DLT_TEMPLATE_ID || '',
+
+  /** S3 object storage (optional). Uses `AWS_ACCESS_KEY` / `AWS_SECRET_KEY` aliases if standard names unset. */
+  awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY || '',
+  awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || process.env.AWS_SECRET_KEY || '',
+  awsBucketName: process.env.AWS_BUCKET_NAME || '',
+  awsRegion: process.env.AWS_REGION || '',
+  /** Presigned GET expiry (seconds). Default 7 days. */
+  awsS3SignedUrlExpiresSeconds: parseInt(
+    process.env.AWS_S3_SIGNED_URL_EXPIRES_SECONDS || '604800',
+    10,
+  ),
+  /**
+   * If true, API returns virtual-host public object URLs instead of presigned URLs (bucket/objects must allow public read).
+   */
+  awsS3UsePublicUrl: process.env.AWS_S3_USE_PUBLIC_URL === 'true',
+
+  isS3Configured: !!(
+    (process.env.AWS_BUCKET_NAME || '').trim() &&
+    (process.env.AWS_REGION || '').trim() &&
+    (process.env.AWS_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY || '').trim() &&
+    (process.env.AWS_SECRET_ACCESS_KEY || process.env.AWS_SECRET_KEY || '').trim()
+  ),
 };

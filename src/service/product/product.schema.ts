@@ -3,6 +3,10 @@ import { UNIT_TYPE_VALUES, normalizeUnitTypeInput } from './product.unitType';
 
 export { UNIT_TYPE_OPTIONS, UNIT_TYPE_VALUES } from './product.unitType';
 
+/** HTTP(S), app-relative path, or S3 storage ref (`s3:object/key`) stored in DB. */
+const imageUrlAllowed = (s: string) =>
+  s.startsWith('http://') || s.startsWith('https://') || s.startsWith('/') || s.startsWith('s3:');
+
 const unitTypeSchema = z.preprocess(normalizeUnitTypeInput, z.enum(UNIT_TYPE_VALUES).optional());
 
 /** Maps Postman / previous API snake_case keys to our DTO shape */
@@ -57,6 +61,30 @@ export function normalizeSellerProductBody(raw: unknown): Record<string, unknown
   if (n.silkMark == null && r.silk_mark != null) n.silkMark = r.silk_mark;
   if (n.haveOndcAttributes == null && r.have_ondc_attributes != null)
     n.haveOndcAttributes = r.have_ondc_attributes;
+  if (n.productWeightGm == null && r.product_weight_gm != null)
+    n.productWeightGm = r.product_weight_gm;
+  if (n.productLengthCm == null && r.product_length_cm != null)
+    n.productLengthCm = r.product_length_cm;
+  if (n.productWidthCm == null && r.product_width_cm != null) n.productWidthCm = r.product_width_cm;
+  if (n.productHeightCm == null && r.product_height_cm != null)
+    n.productHeightCm = r.product_height_cm;
+  if (n.packageWeightGm == null && r.package_weight_gm != null)
+    n.packageWeightGm = r.package_weight_gm;
+  if (n.packageLengthCm == null && r.package_length_cm != null)
+    n.packageLengthCm = r.package_length_cm;
+  if (n.packageWidthCm == null && r.package_width_cm != null) n.packageWidthCm = r.package_width_cm;
+  if (n.packageHeightCm == null && r.package_height_cm != null)
+    n.packageHeightCm = r.package_height_cm;
+  if (n.packageWeightGm == null && r.shipping_pkg_weight_gm != null)
+    n.packageWeightGm = r.shipping_pkg_weight_gm;
+  if (n.packageLengthCm == null && r.shipping_pkg_length_cm != null)
+    n.packageLengthCm = r.shipping_pkg_length_cm;
+  if (n.packageWidthCm == null && r.shipping_pkg_width_cm != null)
+    n.packageWidthCm = r.shipping_pkg_width_cm;
+  if (n.packageHeightCm == null && r.shipping_pkg_height_cm != null)
+    n.packageHeightCm = r.shipping_pkg_height_cm;
+  if (n.ondcSubcategory == null && r.ondc_subcategory != null)
+    n.ondcSubcategory = r.ondc_subcategory;
   return n;
 }
 
@@ -94,6 +122,9 @@ export function normalizeVariantBody(raw: unknown): Record<string, unknown> {
     n.maxPurchaseLimit = r.max_purchase_limit;
   if (n.standardPackageQty == null && r.standard_package_qty != null)
     n.standardPackageQty = r.standard_package_qty;
+  if (n.stock == null && r.stock != null) n.stock = r.stock;
+  if (n.stock == null && r.qty_on_hand != null) n.stock = r.qty_on_hand;
+  if (n.stock == null && r.qtyOnHand != null) n.stock = r.qtyOnHand;
   return n;
 }
 
@@ -223,8 +254,8 @@ const variantImagePayloadItemSchema = z
     imageUrl: z
       .string()
       .min(1, 'imageUrl is required')
-      .refine((s) => s.startsWith('http://') || s.startsWith('https://') || s.startsWith('/'), {
-        message: 'imageUrl must be a URL or an absolute path',
+      .refine((s) => imageUrlAllowed(s), {
+        message: 'imageUrl must be a URL, absolute path, or s3:object/key',
       }),
     sortOrder: z.coerce.number().int().min(0).optional(),
   })
@@ -253,6 +284,8 @@ export const flatVariantCreateSchema = z.object({
   maxPurchaseLimit: z.coerce.number().int().optional(),
   standardPackageQty: z.coerce.number().int().optional(),
   images: variantImagesField,
+  /** Maps to `inventory.qty_on_hand` for this SKU (per default store location). */
+  stock: z.coerce.number().int().min(0).optional(),
 });
 
 /**
@@ -285,6 +318,8 @@ export const treeVariantShapeSchema = z.object({
   standardPackageQty: z.coerce.number().int().optional(),
   colorCode: z.string().max(255).optional(),
   images: variantImagesField,
+  /** Per-leaf qty on hand → `inventory` row (default store location). */
+  stock: z.coerce.number().int().min(0).optional(),
 });
 
 /**
@@ -339,8 +374,8 @@ const productImagePayloadItemSchema = z
     imageUrl: z
       .string()
       .min(1, 'imageUrl is required')
-      .refine((s) => s.startsWith('http://') || s.startsWith('https://') || s.startsWith('/'), {
-        message: 'imageUrl must be a URL or an absolute path',
+      .refine((s) => imageUrlAllowed(s), {
+        message: 'imageUrl must be a URL, absolute path, or s3:object/key',
       }),
     altText: z.string().optional(),
     sortOrder: z.coerce.number().int().min(0).optional(),
@@ -430,6 +465,15 @@ const productCoreSchema = z.object({
   giTag: z.boolean().optional(),
   silkMark: z.boolean().optional(),
   haveOndcAttributes: z.boolean().optional(),
+  productWeightGm: z.coerce.number().int().min(0).optional(),
+  productLengthCm: z.coerce.number().optional(),
+  productWidthCm: z.coerce.number().optional(),
+  productHeightCm: z.coerce.number().optional(),
+  packageWeightGm: z.coerce.number().int().min(0).optional(),
+  packageLengthCm: z.coerce.number().optional(),
+  packageWidthCm: z.coerce.number().optional(),
+  packageHeightCm: z.coerce.number().optional(),
+  ondcSubcategory: z.string().max(512).optional(),
 });
 
 /** @desc Create product. Omit `variants` or `[]` → one default sellable variant; set `variants` to pre-seed many rows.
@@ -440,7 +484,8 @@ export const createProductSchema = productCoreSchema.extend({
   attributes: productAttributesPayloadSchema.optional(),
 });
 
-const updateVariantInPayload = flatVariantCreateSchema.partial()
+const updateVariantInPayload = flatVariantCreateSchema
+  .partial()
   .extend({ id: z.coerce.bigint() })
   .refine((d) => d.id > 0n, { path: ['id'], message: 'id must be a positive BigInt' });
 
