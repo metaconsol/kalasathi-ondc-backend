@@ -1,5 +1,4 @@
-import { db } from '../lib/db';
-import { Prisma } from '../generated/prisma/client';
+import { sqlExec, sqlQuery, withSqlTransaction } from '~/lib/sql';
 
 export const createOrder = async (userId: number, data: any) => {
   const { cart_id, billing_address, shipping_address, currency = 'INR' } = data;
@@ -7,33 +6,31 @@ export const createOrder = async (userId: number, data: any) => {
   const parsedCartId = BigInt(cart_id);
 
   // Validate Cart
-  const cart = await db.cart.findUnique({
-    where: {
-      id: parsedCartId,
-    },
-    include: {
-      items: true,
-    },
-  });
+  const cartRows = await sqlQuery<any>('SELECT * FROM `carts` WHERE `id` = ? LIMIT 1', [
+    parsedCartId,
+  ]);
+  const cart = cartRows[0] ?? null;
 
   if (!cart) {
     throw new Error('Cart not found');
   }
 
-  if (cart.userId !== null && cart.userId !== BigInt(userId)) {
-    throw new Error(
-      `Cart belongs to a different user. cart.userId=${cart.userId}, userId=${userId}, cartId=${parsedCartId}`,
-    );
+  if (cart.user_id !== null && BigInt(cart.user_id) !== BigInt(userId)) {
+    throw new Error('Cart belongs to a different user');
   }
 
-  if (cart.items.length === 0) {
+  const items = await sqlQuery<any>(
+    'SELECT * FROM `cart_items` WHERE `cart_id` = ? ORDER BY `id` ASC',
+    [parsedCartId],
+  );
+  if (items.length === 0) {
     throw new Error('Cart is empty');
   }
 
   // Calculate total amount
   let totalAmount = 0;
-  cart.items.forEach((item) => {
-    totalAmount += item.qty * Number(item.priceSnapshot);
+  items.forEach((item: any) => {
+    totalAmount += item.qty * Number(item.price_snapshot);
   });
 
   // Determine the date prefix (e.g., ORD-20260425-)
@@ -50,111 +47,96 @@ export const createOrder = async (userId: number, data: any) => {
     : { ...billing_address, type: 'shipping' };
 
   // Run transaction
-  const result = await db.$transaction(async (tx: any) => {
+  const result = await withSqlTransaction(async (tx) => {
     // 1. Create Order with temp order_no
-    let order = await tx.order.create({
-      data: {
-        order_no: temp_order_no,
-        user_id: userId,
-        cart_id: parsedCartId,
-        status: 'pending',
-        payment_status: 'pending',
-        currency,
-        total_amount: totalAmount,
-      },
-    });
+    const orderRes = await sqlExec(
+      'INSERT INTO `orders` (`order_no`, `user_id`, `cart_id`, `status`, `payment_status`, `currency`, `total_amount`) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [temp_order_no, userId, parsedCartId, 'pending', 'pending', currency, totalAmount],
+      tx,
+    );
+    const orderId = BigInt(orderRes.insertId as any);
 
-    // Combine prefix and padded auto-increment DB ID (e.g. ORD-20260425-0001)
-    const final_order_no = `${prefix}${String(order.id).padStart(4, '0')}`;
+    // 2. Update final order_no
+    const final_order_no = `${prefix}${String(orderId).padStart(4, '0')}`;
+    await sqlExec(
+      'UPDATE `orders` SET `order_no` = ? WHERE `id` = ?',
+      [final_order_no, orderId],
+      tx,
+    );
 
-    // Update the record with the final order_no instantly
-    order = await tx.order.update({
-      where: { id: order.id },
-      data: { order_no: final_order_no },
-    });
+    // 3. Create OrderItems
+    for (const item of items) {
+      await sqlExec(
+        'INSERT INTO `order_items` (`order_id`, `product_id`, `variant_id`, `qty`, `price`, `total`, `item_status`) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [
+          orderId,
+          item.product_id,
+          item.variant_id,
+          item.qty,
+          item.price_snapshot,
+          item.qty * Number(item.price_snapshot),
+          'pending',
+        ],
+        tx,
+      );
+    }
 
-    // 2. Create OrderItems
-    const orderItemsData = cart.items.map((item) => ({
-      order_id: order.id,
-      product_id: item.productId,
-      variant_id: item.variantId,
-      qty: item.qty,
-      price: item.priceSnapshot,
-      total: item.qty * Number(item.priceSnapshot),
-      item_status: 'pending',
-    }));
+    // 4. Create Addresses
+    for (const addr of [billingAddress, shippingAddress]) {
+      await sqlExec(
+        'INSERT INTO `order_addresses` (`order_id`, `type`, `full_name`, `phone`, `address_line1`, `address_line2`, `city`, `district_id`, `state`, `state_id`, `country`, `pincode`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          orderId,
+          addr.type,
+          addr.full_name,
+          addr.phone,
+          addr.address_line1,
+          addr.address_line2 ?? null,
+          addr.city,
+          addr.city_id ?? null,
+          addr.state,
+          addr.state_id ?? null,
+          addr.country,
+          addr.pincode,
+        ],
+        tx,
+      );
+    }
 
-    await tx.orderItem.createMany({
-      data: orderItemsData,
-    });
+    // 5. Seller units
+    const storeIds = [...new Set(items.map((it: any) => String(it.store_id)))];
+    if (storeIds.length) {
+      const storeRows = await sqlQuery<any>(
+        `SELECT \`id\`, \`seller_user_id\` as sellerUserId FROM \`stores\` WHERE \`id\` IN (${storeIds
+          .map(() => '?')
+          .join(',')})`,
+        storeIds.map((s) => BigInt(s)),
+        tx,
+      );
+      const storeMap = new Map(storeRows.map((s: any) => [String(s.id), s.sellerUserId]));
+      for (const sid of storeIds) {
+        await sqlExec(
+          'INSERT INTO `seller_units` (`order_id`, `store_id`, `seller_id`, `status`) VALUES (?, ?, ?, ?)',
+          [orderId, BigInt(sid), storeMap.get(sid) ?? 0, 'pending'],
+          tx,
+        );
+      }
+    }
 
-    // 3. Create Addresses
-    await tx.orderAddress.createMany({
-      data: [
-        {
-          order_id: order.id,
-          type: billingAddress.type,
-          full_name: billingAddress.full_name,
-          phone: billingAddress.phone,
-          address_line1: billingAddress.address_line1,
-          address_line2: billingAddress.address_line2,
-          city: billingAddress.city,
-          district_id: billingAddress.city_id,
-          state: billingAddress.state,
-          state_id: billingAddress.state_id,
-          country: billingAddress.country,
-          pincode: billingAddress.pincode,
-        },
-        {
-          order_id: order.id,
-          type: shippingAddress.type,
-          full_name: shippingAddress.full_name,
-          phone: shippingAddress.phone,
-          address_line1: shippingAddress.address_line1,
-          address_line2: shippingAddress.address_line2,
-          city: shippingAddress.city,
-          district_id: shippingAddress.city_id,
-          state: shippingAddress.state,
-          state_id: shippingAddress.state_id,
-          country: shippingAddress.country,
-          pincode: shippingAddress.pincode,
-        },
-      ],
-    });
+    // 6. Clear cart
+    await sqlExec('DELETE FROM `cart_items` WHERE `cart_id` = ?', [parsedCartId], tx);
+    await sqlExec(
+      'UPDATE `carts` SET `status` = ? WHERE `id` = ?',
+      ['converted', parsedCartId],
+      tx,
+    );
 
-    // 4. Group items by store_id
-    const storeIds = [...new Set(cart.items.map((item) => item.storeId.toString()))];
-
-    // For each store, we need seller_id
-    // Fetch stores to get seller_id
-    const stores = await tx.store.findMany({
-      where: { id: { in: storeIds.map((id) => BigInt(id)) } },
-    });
-
-    const storeMap = new Map();
-    stores.forEach((s: any) => storeMap.set(s.id.toString(), s.sellerUserId));
-
-    const sellerUnitsData = storeIds.map((storeIdStr) => ({
-      order_id: order.id,
-      store_id: BigInt(storeIdStr),
-      seller_id: storeMap.get(storeIdStr) || 0,
-      status: 'pending',
-    }));
-
-    await tx.sellerUnit.createMany({
-      data: sellerUnitsData,
-    });
-
-    // 5. Clear cart (Assuming clear means delete items and make status converted)
-    await tx.cartItem.deleteMany({
-      where: { cartId: parsedCartId },
-    });
-    await tx.cart.update({
-      where: { id: parsedCartId },
-      data: { status: 'converted' },
-    });
-
-    return order;
+    const orders = await sqlQuery<any>(
+      'SELECT * FROM `orders` WHERE `id` = ? LIMIT 1',
+      [orderId],
+      tx,
+    );
+    return orders[0] ?? null;
   });
 
   return result;
@@ -163,21 +145,27 @@ export const createOrder = async (userId: number, data: any) => {
 export const listOrders = async (userId: number, filters: any) => {
   const { status, payment_status, page, limit } = filters;
 
-  const where: any = { user_id: userId };
-  if (status) where.status = status;
-  if (payment_status) where.payment_status = payment_status;
-
   const skip = (page - 1) * limit;
 
-  const [data, total] = await Promise.all([
-    db.order.findMany({
-      where,
-      skip,
-      take: limit,
-      orderBy: { created_at: 'desc' },
-    }),
-    db.order.count({ where }),
+  const args: any[] = [userId];
+  let whereSql = '`user_id` = ?';
+  if (status) {
+    whereSql += ' AND `status` = ?';
+    args.push(status);
+  }
+  if (payment_status) {
+    whereSql += ' AND `payment_status` = ?';
+    args.push(payment_status);
+  }
+
+  const [data, totalRows] = await Promise.all([
+    sqlQuery<any>(
+      `SELECT * FROM \`orders\` WHERE ${whereSql} ORDER BY \`created_at\` DESC LIMIT ? OFFSET ?`,
+      [...args, limit, skip],
+    ),
+    sqlQuery<{ total: number }>(`SELECT COUNT(*) as total FROM \`orders\` WHERE ${whereSql}`, args),
   ]);
+  const total = Number(totalRows?.[0]?.total ?? 0);
 
   return {
     data,
@@ -192,35 +180,43 @@ export const listOrders = async (userId: number, filters: any) => {
 
 export const getOrderDetails = async (userId: number, idOrNo: string) => {
   const isNumeric = /^\d+$/.test(idOrNo);
-  const whereCl: any = { user_id: userId };
-
+  const args: any[] = [userId];
+  let whereSql = '`user_id` = ?';
   if (isNumeric) {
-    whereCl.id = BigInt(idOrNo);
+    whereSql += ' AND `id` = ?';
+    args.push(BigInt(idOrNo));
   } else {
-    whereCl.order_no = idOrNo;
+    whereSql += ' AND `order_no` = ?';
+    args.push(idOrNo);
   }
-
-  const order = await db.order.findFirst({
-    where: whereCl,
-    include: {
-      items: true,
-      addresses: true,
-      seller_units: true,
-    },
-  });
-
-  return order;
+  const orders = await sqlQuery<any>(`SELECT * FROM \`orders\` WHERE ${whereSql} LIMIT 1`, args);
+  const order = orders[0] ?? null;
+  if (!order) return null;
+  const [items, addresses, seller_units] = await Promise.all([
+    sqlQuery<any>('SELECT * FROM `order_items` WHERE `order_id` = ? ORDER BY `id` ASC', [order.id]),
+    sqlQuery<any>('SELECT * FROM `order_addresses` WHERE `order_id` = ? ORDER BY `id` ASC', [
+      order.id,
+    ]),
+    sqlQuery<any>('SELECT * FROM `seller_units` WHERE `order_id` = ? ORDER BY `id` ASC', [
+      order.id,
+    ]),
+  ]);
+  return { ...order, items, addresses, seller_units };
 };
 
 export const cancelOrder = async (userId: number, id: string, note?: string) => {
   const isNumeric = /^\d+$/.test(id);
-  const whereCl: any = { user_id: userId };
-  if (isNumeric) whereCl.id = BigInt(id);
-  else whereCl.order_no = id;
-
-  const order = await db.order.findFirst({
-    where: whereCl,
-  });
+  const args: any[] = [userId];
+  let whereSql = '`user_id` = ?';
+  if (isNumeric) {
+    whereSql += ' AND `id` = ?';
+    args.push(BigInt(id));
+  } else {
+    whereSql += ' AND `order_no` = ?';
+    args.push(id);
+  }
+  const rows = await sqlQuery<any>(`SELECT * FROM \`orders\` WHERE ${whereSql} LIMIT 1`, args);
+  const order = rows[0] ?? null;
 
   if (!order) {
     throw new Error('Order not found');
@@ -230,24 +226,24 @@ export const cancelOrder = async (userId: number, id: string, note?: string) => 
     throw new Error('Cannot cancel order because it is not in pending or confirmed state');
   }
 
-  const result = await db.$transaction(async (tx: any) => {
-    const updatedOrder = await tx.order.update({
-      where: { id: order.id },
-      data: { status: 'cancelled' }, // Could store note in adminNotes or a separate column if it existed
-    });
-
-    await tx.orderItem.updateMany({
-      where: { order_id: order.id },
-      data: { item_status: 'cancelled' },
-    });
-
-    // Also update seller_units
-    await tx.sellerUnit.updateMany({
-      where: { order_id: order.id },
-      data: { status: 'cancelled' },
-    });
-
-    return updatedOrder;
+  const result = await withSqlTransaction(async (tx) => {
+    await sqlExec('UPDATE `orders` SET `status` = ? WHERE `id` = ?', ['cancelled', order.id], tx);
+    await sqlExec(
+      'UPDATE `order_items` SET `item_status` = ? WHERE `order_id` = ?',
+      ['cancelled', order.id],
+      tx,
+    );
+    await sqlExec(
+      'UPDATE `seller_units` SET `status` = ? WHERE `order_id` = ?',
+      ['cancelled', order.id],
+      tx,
+    );
+    const updated = await sqlQuery<any>(
+      'SELECT * FROM `orders` WHERE `id` = ? LIMIT 1',
+      [order.id],
+      tx,
+    );
+    return updated[0] ?? null;
   });
 
   return result;
@@ -255,49 +251,51 @@ export const cancelOrder = async (userId: number, id: string, note?: string) => 
 
 export const orderTracking = async (userId: number, id: string) => {
   const isNumeric = /^\d+$/.test(id);
-  const whereCl: any = { user_id: userId };
-  if (isNumeric) whereCl.id = BigInt(id);
-  else whereCl.order_no = id;
-
-  const order = await db.order.findFirst({
-    where: whereCl,
-    include: {
-      seller_units: {
-        select: {
-          id: true,
-          tracking_no: true,
-          logistics_provider: true,
-          status: true,
-        },
-      },
-    },
-  });
+  const args: any[] = [userId];
+  let whereSql = '`user_id` = ?';
+  if (isNumeric) {
+    whereSql += ' AND `id` = ?';
+    args.push(BigInt(id));
+  } else {
+    whereSql += ' AND `order_no` = ?';
+    args.push(id);
+  }
+  const orders = await sqlQuery<any>(`SELECT * FROM \`orders\` WHERE ${whereSql} LIMIT 1`, args);
+  const order = orders[0] ?? null;
 
   if (!order) {
     throw new Error('Order not found');
   }
 
-  return { seller_units: order.seller_units };
+  const seller_units = await sqlQuery<any>(
+    'SELECT `id`, `tracking_no`, `logistics_provider`, `status` FROM `seller_units` WHERE `order_id` = ? ORDER BY `id` ASC',
+    [order.id],
+  );
+  return { seller_units };
 };
 
 export const listReturns = async (userId: number, id: string) => {
   const isNumeric = /^\d+$/.test(id);
-  const whereCl: any = { user_id: userId };
-  if (isNumeric) whereCl.id = BigInt(id);
-  else whereCl.order_no = id;
-
-  const order = await db.order.findFirst({
-    where: whereCl,
-  });
+  const args: any[] = [userId];
+  let whereSql = '`user_id` = ?';
+  if (isNumeric) {
+    whereSql += ' AND `id` = ?';
+    args.push(BigInt(id));
+  } else {
+    whereSql += ' AND `order_no` = ?';
+    args.push(id);
+  }
+  const orders = await sqlQuery<any>(`SELECT * FROM \`orders\` WHERE ${whereSql} LIMIT 1`, args);
+  const order = orders[0] ?? null;
 
   if (!order) {
     throw new Error('Order not found');
   }
 
-  const returns = await db.return.findMany({
-    where: { order_id: order.id },
-    orderBy: { created_at: 'desc' },
-  });
+  const returns = await sqlQuery<any>(
+    'SELECT * FROM `returns` WHERE `order_id` = ? ORDER BY `created_at` DESC',
+    [order.id],
+  );
 
   return returns;
 };
@@ -306,24 +304,27 @@ export const requestReturn = async (userId: number, id: string, data: any) => {
   const { order_item_id, reason, refund_amount, refund_mode } = data;
 
   const isNumeric = /^\d+$/.test(id);
-  const whereCl: any = { user_id: userId };
-  if (isNumeric) whereCl.id = BigInt(id);
-  else whereCl.order_no = id;
-
-  const order = await db.order.findFirst({
-    where: whereCl,
-  });
+  const args: any[] = [userId];
+  let whereSql = '`user_id` = ?';
+  if (isNumeric) {
+    whereSql += ' AND `id` = ?';
+    args.push(BigInt(id));
+  } else {
+    whereSql += ' AND `order_no` = ?';
+    args.push(id);
+  }
+  const orders = await sqlQuery<any>(`SELECT * FROM \`orders\` WHERE ${whereSql} LIMIT 1`, args);
+  const order = orders[0] ?? null;
 
   if (!order) {
     throw new Error('Order not found');
   }
 
-  const orderItem = await db.orderItem.findFirst({
-    where: {
-      id: BigInt(order_item_id),
-      order_id: order.id,
-    },
-  });
+  const itemRows = await sqlQuery<any>(
+    'SELECT * FROM `order_items` WHERE `id` = ? AND `order_id` = ? LIMIT 1',
+    [BigInt(order_item_id), order.id],
+  );
+  const orderItem = itemRows[0] ?? null;
 
   if (!orderItem) {
     throw new Error('Order Item not found or does not belong to this order');
@@ -333,24 +334,23 @@ export const requestReturn = async (userId: number, id: string, data: any) => {
     throw new Error('Can only return delivered items');
   }
 
-  const result = await db.$transaction(async (tx: any) => {
-    const returnReq = await tx.return.create({
-      data: {
-        order_id: order.id,
-        order_item_id: orderItem.id,
-        reason,
-        refund_amount: Number(refund_amount),
-        refund_mode,
-        status: 'pending', // pending initially
-      },
-    });
-
-    await tx.orderItem.update({
-      where: { id: orderItem.id },
-      data: { item_status: 'returned' },
-    });
-
-    return returnReq;
+  const result = await withSqlTransaction(async (tx) => {
+    const res = await sqlExec(
+      'INSERT INTO `returns` (`order_id`, `order_item_id`, `reason`, `refund_amount`, `refund_mode`, `status`) VALUES (?, ?, ?, ?, ?, ?)',
+      [order.id, orderItem.id, reason, Number(refund_amount), refund_mode, 'pending'],
+      tx,
+    );
+    await sqlExec(
+      'UPDATE `order_items` SET `item_status` = ? WHERE `id` = ?',
+      ['returned', orderItem.id],
+      tx,
+    );
+    const rows = await sqlQuery<any>(
+      'SELECT * FROM `returns` WHERE `id` = ? LIMIT 1',
+      [BigInt(res.insertId as any)],
+      tx,
+    );
+    return rows[0] ?? null;
   });
 
   return result;

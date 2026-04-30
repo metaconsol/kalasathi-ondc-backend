@@ -1,18 +1,18 @@
 import 'dotenv/config';
 import { createServer } from 'node:http';
-import { db } from '~/lib/db';
 import { logger } from '~/lib/logger';
 import { env } from '~/config/env.config';
 import { createApp } from './app';
+import { sqlQuery } from '~/lib/sql';
 
 async function startServer() {
   const app = createApp();
   const server = createServer(app);
 
   try {
-    // 1. Establish Database Connection
-    await db.$connect();
-    logger.info('Prisma connected to the database successfully');
+    // 1. Verify Database Connection
+    await sqlQuery('SELECT 1 as ok');
+    logger.info('Database connected successfully');
 
     // 2. Resolve Port
     const port = parseInt(process.env.PORT || env.serverPort.toString() || '5001', 10);

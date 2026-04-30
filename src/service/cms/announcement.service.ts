@@ -1,4 +1,4 @@
-import { db } from '~/lib/db';
+import { sqlExec, sqlQuery } from '~/lib/sql';
 
 export const createAnnouncementService = async (data: {
   text: string;
@@ -8,16 +8,27 @@ export const createAnnouncementService = async (data: {
   startAt?: Date;
   endAt?: Date;
 }) => {
-  return db.announcement.create({
-    data,
-  });
+  const res = await sqlExec(
+    'INSERT INTO `Announcement` (`text`, `contactPhone`, `contactEmail`, `isPublished`, `startAt`, `endAt`) VALUES (?, ?, ?, ?, ?, ?)',
+    [
+      data.text,
+      data.contactPhone ?? null,
+      data.contactEmail ?? null,
+      data.isPublished ?? false,
+      data.startAt ?? null,
+      data.endAt ?? null,
+    ],
+  );
+  const rows = await sqlQuery('SELECT * FROM `Announcement` WHERE `id` = ? LIMIT 1', [
+    Number(res.insertId),
+  ]);
+  return rows[0] ?? null;
 };
 
 export const getAllAnnouncementsService = async () => {
-  return db.announcement.findMany({
-    where: { deletedAt: null },
-    orderBy: { createdAt: 'desc' },
-  });
+  return sqlQuery(
+    'SELECT * FROM `Announcement` WHERE `deletedAt` IS NULL ORDER BY `createdAt` DESC',
+  );
 };
 
 export const updateAnnouncementService = async (
@@ -31,54 +42,64 @@ export const updateAnnouncementService = async (
     endAt: Date | null;
   }>,
 ) => {
-  return db.announcement.update({
-    where: { id },
-    data,
-  });
+  const patch = {
+    text: data.text ?? undefined,
+    contactPhone: data.contactPhone ?? undefined,
+    contactEmail: data.contactEmail ?? undefined,
+    isPublished: data.isPublished ?? undefined,
+    startAt: data.startAt ?? undefined,
+    endAt: data.endAt ?? undefined,
+  } as const;
+
+  const fields: string[] = [];
+  const values: any[] = [];
+  for (const [k, v] of Object.entries(patch)) {
+    if (v !== undefined) {
+      fields.push(`\`${k}\` = ?`);
+      values.push(v);
+    }
+  }
+  if (fields.length === 0) {
+    const rows = await sqlQuery('SELECT * FROM `Announcement` WHERE `id` = ? LIMIT 1', [id]);
+    return rows[0] ?? null;
+  }
+  await sqlExec(`UPDATE \`Announcement\` SET ${fields.join(', ')} WHERE \`id\` = ?`, [
+    ...values,
+    id,
+  ]);
+  const rows = await sqlQuery('SELECT * FROM `Announcement` WHERE `id` = ? LIMIT 1', [id]);
+  return rows[0] ?? null;
 };
 
 export const deleteAnnouncementService = async (id: number) => {
-  return db.announcement.update({
-    where: { id },
-    data: {
-      deletedAt: new Date(),
-    },
-  });
+  await sqlExec('UPDATE `Announcement` SET `deletedAt` = NOW() WHERE `id` = ?', [id]);
+  const rows = await sqlQuery('SELECT * FROM `Announcement` WHERE `id` = ? LIMIT 1', [id]);
+  return rows[0] ?? null;
 };
 
 export const toggleAnnouncementService = async (id: number) => {
-  const announcement = await db.announcement.findUnique({
-    where: { id, deletedAt: null },
-  });
+  const rows = await sqlQuery(
+    'SELECT * FROM `Announcement` WHERE `id` = ? AND `deletedAt` IS NULL LIMIT 1',
+    [id],
+  );
+  const announcement = rows[0] ?? null;
 
   if (!announcement) {
     throw new Error('Announcement not found');
   }
 
-  return db.announcement.update({
-    where: { id },
-    data: {
-      isPublished: !announcement.isPublished,
-    },
-  });
+  await sqlExec('UPDATE `Announcement` SET `isPublished` = ? WHERE `id` = ?', [
+    !announcement.isPublished,
+    id,
+  ]);
+  const updated = await sqlQuery('SELECT * FROM `Announcement` WHERE `id` = ? LIMIT 1', [id]);
+  return updated[0] ?? null;
 };
 
 export const getActiveAnnouncementsService = async () => {
   const now = new Date();
-
-  return db.announcement.findMany({
-    where: {
-      isPublished: true,
-      deletedAt: null,
-      AND: [
-        {
-          OR: [{ startAt: null }, { startAt: { lte: now } }],
-        },
-        {
-          OR: [{ endAt: null }, { endAt: { gte: now } }],
-        },
-      ],
-    },
-    orderBy: { createdAt: 'desc' },
-  });
+  return sqlQuery(
+    'SELECT * FROM `Announcement` WHERE `isPublished` = true AND `deletedAt` IS NULL AND (`startAt` IS NULL OR `startAt` <= ?) AND (`endAt` IS NULL OR `endAt` >= ?) ORDER BY `createdAt` DESC',
+    [now, now],
+  );
 };

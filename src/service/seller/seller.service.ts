@@ -1,6 +1,7 @@
-import { db } from '~/lib/db';
+import { sqlExec, sqlQuery, withSqlTransaction } from '~/lib/sql';
 import { ApiError } from '~/lib/response';
-import { KycStatus, StoreLocationType } from '~/generated/prisma/enums';
+export type KycStatus = 'PENDING' | 'SUBMITTED' | 'IN_REVIEW' | 'VERIFIED' | 'REJECTED';
+export type StoreLocationType = 'DELIVERY' | 'SELF_PICKUP' | 'RETURN';
 
 /** Active stores only (not soft-deleted). */
 const storeIsActiveRow = { deletedAt: null } as const;
@@ -36,7 +37,11 @@ async function allocateStoreSlug(storeName: string, preferredSlug?: string): Pro
   let slug = base;
   let i = 0;
   for (;;) {
-    const hit = await db.store.findUnique({ where: { storeSlug: slug }, select: { id: true } });
+    const hitRows = await sqlQuery<{ id: bigint }>(
+      'SELECT `id` FROM `stores` WHERE `store_slug` = ? LIMIT 1',
+      [slug],
+    );
+    const hit = hitRows[0] ?? null;
     if (!hit) return slug;
     i += 1;
     slug = `${base}-${i}`;
@@ -44,31 +49,48 @@ async function allocateStoreSlug(storeName: string, preferredSlug?: string): Pro
 }
 
 export async function assertStoreOwnedBySeller(storeId: bigint, sellerUserId: number) {
-  const store = await db.store.findFirst({
-    where: { id: storeId, sellerUserId, ...storeIsActiveRow },
-  });
+  const rows = await sqlQuery(
+    'SELECT `id`, `seller_user_id` as sellerUserId, `store_name` as storeName, `store_slug` as storeSlug, `description`, `support_email` as supportEmail, `support_phone` as supportPhone, `is_active` as isActive, `deleted_at` as deletedAt, `created_at` as createdAt, `updated_at` as updatedAt FROM `stores` WHERE `id` = ? AND `seller_user_id` = ? AND `deleted_at` IS NULL LIMIT 1',
+    [storeId, sellerUserId],
+  );
+  const store = rows[0] ?? null;
   if (!store) {
     throw ApiError.NOT_FOUND('Store not found');
   }
   return store;
 }
 
-export function serializeLocation(loc: {
-  id: bigint;
-  storeId: bigint;
-  radiusKm: bigint | null;
-  latitude?: unknown;
-  longitude?: unknown;
-  [key: string]: unknown;
-}) {
-  const { id, storeId, radiusKm, latitude, longitude, ...rest } = loc;
+// export function serializeLocation(loc: {
+//   id: bigint;
+//   storeId: bigint;
+//   radiusKm: bigint | null;
+//   latitude?: unknown;
+//   longitude?: unknown;
+//   [key: string]: unknown;
+// }) {
+//   const { id, storeId, radiusKm, latitude, longitude, ...rest } = loc;
+//   return {
+//     ...rest,
+//     id: id.toString(),
+//     storeId: storeId.toString(),
+//     radiusKm: radiusKm !== null ? radiusKm.toString() : null,
+//     latitude: latitude != null ? String(latitude) : null,
+//     longitude: longitude != null ? String(longitude) : null,
+//   };
+// }
+
+export function serializeLocation(loc: any) {
   return {
-    ...rest,
-    id: id.toString(),
-    storeId: storeId.toString(),
-    radiusKm: radiusKm !== null ? radiusKm.toString() : null,
-    latitude: latitude != null ? String(latitude) : null,
-    longitude: longitude != null ? String(longitude) : null,
+    ...loc,
+
+    id: loc.id ? loc.id.toString() : null,
+
+    storeId: loc.storeId ? loc.storeId.toString() : loc.store_id ? loc.store_id.toString() : null,
+
+    radiusKm: loc.radiusKm ? loc.radiusKm.toString() : loc.radius ? loc.radius.toString() : null,
+
+    latitude: loc.latitude != null ? String(loc.latitude) : null,
+    longitude: loc.longitude != null ? String(loc.longitude) : null,
   };
 }
 
@@ -105,7 +127,10 @@ function locationCreateData(storeId: bigint, locationType: StoreLocationType, bo
 }
 
 export async function getSellerProfile(userId: number) {
-  return db.sellerProfile.findUnique({ where: { userId } });
+  const rows = await sqlQuery('SELECT * FROM `seller_profiles` WHERE `user_id` = ? LIMIT 1', [
+    userId,
+  ]);
+  return rows[0] ?? null;
 }
 
 export async function upsertSellerProfile(
@@ -119,7 +144,11 @@ export async function upsertSellerProfile(
     kycStatus?: KycStatus;
   },
 ) {
-  const existing = await db.sellerProfile.findUnique({ where: { userId } });
+  const existingRows = await sqlQuery<any>(
+    'SELECT * FROM `seller_profiles` WHERE `user_id` = ? LIMIT 1',
+    [userId],
+  );
+  const existing = existingRows[0] ?? null;
 
   const gstin = data.gstin !== undefined ? (data.gstin?.trim() ?? null) : (existing?.gstin ?? null);
   const pan =
@@ -136,50 +165,52 @@ export async function upsertSellerProfile(
 
   let kycStatus = data.kycStatus;
   if (kycStatus === undefined) {
+    const existingStatus = (existing?.kyc_status ??
+      existing?.kycStatus ??
+      null) as KycStatus | null;
     const locked =
-      existing?.kycStatus === KycStatus.VERIFIED ||
-      existing?.kycStatus === KycStatus.IN_REVIEW ||
-      existing?.kycStatus === KycStatus.REJECTED;
+      existingStatus === 'VERIFIED' ||
+      existingStatus === 'IN_REVIEW' ||
+      existingStatus === 'REJECTED';
     if (locked) {
-      kycStatus = existing!.kycStatus;
+      kycStatus = existingStatus!;
     } else if (gstin && pan) {
-      kycStatus = KycStatus.SUBMITTED;
+      kycStatus = 'SUBMITTED';
     } else {
-      kycStatus = KycStatus.PENDING;
+      kycStatus = 'PENDING';
     }
   }
 
-  return db.sellerProfile.upsert({
-    where: { userId },
-    create: {
-      userId,
-      gstin,
-      pan,
-      bankAccountNo,
-      bankIfsc,
-      upiId,
-      kycStatus,
-    },
-    update: {
-      ...(data.gstin !== undefined && { gstin: data.gstin?.trim() ?? null }),
-      ...(data.pan !== undefined && { pan: data.pan?.trim()?.toUpperCase() ?? null }),
-      ...(data.bankAccountNo !== undefined && {
-        bankAccountNo: data.bankAccountNo?.trim() ?? null,
-      }),
-      ...(data.bankIfsc !== undefined && {
-        bankIfsc: data.bankIfsc?.trim()?.toUpperCase() ?? null,
-      }),
-      ...(data.upiId !== undefined && { upiId: data.upiId?.trim() ?? null }),
-      kycStatus,
-    },
-  });
+  if (!existing) {
+    await sqlExec(
+      'INSERT INTO `seller_profiles` (`user_id`, `gstin`, `pan`, `bank_account_no`, `bank_ifsc`, `upi_id`, `kyc_status`) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [userId, gstin, pan, bankAccountNo, bankIfsc, upiId, kycStatus],
+    );
+  } else {
+    await sqlExec(
+      'UPDATE `seller_profiles` SET `gstin` = ?, `pan` = ?, `bank_account_no` = ?, `bank_ifsc` = ?, `upi_id` = ?, `kyc_status` = ? WHERE `user_id` = ?',
+      [
+        data.gstin !== undefined ? (data.gstin?.trim() ?? null) : gstin,
+        data.pan !== undefined ? (data.pan?.trim()?.toUpperCase() ?? null) : pan,
+        data.bankAccountNo !== undefined ? (data.bankAccountNo?.trim() ?? null) : bankAccountNo,
+        data.bankIfsc !== undefined ? (data.bankIfsc?.trim()?.toUpperCase() ?? null) : bankIfsc,
+        data.upiId !== undefined ? (data.upiId?.trim() ?? null) : upiId,
+        kycStatus,
+        userId,
+      ],
+    );
+  }
+  const out = await sqlQuery<any>('SELECT * FROM `seller_profiles` WHERE `user_id` = ? LIMIT 1', [
+    userId,
+  ]);
+  return out[0] ?? null;
 }
 
 export async function listStoresForSeller(sellerUserId: number) {
-  const rows = await db.store.findMany({
-    where: { sellerUserId, ...storeIsActiveRow },
-    orderBy: { createdAt: 'desc' },
-  });
+  const rows = await sqlQuery<any>(
+    'SELECT `id`, `seller_user_id` as sellerUserId, `store_name` as storeName, `store_slug` as storeSlug, `description`, `support_email` as supportEmail, `support_phone` as supportPhone, `is_active` as isActive, `deleted_at` as deletedAt, `created_at` as createdAt, `updated_at` as updatedAt FROM `stores` WHERE `seller_user_id` = ? AND `deleted_at` IS NULL ORDER BY `created_at` DESC',
+    [sellerUserId],
+  );
   return rows.map(serializeStore);
 }
 
@@ -195,18 +226,23 @@ export async function createStoreForSeller(
   },
 ) {
   const storeSlug = await allocateStoreSlug(body.storeName, body.storeSlug);
-  const store = await db.store.create({
-    data: {
+  const res = await sqlExec(
+    'INSERT INTO `stores` (`seller_user_id`, `store_name`, `store_slug`, `description`, `support_email`, `support_phone`, `is_active`) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [
       sellerUserId,
-      storeName: body.storeName.trim(),
+      body.storeName.trim(),
       storeSlug,
-      description: body.description?.trim() ?? null,
-      supportEmail: body.supportEmail?.trim() ?? null,
-      supportPhone: body.supportPhone?.trim() ?? null,
-      isActive: body.isActive ?? true,
-    },
-  });
-  return serializeStore(store);
+      body.description?.trim() ?? null,
+      body.supportEmail?.trim() ?? null,
+      body.supportPhone?.trim() ?? null,
+      body.isActive ?? true,
+    ],
+  );
+  const rows = await sqlQuery<any>(
+    'SELECT `id`, `seller_user_id` as sellerUserId, `store_name` as storeName, `store_slug` as storeSlug, `description`, `support_email` as supportEmail, `support_phone` as supportPhone, `is_active` as isActive, `deleted_at` as deletedAt, `created_at` as createdAt, `updated_at` as updatedAt FROM `stores` WHERE `id` = ? LIMIT 1',
+    [BigInt(res.insertId as any)],
+  );
+  return serializeStore(rows[0]);
 }
 
 export async function getStoreForSeller(
@@ -214,14 +250,20 @@ export async function getStoreForSeller(
   sellerUserId: number,
   includeLocations: boolean,
 ) {
-  const store = await db.store.findFirst({
-    where: { id: storeId, sellerUserId, ...storeIsActiveRow },
-    ...(includeLocations ? { include: { locations: { orderBy: { createdAt: 'desc' } } } } : {}),
-  });
+  const storeRows = await sqlQuery<any>(
+    'SELECT `id`, `seller_user_id` as sellerUserId, `store_name` as storeName, `store_slug` as storeSlug, `description`, `support_email` as supportEmail, `support_phone` as supportPhone, `is_active` as isActive, `deleted_at` as deletedAt, `created_at` as createdAt, `updated_at` as updatedAt FROM `stores` WHERE `id` = ? AND `seller_user_id` = ? AND `deleted_at` IS NULL LIMIT 1',
+    [storeId, sellerUserId],
+  );
+  const store = storeRows[0] ?? null;
   if (!store) {
     throw ApiError.NOT_FOUND('Store not found');
   }
-  return serializeStore(store as any);
+  if (!includeLocations) return serializeStore(store as any);
+  const locRows = await sqlQuery<any>(
+    'SELECT * FROM `store_locations` WHERE `store_id` = ? ORDER BY `created_at` DESC',
+    [storeId],
+  );
+  return serializeStore({ ...(store as any), locations: locRows } as any);
 }
 
 async function uniqueStoreSlugForUpdate(
@@ -232,10 +274,11 @@ async function uniqueStoreSlugForUpdate(
   let slug = base;
   let i = 0;
   for (;;) {
-    const other = await db.store.findUnique({
-      where: { storeSlug: slug },
-      select: { id: true },
-    });
+    const otherRows = await sqlQuery<{ id: bigint }>(
+      'SELECT `id` FROM `stores` WHERE `store_slug` = ? LIMIT 1',
+      [slug],
+    );
+    const other = otherRows[0] ?? null;
     if (!other || other.id === excludeStoreId) {
       return slug;
     }
@@ -256,9 +299,11 @@ export async function updateStoreForSeller(
     isActive: boolean;
   }>,
 ) {
-  const current = await db.store.findFirst({
-    where: { id: storeId, sellerUserId, ...storeIsActiveRow },
-  });
+  const currentRows = await sqlQuery<any>(
+    'SELECT `id`, `seller_user_id` as sellerUserId, `store_name` as storeName, `store_slug` as storeSlug, `description`, `support_email` as supportEmail, `support_phone` as supportPhone, `is_active` as isActive, `deleted_at` as deletedAt, `created_at` as createdAt, `updated_at` as updatedAt FROM `stores` WHERE `id` = ? AND `seller_user_id` = ? AND `deleted_at` IS NULL LIMIT 1',
+    [storeId, sellerUserId],
+  );
+  const current = currentRows[0] ?? null;
   if (!current) {
     throw ApiError.NOT_FOUND('Store not found');
   }
@@ -271,18 +316,23 @@ export async function updateStoreForSeller(
     }
   }
 
-  const updated = await db.store.update({
-    where: { id: storeId },
-    data: {
-      ...(body.storeName !== undefined && { storeName: body.storeName.trim() }),
-      ...(body.storeSlug !== undefined && { storeSlug: nextSlug }),
-      ...(body.description !== undefined && { description: body.description?.trim() ?? null }),
-      ...(body.supportEmail !== undefined && { supportEmail: body.supportEmail?.trim() ?? null }),
-      ...(body.supportPhone !== undefined && { supportPhone: body.supportPhone?.trim() ?? null }),
-      ...(body.isActive !== undefined && { isActive: body.isActive }),
-    },
-  });
-  return serializeStore(updated);
+  await sqlExec(
+    'UPDATE `stores` SET `store_name` = ?, `store_slug` = ?, `description` = ?, `support_email` = ?, `support_phone` = ?, `is_active` = ? WHERE `id` = ?',
+    [
+      body.storeName !== undefined ? body.storeName.trim() : current.storeName,
+      body.storeSlug !== undefined ? nextSlug : current.storeSlug,
+      body.description !== undefined ? (body.description?.trim() ?? null) : current.description,
+      body.supportEmail !== undefined ? (body.supportEmail?.trim() ?? null) : current.supportEmail,
+      body.supportPhone !== undefined ? (body.supportPhone?.trim() ?? null) : current.supportPhone,
+      body.isActive !== undefined ? body.isActive : current.isActive,
+      storeId,
+    ],
+  );
+  const rows = await sqlQuery<any>(
+    'SELECT `id`, `seller_user_id` as sellerUserId, `store_name` as storeName, `store_slug` as storeSlug, `description`, `support_email` as supportEmail, `support_phone` as supportPhone, `is_active` as isActive, `deleted_at` as deletedAt, `created_at` as createdAt, `updated_at` as updatedAt FROM `stores` WHERE `id` = ? LIMIT 1',
+    [storeId],
+  );
+  return serializeStore(rows[0]);
 }
 
 /** Frees `storeSlug` for reuse while keeping the row (soft delete). */
@@ -293,31 +343,30 @@ async function uniqueArchivedStoreSlug(storeId: bigint, baseSlug: string): Promi
     const budget = 255 - suffix.length - extra.length;
     const stem = baseSlug.slice(0, Math.max(1, budget));
     const candidate = `${stem}${extra}${suffix}`.slice(0, 255);
-    const clash = await db.store.findFirst({
-      where: { storeSlug: candidate, NOT: { id: storeId } },
-      select: { id: true },
-    });
+    const clashRows = await sqlQuery<{ id: bigint }>(
+      'SELECT `id` FROM `stores` WHERE `store_slug` = ? AND `id` <> ? LIMIT 1',
+      [candidate, storeId],
+    );
+    const clash = clashRows[0] ?? null;
     if (!clash) return candidate;
   }
   throw ApiError.CONFLICT('Could not allocate archived store slug');
 }
 
 export async function deleteStoreForSeller(storeId: bigint, sellerUserId: number) {
-  const store = await db.store.findFirst({
-    where: { id: storeId, sellerUserId, ...storeIsActiveRow },
-  });
+  const storeRows = await sqlQuery<any>(
+    'SELECT `id`, `store_slug` as storeSlug FROM `stores` WHERE `id` = ? AND `seller_user_id` = ? AND `deleted_at` IS NULL LIMIT 1',
+    [storeId, sellerUserId],
+  );
+  const store = storeRows[0] ?? null;
   if (!store) {
     throw ApiError.NOT_FOUND('Store not found');
   }
   const archivedSlug = await uniqueArchivedStoreSlug(storeId, store.storeSlug);
-  await db.store.update({
-    where: { id: storeId },
-    data: {
-      deletedAt: new Date(),
-      isActive: false,
-      storeSlug: archivedSlug,
-    },
-  });
+  await sqlExec(
+    'UPDATE `stores` SET `deleted_at` = NOW(), `is_active` = false, `store_slug` = ? WHERE `id` = ?',
+    [archivedSlug, storeId],
+  );
 }
 
 export async function createLocation(
@@ -327,10 +376,31 @@ export async function createLocation(
   body: LocationBody,
 ) {
   await assertStoreOwnedBySeller(storeId, sellerUserId);
-  const row = await db.storeLocation.create({
-    data: locationCreateData(storeId, locationType, body),
-  });
-  return serializeLocation(row);
+  const d = locationCreateData(storeId, locationType, body);
+  const res = await sqlExec(
+    'INSERT INTO `store_locations` (`store_id`, `location_type`, `address_line1`, `address_line2`, `city`, `state`, `country`, `pincode`, `latitude`, `longitude`, `radius`, `opening_time`, `closing_time`, `serviceability`, `is_active`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [
+      d.storeId,
+      d.locationType,
+      d.addressLine1,
+      d.addressLine2,
+      d.city,
+      d.state,
+      d.country,
+      d.pincode,
+      d.latitude,
+      d.longitude,
+      d.radiusKm,
+      d.openingTime,
+      d.closingTime,
+      d.serviceability,
+      d.isActive,
+    ],
+  );
+  const rows = await sqlQuery<any>('SELECT * FROM `store_locations` WHERE `id` = ? LIMIT 1', [
+    BigInt(res.insertId as any),
+  ]);
+  return serializeLocation(rows[0]);
 }
 
 export async function createPickupAndReturn(
@@ -340,34 +410,93 @@ export async function createPickupAndReturn(
   ret: LocationBody,
 ) {
   await assertStoreOwnedBySeller(storeId, sellerUserId);
-  const [a, b] = await db.$transaction([
-    db.storeLocation.create({
-      data: locationCreateData(storeId, StoreLocationType.SELF_PICKUP, pickup),
-    }),
-    db.storeLocation.create({
-      data: locationCreateData(storeId, StoreLocationType.RETURN, ret),
-    }),
-  ]);
-  return { pickup: serializeLocation(a), return: serializeLocation(b) };
+  return withSqlTransaction(async (tx) => {
+    const a = locationCreateData(storeId, 'SELF_PICKUP', pickup);
+    const b = locationCreateData(storeId, 'RETURN', ret);
+    const ra = await sqlExec(
+      'INSERT INTO `store_locations` (`store_id`, `location_type`, `address_line1`, `address_line2`, `city`, `state`, `country`, `pincode`, `latitude`, `longitude`, `radius`, `opening_time`, `closing_time`, `serviceability`, `is_active`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        a.storeId,
+        a.locationType,
+        a.addressLine1,
+        a.addressLine2,
+        a.city,
+        a.state,
+        a.country,
+        a.pincode,
+        a.latitude,
+        a.longitude,
+        a.radiusKm,
+        a.openingTime,
+        a.closingTime,
+        a.serviceability,
+        a.isActive,
+      ],
+      tx,
+    );
+    const rb = await sqlExec(
+      'INSERT INTO `store_locations` (`store_id`, `location_type`, `address_line1`, `address_line2`, `city`, `state`, `country`, `pincode`, `latitude`, `longitude`, `radius`, `opening_time`, `closing_time`, `serviceability`, `is_active`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        b.storeId,
+        b.locationType,
+        b.addressLine1,
+        b.addressLine2,
+        b.city,
+        b.state,
+        b.country,
+        b.pincode,
+        b.latitude,
+        b.longitude,
+        b.radiusKm,
+        b.openingTime,
+        b.closingTime,
+        b.serviceability,
+        b.isActive,
+      ],
+      tx,
+    );
+    const [aRow] = await sqlQuery<any>(
+      'SELECT * FROM `store_locations` WHERE `id` = ? LIMIT 1',
+      [BigInt(ra.insertId as any)],
+      tx,
+    );
+    const [bRow] = await sqlQuery<any>(
+      'SELECT * FROM `store_locations` WHERE `id` = ? LIMIT 1',
+      [BigInt(rb.insertId as any)],
+      tx,
+    );
+    return { pickup: serializeLocation(aRow), return: serializeLocation(bRow) };
+  });
 }
 
 export async function getDashboardSummary(sellerUserId: number) {
-  const [profile, storeCount, activeStoreCount, locationCount] = await Promise.all([
-    db.sellerProfile.findUnique({ where: { userId: sellerUserId } }),
-    db.store.count({ where: { sellerUserId, ...storeIsActiveRow } }),
-    db.store.count({ where: { sellerUserId, ...storeIsActiveRow, isActive: true } }),
-    db.storeLocation.count({
-      where: { store: { sellerUserId, ...storeIsActiveRow } },
-    }),
+  const [profileRows, storeCountRows, activeStoreCountRows, locationCountRows] = await Promise.all([
+    sqlQuery<any>('SELECT * FROM `seller_profiles` WHERE `user_id` = ? LIMIT 1', [sellerUserId]),
+    sqlQuery<{ total: number }>(
+      'SELECT COUNT(*) as total FROM `stores` WHERE `seller_user_id` = ? AND `deleted_at` IS NULL',
+      [sellerUserId],
+    ),
+    sqlQuery<{ total: number }>(
+      'SELECT COUNT(*) as total FROM `stores` WHERE `seller_user_id` = ? AND `deleted_at` IS NULL AND `is_active` = true',
+      [sellerUserId],
+    ),
+    sqlQuery<{ total: number }>(
+      'SELECT COUNT(*) as total FROM `store_locations` sl JOIN `stores` s ON s.`id` = sl.`store_id` WHERE s.`seller_user_id` = ? AND s.`deleted_at` IS NULL',
+      [sellerUserId],
+    ),
   ]);
+  const profile = profileRows[0] ?? null;
+  const storeCount = Number(storeCountRows?.[0]?.total ?? 0);
+  const activeStoreCount = Number(activeStoreCountRows?.[0]?.total ?? 0);
+  const locationCount = Number(locationCountRows?.[0]?.total ?? 0);
 
   return {
-    kycStatus: profile?.kycStatus ?? KycStatus.PENDING,
+    kycStatus: (profile?.kyc_status ?? 'PENDING') as KycStatus,
     profileCompleteness: {
       hasGstin: Boolean(profile?.gstin),
       hasPan: Boolean(profile?.pan),
-      hasBank: Boolean(profile?.bankAccountNo && profile?.bankIfsc),
-      hasUpi: Boolean(profile?.upiId),
+      hasBank: Boolean(profile?.bank_account_no && profile?.bank_ifsc),
+      hasUpi: Boolean(profile?.upi_id),
     },
     storeCount,
     activeStoreCount,

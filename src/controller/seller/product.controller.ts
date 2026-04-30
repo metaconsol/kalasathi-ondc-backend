@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { env } from '~/config/env.config';
-import { productService } from '~/service/product/product.service';
+import { productService } from '~/service/product/product.sql.service';
 import {
   createProductSchema,
   updateProductSchema,
@@ -144,6 +144,37 @@ export const createProduct = async (req: Request, res: Response) => {
     return productService.createProduct(req, res, resolved.storeId, bodyResult.data);
   } catch (error) {
     return ApiResponse.serverError(res, 'Error creating product', error);
+  }
+};
+
+export const approveProduct = async (req: Request, res: Response) => {
+  try {
+    const { productId } = req.params;
+
+    // ✅ FIX: validate productId
+    if (!productId || Array.isArray(productId)) {
+      return ApiResponse.badRequest(res, 'Invalid productId');
+    }
+
+    return productService.approveProduct(res, BigInt(productId));
+  } catch (error) {
+    return ApiResponse.serverError(res, 'Error approving product', error);
+  }
+};
+
+export const rejectProduct = async (req: Request, res: Response) => {
+  try {
+    const { productId } = req.params;
+    const { reason } = req.body;
+
+    // ✅ FIX: validate productId
+    if (!productId || Array.isArray(productId)) {
+      return ApiResponse.badRequest(res, 'Invalid productId');
+    }
+
+    return productService.rejectProduct(res, BigInt(productId), reason);
+  } catch (error) {
+    return ApiResponse.serverError(res, 'Error rejecting product', error);
   }
 };
 

@@ -1,6 +1,5 @@
 import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import { PrismaClient } from '../generated/prisma/client';
-
 import { env } from '~/config/env.config';
 
 const databaseConfigs = () => {
@@ -41,3 +40,10 @@ const createPrismaClient = () => {
 export const db = globalForPrisma.prisma ?? createPrismaClient();
 
 if (env.nodeEnv !== 'production') globalForPrisma.prisma = db;
+
+// Export raw SQL utilities as well
+export {
+  sqlExec as dbExec,
+  sqlQuery as dbQuery,
+  withSqlTransaction as dbTransaction,
+} from '~/lib/sql';

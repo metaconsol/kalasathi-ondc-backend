@@ -1,10 +1,11 @@
-import { db } from '~/lib/db';
+import { sqlExec, sqlQuery } from '~/lib/sql';
 import { ApiError } from '~/lib/response';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 
-import type { FileType, StorageProvider } from '~/generated/prisma/client';
+type FileType = 'IMAGE' | 'PDF' | 'DOC' | 'OTHER';
+type StorageProvider = 'LOCAL' | 'S3' | 'CDN';
 
 export class MediaService {
   /**
@@ -51,19 +52,24 @@ export class MediaService {
       const fileType = this.determineFileType(file.mimetype);
       const publicUrl = `/uploads/productImages/${file.filename}`;
 
-      const savedMedia = await db.mediaFile.create({
-        data: {
+      const id = crypto.randomUUID();
+      await sqlExec(
+        'INSERT INTO `media_files` (`id`, `file_type`, `original_name`, `mime_type`, `file_size_bytes`, `storage_provider`, `storage_path`, `public_url`, `checksum_sha256`, `uploaded_by`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          id,
           fileType,
-          originalName: file.originalname,
-          mimeType: file.mimetype,
-          fileSizeBytes: file.size,
-          storageProvider: 'LOCAL' as StorageProvider,
-          storagePath: filePath,
+          file.originalname,
+          file.mimetype,
+          file.size,
+          'LOCAL' as StorageProvider,
+          filePath,
           publicUrl,
-          checksumSha256: checksum,
-          uploadedBy: uploadedBy ?? null,
-        },
-      });
+          checksum,
+          uploadedBy ?? null,
+        ],
+      );
+      const rows = await sqlQuery('SELECT * FROM `media_files` WHERE `id` = ? LIMIT 1', [id]);
+      const savedMedia = rows[0] ?? null;
 
       uploadedMedia.push(savedMedia);
     }
@@ -80,17 +86,16 @@ export class MediaService {
 
     const skip = (page - 1) * limit;
 
-    const where = { deletedAt: null };
-
-    const [total, mediaFiles] = await Promise.all([
-      db.mediaFile.count({ where }),
-      db.mediaFile.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-      }),
+    const [totalRows, mediaFiles] = await Promise.all([
+      sqlQuery<{ total: number }>(
+        'SELECT COUNT(*) as total FROM `media_files` WHERE `deleted_at` IS NULL',
+      ),
+      sqlQuery(
+        'SELECT * FROM `media_files` WHERE `deleted_at` IS NULL ORDER BY `created_at` DESC LIMIT ? OFFSET ?',
+        [limit, skip],
+      ),
     ]);
+    const total = Number(totalRows?.[0]?.total ?? 0);
 
     const totalPages = Math.ceil(total / limit);
 
@@ -109,9 +114,11 @@ export class MediaService {
    * Delete media by ID (Soft Delete)
    */
   static async deleteMediaFile(id: string) {
-    const mediaFile = await db.mediaFile.findUnique({
-      where: { id, deletedAt: null },
-    });
+    const rows = await sqlQuery(
+      'SELECT * FROM `media_files` WHERE `id` = ? AND `deleted_at` IS NULL LIMIT 1',
+      [id],
+    );
+    const mediaFile = rows[0] ?? null;
 
     if (!mediaFile) {
       throw ApiError.NOT_FOUND('Media file not found');
@@ -120,12 +127,7 @@ export class MediaService {
     // Note: We keep the physical file for Soft Delete.
     // To hard delete and cleanup disk space, we would unlink the file.
 
-    await db.mediaFile.update({
-      where: { id },
-      data: {
-        deletedAt: new Date(),
-      },
-    });
+    await sqlExec('UPDATE `media_files` SET `deleted_at` = NOW() WHERE `id` = ?', [id]);
 
     return { success: true, message: 'Media file deleted successfully' };
   }

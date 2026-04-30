@@ -72,6 +72,7 @@
     "express": "^5.2.1",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
+    "mysql2": "^3.14.4",
     "multer": "^2.1.1",
     "nodemailer": "^8.0.5",
     "winston": "^3.19.0",
