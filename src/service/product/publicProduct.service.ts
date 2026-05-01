@@ -186,6 +186,7 @@ class PublicProductService {
 
   private buildListWhereSql(q: {
     categoryId?: string | undefined;
+    categoryIds?: bigint[] | undefined;
     storeId?: string | undefined;
     search?: string | undefined;
     minPrice?: number | undefined;
@@ -195,11 +196,16 @@ class PublicProductService {
     let whereSql =
       "p.publish_status = 'publish' AND p.visibility = 'PUBLIC' AND s.is_active = 1 AND s.deleted_at IS NULL AND c.is_active = 1";
 
-    const catId = parseOptionalBigintParam(q.categoryId);
-    if (q.categoryId !== undefined && q.categoryId !== '' && catId === null) return null;
-    if (catId != null) {
-      whereSql += ' AND p.category_id = ?';
-      args.push(catId);
+    if (q.categoryIds?.length) {
+      whereSql += ` AND p.category_id IN (${q.categoryIds.map(() => '?').join(',')})`;
+      args.push(...q.categoryIds);
+    } else {
+      const catId = parseOptionalBigintParam(q.categoryId);
+      if (q.categoryId !== undefined && q.categoryId !== '' && catId === null) return null;
+      if (catId != null) {
+        whereSql += ' AND p.category_id = ?';
+        args.push(catId);
+      }
     }
 
     const sid = parseOptionalBigintParam(q.storeId);
@@ -225,6 +231,30 @@ class PublicProductService {
     }
 
     return { whereSql, args };
+  }
+
+  private async getActiveCategoryDescendantIds(slug: string): Promise<bigint[] | null> {
+    const rows = await sqlQuery<any>(
+      'SELECT id, parent_id as parentId, slug FROM categories WHERE is_active = 1',
+    );
+    const target = rows.find((r) => String(r.slug) === slug);
+    if (!target) return null;
+
+    const byParent = new Map<string, any[]>();
+    for (const row of rows) {
+      const key = row.parentId == null ? 'root' : String(row.parentId);
+      const list = byParent.get(key) ?? [];
+      list.push(row);
+      byParent.set(key, list);
+    }
+
+    const ids: bigint[] = [];
+    const visit = (node: any) => {
+      ids.push(BigInt(String(node.id)));
+      for (const child of byParent.get(String(node.id)) ?? []) visit(child);
+    };
+    visit(target);
+    return ids;
   }
 
   public listCatalog = async (req: Request, res: Response) => {
@@ -304,6 +334,159 @@ class PublicProductService {
       });
     } catch (error) {
       return ApiResponse.serverError(res, 'Error fetching products', error);
+    }
+  };
+
+  public listByCategorySlug = async (req: Request, res: Response) => {
+    try {
+      const slug = slugParam(req.params.slug).trim();
+      if (!slug) {
+        return ApiResponse.badRequest(res, 'Invalid category slug');
+      }
+
+      const parsed = publicCatalogQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return ApiResponse.badRequest(res, 'Invalid query parameters', parsed.error);
+      }
+      const q = parsed.data;
+
+      const categoryIds = await this.getActiveCategoryDescendantIds(slug);
+      if (!categoryIds) {
+        return ApiResponse.notFound(res, 'Category not found');
+      }
+
+      const where = this.buildListWhereSql({ ...q, categoryIds });
+      if (!where) {
+        return ApiResponse.badRequest(res, 'Invalid storeId');
+      }
+
+      const page = q.page;
+      const limit = q.limit;
+      const skip = (page - 1) * limit;
+      const orderBy = orderByForSort(q.sort);
+
+      const [baseRows, totalRows] = await Promise.all([
+        sqlQuery<any>(
+          `SELECT p.*, 
+            s.id as store_id_join, s.store_name, s.store_slug, s.description as store_description, s.is_active as store_is_active,
+            c.id as category_id_join, c.name as category_name, c.slug as category_slug, c.domain as category_domain, c.is_active as category_is_active
+           FROM products p
+           JOIN stores s ON s.id = p.store_id
+           JOIN categories c ON c.id = p.category_id
+           JOIN product_verification v ON v.product_id = p.id
+           WHERE ${where.whereSql}
+             AND v.approval_status = 'approved'
+           ORDER BY ${orderBy}
+           LIMIT ? OFFSET ?`,
+          [...where.args, limit, skip],
+        ),
+        sqlQuery<{ total: number }>(
+          `SELECT COUNT(*) as total
+           FROM products p
+           JOIN stores s ON s.id = p.store_id
+           JOIN categories c ON c.id = p.category_id
+           JOIN product_verification v ON v.product_id = p.id
+           WHERE ${where.whereSql}
+             AND v.approval_status = 'approved'`,
+          where.args,
+        ),
+      ]);
+
+      const total = Number(totalRows?.[0]?.total ?? 0);
+      const rows = await hydrateProducts(
+        baseRows.map((r) => ({
+          ...r,
+          id: r.id,
+          store: {
+            id: r.store_id_join,
+            storeName: r.store_name,
+            storeSlug: r.store_slug,
+            description: r.store_description,
+            isActive: !!r.store_is_active,
+          },
+          category: {
+            id: r.category_id_join,
+            name: r.category_name,
+            slug: r.category_slug,
+            domainCode: r.category_domain,
+            isActive: !!r.category_is_active,
+          },
+        })),
+        { variantLimit: 12, withServiceability: false },
+      );
+
+      return ApiResponse.success(res, 'Products fetched by category successfully', rows, {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+        categorySlug: slug,
+      });
+    } catch (error) {
+      return ApiResponse.serverError(res, 'Error fetching products by category', error);
+    }
+  };
+
+  public listProductCategoryTree = async (_req: Request, res: Response) => {
+    try {
+      const [categoryRows, productRows] = await Promise.all([
+        sqlQuery<any>(
+          'SELECT id, parent_id as parentId, domain as domainCode, name, slug, is_active as isActive FROM categories WHERE is_active = 1 ORDER BY sort_order ASC, name ASC',
+        ),
+        sqlQuery<any>(
+          `SELECT p.category_id as categoryId, COUNT(*) as productCount
+           FROM products p
+           JOIN stores s ON s.id = p.store_id
+           JOIN categories c ON c.id = p.category_id
+           JOIN product_verification v ON v.product_id = p.id
+           WHERE p.publish_status = 'publish'
+             AND p.visibility = 'PUBLIC'
+             AND s.is_active = 1
+             AND s.deleted_at IS NULL
+             AND c.is_active = 1
+             AND v.approval_status = 'approved'
+           GROUP BY p.category_id`,
+        ),
+      ]);
+
+      const counts = new Map<string, number>();
+      for (const row of productRows) {
+        counts.set(String(row.categoryId), Number(row.productCount ?? 0));
+      }
+
+      const byParent = new Map<string, any[]>();
+      for (const row of categoryRows) {
+        const key = row.parentId == null ? 'root' : String(row.parentId);
+        const list = byParent.get(key) ?? [];
+        list.push({ ...row, children: [], productCount: counts.get(String(row.id)) ?? 0 });
+        byParent.set(key, list);
+      }
+
+      const attach = (node: any, depth: number): any | null => {
+        const children = (byParent.get(String(node.id)) ?? [])
+          .map((child) => attach(child, depth + 1))
+          .filter(Boolean);
+        const directProductCount = counts.get(String(node.id)) ?? 0;
+        const childProductCount = children.reduce(
+          (sum: number, child: any) => sum + Number(child.productCount ?? 0),
+          0,
+        );
+        const productCount = directProductCount + childProductCount;
+        if (productCount <= 0) return null;
+
+        return {
+          ...node,
+          children,
+          level: depth,
+          productCount,
+          is_selectable: children.length === 0 && directProductCount > 0,
+        };
+      };
+
+      const roots = (byParent.get('root') ?? []).map((root) => attach(root, 0)).filter(Boolean);
+      return ApiResponse.success(res, 'Category tree fetched successfully', roots);
+    } catch (error) {
+      return ApiResponse.serverError(res, 'Error building category tree', error);
     }
   };
 
