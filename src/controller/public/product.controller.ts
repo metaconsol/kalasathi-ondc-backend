@@ -7,6 +7,12 @@ export const listPublicProducts = (req: Request, res: Response) =>
 export const searchPublicProducts = (req: Request, res: Response) =>
   publicProductService.listCatalog(req, res);
 
+export const listPublicProductCategoryTree = (req: Request, res: Response) =>
+  publicProductService.listProductCategoryTree(req, res);
+
+export const listPublicProductsByCategory = (req: Request, res: Response) =>
+  publicProductService.listByCategorySlug(req, res);
+
 export const getPublicProductById = (req: Request, res: Response) =>
   publicProductService.getById(req, res);
 

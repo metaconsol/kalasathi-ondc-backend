@@ -3,6 +3,8 @@ import { optionalAccessToken } from '~/middleware/optionalAccess.middleware';
 import {
   listPublicProducts,
   searchPublicProducts,
+  listPublicProductCategoryTree,
+  listPublicProductsByCategory,
   getPublicProductById,
   getPublicProductBySlug,
   getRelatedProducts,
@@ -24,6 +26,16 @@ router.get('/', listPublicProducts);
  * GET /ui/products/search — same behavior as list (category / price filters)
  */
 router.get('/search', searchPublicProducts);
+
+/**
+ * GET /ui/products/categories/tree — category tree pruned to categories that have public products
+ */
+router.get('/categories/tree', listPublicProductCategoryTree);
+
+/**
+ * GET /ui/products/category/:slug — public products in a category slug or its descendants
+ */
+router.get('/category/:slug', listPublicProductsByCategory);
 
 /**
  * GET /ui/products/variants/:variant_id/stock
