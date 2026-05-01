@@ -568,6 +568,7 @@ export const publicCatalogQuerySchema = z.preprocess(
     sort: z.enum(['popular', 'newest', 'price_asc', 'price_desc']).default('popular'),
     categoryId: z.string().optional(),
     storeId: z.string().optional(),
+    district: z.string().optional(),
     search: z.string().optional(),
     minPrice: z.coerce.number().optional(),
     maxPrice: z.coerce.number().optional(),
