@@ -14,6 +14,7 @@ import { orderRouter } from './order.route';
 import locationRouter from './location.route';
 import { addressRouter } from './address.route';
 import { userRouter } from './user.route';
+import { districtRouter } from './district.route';
 
 const router = express.Router();
 
@@ -40,6 +41,7 @@ router.use('/orders', orderRouter);
 router.use('/user', userRouter);
 router.use('/addresses', addressRouter);
 router.use('/locations', locationRouter);
+router.use('/districts', districtRouter);
 router.use('/', adminRouter); // Mounted at root as it has prefix in admin.route.ts
 
 /**

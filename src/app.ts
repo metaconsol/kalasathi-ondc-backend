@@ -47,15 +47,12 @@ export function createApp(): Application {
       },
     }),
   );
-  // app.use(
-  //   helmet({
-  //     crossOriginResourcePolicy: { policy: 'cross-origin' },
-  //   }),
-  // );
-  helmet({
-    crossOriginResourcePolicy: { policy: 'cross-origin' },
-    contentSecurityPolicy: false,
-  });
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      contentSecurityPolicy: false,
+    }),
+  );
 
   app.use(compression());
 

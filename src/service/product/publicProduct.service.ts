@@ -230,6 +230,11 @@ class PublicProductService {
       args.push(q.maxPrice);
     }
 
+    if (q.district !== undefined && q.district.trim() !== '') {
+      whereSql += ' AND p.district = ?';
+      args.push(q.district.trim());
+    }
+
     return { whereSql, args };
   }
 

@@ -162,7 +162,7 @@ async function findOrCreateCart(owner: CartOwner): Promise<CartRow> {
   if (existing) return existing;
   if ('userId' in owner && owner.userId != null) {
     const res = await sqlExec(
-      'INSERT INTO `carts` (`user_id`, `status`, `currency`) VALUES (?, ?, ?)',
+      'INSERT INTO `carts` (`user_id`, `status`, `currency`, `created_at`, `updated_at`) VALUES (?, ?, ?, NOW(), NOW())',
       [BigInt(owner.userId), 'active', 'INR'],
     );
     const rows = await sqlQuery<CartRow>('SELECT * FROM `carts` WHERE `id` = ? LIMIT 1', [
@@ -172,7 +172,7 @@ async function findOrCreateCart(owner: CartOwner): Promise<CartRow> {
   }
   if ('sessionId' in owner && owner.sessionId) {
     const res = await sqlExec(
-      'INSERT INTO `carts` (`session_id`, `status`, `currency`) VALUES (?, ?, ?)',
+      'INSERT INTO `carts` (`session_id`, `status`, `currency`, `created_at`, `updated_at`) VALUES (?, ?, ?, NOW(), NOW())',
       [owner.sessionId, 'active', 'INR'],
     );
     const rows = await sqlQuery<CartRow>('SELECT * FROM `carts` WHERE `id` = ? LIMIT 1', [
@@ -407,7 +407,7 @@ export async function addCartItem(
       throw ApiError.BAD_REQUEST('Insufficient stock for requested quantity');
     }
     await sqlExec(
-      'UPDATE `cart_items` SET `qty` = ?, `price_snapshot` = ?, `mrp_snapshot` = ?, `tax_snapshot` = ?, `discount_snapshot` = ?, `store_id` = ?, `product_id` = ?, `variant_id` = ? WHERE `id` = ?',
+      'UPDATE `cart_items` SET `qty` = ?, `price_snapshot` = ?, `mrp_snapshot` = ?, `tax_snapshot` = ?, `discount_snapshot` = ?, `store_id` = ?, `product_id` = ?, `variant_id` = ?, `updated_at` = NOW() WHERE `id` = ?',
       [
         newQty,
         snapshotData.price_snapshot,
@@ -431,7 +431,7 @@ export async function addCartItem(
   }
 
   const res = await sqlExec(
-    'INSERT INTO `cart_items` (`cart_id`, `store_id`, `product_id`, `variant_id`, `qty`, `price_snapshot`, `mrp_snapshot`, `tax_snapshot`, `discount_snapshot`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO `cart_items` (`cart_id`, `store_id`, `product_id`, `variant_id`, `qty`, `price_snapshot`, `mrp_snapshot`, `tax_snapshot`, `discount_snapshot`, `created_at`, `updated_at`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
     [
       cart.id,
       storeId,
@@ -534,11 +534,10 @@ export async function updateCartItemQty(owner: CartOwner, itemId: bigint, qty: n
       ? toDecimalString(variant.price)
       : toDecimalString(product.default_price);
 
-  await sqlExec('UPDATE `cart_items` SET `qty` = ?, `price_snapshot` = ? WHERE `id` = ?', [
-    qty,
-    unitPrice,
-    itemId,
-  ]);
+  await sqlExec(
+    'UPDATE `cart_items` SET `qty` = ?, `price_snapshot` = ?, `updated_at` = NOW() WHERE `id` = ?',
+    [qty, unitPrice, itemId],
+  );
   const updatedRows = await sqlQuery<any>(
     'SELECT ci.*, s.`store_name`, s.`store_slug` FROM `cart_items` ci JOIN `stores` s ON s.`id` = ci.`store_id` WHERE ci.`id` = ? LIMIT 1',
     [itemId],
@@ -609,61 +608,64 @@ export async function mergeGuestIntoUser(userId: number, guestSessionId: string)
     }
 
     for (const guestLine of guestItems) {
-      const catalog = await loadAndValidateCatalog(tx, {
-        storeId: guestLine.store_id,
-        productId: guestLine.product_id,
-        variantId: guestLine.variant_id,
-      });
-      const stock = availableStock(catalog.product, catalog.variant);
+      try {
+        const catalog = await loadAndValidateCatalog(tx, {
+          storeId: guestLine.store_id,
+          productId: guestLine.product_id,
+          variantId: guestLine.variant_id,
+        });
+        const stock = availableStock(catalog.product, catalog.variant);
 
-      const matchRows = await sqlQuery<any>(
-        'SELECT * FROM `cart_items` WHERE `cart_id` = ? AND `product_id` = ? AND `variant_id` = ? LIMIT 1',
-        [userCart.id, guestLine.product_id, guestLine.variant_id],
-        tx,
-      );
-      const match = matchRows[0] ?? null;
-
-      if (match) {
-        const newQty = match.qty + guestLine.qty;
-        if (stock < newQty) {
-          throw ApiError.BAD_REQUEST(
-            `Insufficient stock when merging line for product ${guestLine.product_id.toString()}`,
-          );
-        }
-        await sqlExec(
-          'UPDATE `cart_items` SET `qty` = ?, `price_snapshot` = ?, `store_id` = ?, `product_id` = ?, `variant_id` = ? WHERE `id` = ?',
-          [
-            newQty,
-            catalog.unitPrice,
-            guestLine.store_id,
-            guestLine.product_id,
-            guestLine.variant_id,
-            match.id,
-          ],
+        const matchRows = await sqlQuery<any>(
+          'SELECT * FROM `cart_items` WHERE `cart_id` = ? AND `product_id` = ? AND `variant_id` = ? LIMIT 1',
+          [userCart.id, guestLine.product_id, guestLine.variant_id],
           tx,
         );
-      } else {
-        if (stock < guestLine.qty) {
-          throw ApiError.BAD_REQUEST(
-            `Insufficient stock when merging line for product ${guestLine.product_id.toString()}`,
+        const match = matchRows[0] ?? null;
+
+        if (match) {
+          const newQty = match.qty + guestLine.qty;
+          const cappedQty = stock < newQty ? stock : newQty;
+
+          await sqlExec(
+            'UPDATE `cart_items` SET `qty` = ?, `price_snapshot` = ?, `store_id` = ?, `product_id` = ?, `variant_id` = ?, `updated_at` = NOW() WHERE `id` = ?',
+            [
+              cappedQty,
+              catalog.unitPrice,
+              guestLine.store_id,
+              guestLine.product_id,
+              guestLine.variant_id,
+              match.id,
+            ],
+            tx,
           );
+        } else {
+          const finalQty = stock < guestLine.qty ? stock : guestLine.qty;
+          if (finalQty > 0) {
+            await sqlExec(
+              'INSERT INTO `cart_items` (`cart_id`, `store_id`, `product_id`, `variant_id`, `qty`, `price_snapshot`, `mrp_snapshot`, `tax_snapshot`, `discount_snapshot`, `created_at`, `updated_at`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
+              [
+                userCart.id,
+                guestLine.store_id,
+                guestLine.product_id,
+                guestLine.variant_id,
+                finalQty,
+                catalog.unitPrice,
+                null,
+                null,
+                null,
+                null,
+              ],
+              tx,
+            );
+          }
         }
-        await sqlExec(
-          'INSERT INTO `cart_items` (`cart_id`, `store_id`, `product_id`, `variant_id`, `qty`, `price_snapshot`, `mrp_snapshot`, `tax_snapshot`, `discount_snapshot`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [
-            userCart.id,
-            guestLine.store_id,
-            guestLine.product_id,
-            guestLine.variant_id,
-            guestLine.qty,
-            catalog.unitPrice,
-            null,
-            null,
-            null,
-            null,
-          ],
-          tx,
+      } catch (err) {
+        console.warn(
+          `[Merge] Skipping invalid guest item ${guestLine.product_id}:`,
+          (err as any).message,
         );
+        continue;
       }
     }
 
