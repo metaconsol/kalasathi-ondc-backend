@@ -160,6 +160,29 @@ async function insertVariantTreeFromPayload(
         j++;
       }
     }
+    if (Array.isArray(v.ondcAttributes)) {
+      let k = 0;
+      for (const a of v.ondcAttributes) {
+        if (!a?.attributeKey) continue;
+        await sqlExec(
+          'INSERT INTO product_ondc_attributes (product_id, variant_id, attribute_key, attribute_value, color_name, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
+          [
+            productId,
+            vid,
+            String(a.attributeKey).trim(),
+            a.attributeValue != null && String(a.attributeValue).trim() !== ''
+              ? String(a.attributeValue).trim()
+              : null,
+            a.colorName != null && String(a.colorName).trim() !== ''
+              ? String(a.colorName).trim()
+              : null,
+            a.sortOrder ?? k,
+          ],
+          tx,
+        );
+        k++;
+      }
+    }
 
     const skuTrim = v.sku != null ? String(v.sku).trim() : '';
     if (skuTrim.length > 0) {
@@ -232,13 +255,17 @@ async function loadProductHydrated(storeId: bigint, productId: bigint) {
 
   const storeIdForInv = BigInt(p.store_id);
 
-  const [images, attributes, variants, vimgs] = await Promise.all([
+  const [images, attributes, ondcAttributes, variants, vimgs] = await Promise.all([
     sqlQuery<any>('SELECT * FROM product_images WHERE product_id = ? ORDER BY sort_order ASC', [
       productId,
     ]),
     sqlQuery<any>('SELECT * FROM product_attributes WHERE product_id = ? ORDER BY id ASC', [
       productId,
     ]),
+    sqlQuery<any>(
+      'SELECT * FROM product_ondc_attributes WHERE product_id = ? ORDER BY sort_order ASC, id ASC',
+      [productId],
+    ),
     sqlQuery<any>('SELECT * FROM product_variants WHERE product_id = ? ORDER BY id ASC', [
       productId,
     ]),
@@ -352,6 +379,16 @@ async function loadProductHydrated(storeId: bigint, productId: bigint) {
       productId: r.product_id,
       attributeKey: r.attribute_key,
       attributeValue: r.attribute_value,
+      createdAt: r.created_at,
+    })),
+    ondcAttributes: ondcAttributes.map((r) => ({
+      id: r.id,
+      productId: r.product_id,
+      variantId: r.variant_id,
+      attributeKey: r.attribute_key,
+      attributeValue: r.attribute_value,
+      colorName: r.color_name,
+      sortOrder: r.sort_order,
       createdAt: r.created_at,
     })),
     variants: variantsOut,
@@ -580,8 +617,8 @@ class ProductSqlService {
     try {
       const productId = await withSqlTransaction(async (tx) => {
         const ins = await sqlExec(
-          `INSERT INTO products (store_id, category_id, product_name, district, description, hsn_sac_code, gst_percent, gtin_ean, stock, force_out_of_stock, unit_count, unit_type, brand, manufacturing_month, expiry_date, country_of_origin, sort_order, return_days_window, seller_pickup_return, is_cod_available, publish_status, is_manufacturer, manufacturer_name, manufacturer_address, currency, default_price, mrp, visibility, alias_slug, seo_title, seo_description, seo_keywords, disable_for_bots, availability_mode, cancellable, returnable, time_to_ship_value, time_to_ship_unit, instructions, storage_conditions, included_items, size_chart_url, gi_tag, silk_mark, have_ondc_attributes, product_weight_gm, product_length_cm, product_width_cm, product_height_cm, package_weight_gm, package_length_cm, package_width_cm, package_height_cm, ondc_subcategory)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO products (store_id, category_id, product_name, district, description, hsn_sac_code, gst_percent, gtin_ean, stock, force_out_of_stock, unit_count, unit_type, brand, manufacturing_month, expiry_date, country_of_origin, sort_order, return_days_window, seller_pickup_return, is_cod_available, publish_status, is_manufacturer, manufacturer_name, manufacturer_address, currency, default_price, mrp, visibility, alias_slug, seo_title, seo_description, seo_keywords, disable_for_bots, availability_mode, cancellable, returnable, time_to_ship_value, time_to_ship_unit, instructions, storage_conditions, included_items, size_chart_url, gi_tag, silk_mark, have_ondc_attributes, product_weight_gm, product_length_cm, product_width_cm, product_height_cm, package_weight_gm, package_length_cm, package_width_cm, package_height_cm, min_purchase_limit, max_purchase_limit, standard_package_qty, low_stock_qty, order_mode, ondc_subcategory)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             storeId,
             body.categoryId,
@@ -636,6 +673,11 @@ class ProductSqlService {
             (body as any).packageLengthCm ?? null,
             (body as any).packageWidthCm ?? null,
             (body as any).packageHeightCm ?? null,
+            (body as any).minPurchaseLimit ?? null,
+            (body as any).maxPurchaseLimit ?? null,
+            (body as any).standardPackageQty ?? null,
+            (body as any).lowStockQty ?? null,
+            (body as any).orderMode ?? 'ONLINE',
             (body as any).ondcSubcategory ?? null,
           ],
           tx,
@@ -661,6 +703,29 @@ class ProductSqlService {
               [pid, a.attributeKey, a.attributeValue ?? null],
               tx,
             );
+          }
+        }
+        if (Array.isArray((body as any).ondcAttributes)) {
+          let i = 0;
+          for (const a of (body as any).ondcAttributes) {
+            if (!a?.attributeKey) continue;
+            await sqlExec(
+              'INSERT INTO product_ondc_attributes (product_id, variant_id, attribute_key, attribute_value, color_name, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
+              [
+                pid,
+                null,
+                String(a.attributeKey).trim(),
+                a.attributeValue != null && String(a.attributeValue).trim() !== ''
+                  ? String(a.attributeValue).trim()
+                  : null,
+                a.colorName != null && String(a.colorName).trim() !== ''
+                  ? String(a.colorName).trim()
+                  : null,
+                a.sortOrder ?? i,
+              ],
+              tx,
+            );
+            i++;
           }
         }
         if (Array.isArray((body as any).variants)) {
@@ -778,6 +843,41 @@ class ProductSqlService {
         if ((body as any).aliasSlug !== undefined)
           set('alias_slug', (body as any).aliasSlug ?? null);
         if ((body as any).stock !== undefined) set('stock', (body as any).stock);
+        if ((body as any).district !== undefined) set('district', (body as any).district ?? '');
+        if ((body as any).brand !== undefined) set('brand', (body as any).brand ?? null);
+        if ((body as any).hsnSacCode !== undefined)
+          set('hsn_sac_code', (body as any).hsnSacCode ?? null);
+        if ((body as any).gstPercent !== undefined)
+          set('gst_percent', (body as any).gstPercent ?? 0);
+        if ((body as any).unitCount !== undefined)
+          set('unit_count', (body as any).unitCount ?? null);
+        if ((body as any).unitType !== undefined) set('unit_type', (body as any).unitType ?? null);
+        if ((body as any).countryOfOrigin !== undefined)
+          set('country_of_origin', (body as any).countryOfOrigin ?? null);
+        if ((body as any).minPurchaseLimit !== undefined)
+          set('min_purchase_limit', (body as any).minPurchaseLimit ?? null);
+        if ((body as any).maxPurchaseLimit !== undefined)
+          set('max_purchase_limit', (body as any).maxPurchaseLimit ?? null);
+        if ((body as any).standardPackageQty !== undefined)
+          set('standard_package_qty', (body as any).standardPackageQty ?? null);
+        if ((body as any).lowStockQty !== undefined)
+          set('low_stock_qty', (body as any).lowStockQty ?? null);
+        if ((body as any).orderMode !== undefined)
+          set('order_mode', (body as any).orderMode ?? 'ONLINE');
+        if ((body as any).timeToShipValue !== undefined)
+          set('time_to_ship_value', (body as any).timeToShipValue ?? null);
+        if ((body as any).timeToShipUnit !== undefined)
+          set('time_to_ship_unit', (body as any).timeToShipUnit ?? null);
+        if ((body as any).instructions !== undefined)
+          set('instructions', (body as any).instructions ?? null);
+        if ((body as any).storageConditions !== undefined)
+          set('storage_conditions', (body as any).storageConditions ?? null);
+        if ((body as any).includedItems !== undefined)
+          set('included_items', (body as any).includedItems ?? null);
+        if ((body as any).sizeChartUrl !== undefined)
+          set('size_chart_url', (body as any).sizeChartUrl ?? null);
+        if ((body as any).haveOndcAttributes !== undefined)
+          set('have_ondc_attributes', toBool((body as any).haveOndcAttributes));
         if ((body as any).forceOutOfStock !== undefined)
           set('force_out_of_stock', toBool((body as any).forceOutOfStock));
         if ((body as any).productWeightGm !== undefined)
@@ -828,6 +928,34 @@ class ProductSqlService {
               [productId, a.attributeKey, a.attributeValue ?? null],
               tx,
             );
+          }
+        }
+        if (Array.isArray((body as any).ondcAttributes)) {
+          await sqlExec(
+            'DELETE FROM product_ondc_attributes WHERE product_id = ? AND variant_id IS NULL',
+            [productId],
+            tx,
+          );
+          let i = 0;
+          for (const a of (body as any).ondcAttributes) {
+            if (!a?.attributeKey) continue;
+            await sqlExec(
+              'INSERT INTO product_ondc_attributes (product_id, variant_id, attribute_key, attribute_value, color_name, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
+              [
+                productId,
+                null,
+                String(a.attributeKey).trim(),
+                a.attributeValue != null && String(a.attributeValue).trim() !== ''
+                  ? String(a.attributeValue).trim()
+                  : null,
+                a.colorName != null && String(a.colorName).trim() !== ''
+                  ? String(a.colorName).trim()
+                  : null,
+                a.sortOrder ?? i,
+              ],
+              tx,
+            );
+            i++;
           }
         }
 
