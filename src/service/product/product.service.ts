@@ -139,6 +139,12 @@ function variantDataForCreate(productId: bigint, data: VariantRowInput) {
 }
 
 type VariantImageInput = { imageUrl: string; sortOrder?: number | undefined };
+type OndcAttributeInput = {
+  attributeKey: string;
+  attributeValue?: string | null | undefined;
+  colorName?: string | null | undefined;
+  sortOrder?: number | undefined;
+};
 
 async function replaceVariantImagesInTx(tx: Tx, variantId: bigint, items: VariantImageInput[]) {
   await tx.variantImage.deleteMany({ where: { variantId } });
@@ -149,6 +155,32 @@ async function replaceVariantImagesInTx(tx: Tx, variantId: bigint, items: Varian
       variantId,
       imageUrl: im.imageUrl,
       sortOrder: im.sortOrder !== undefined && im.sortOrder >= 0 ? im.sortOrder : i,
+    })),
+  });
+}
+
+async function replaceProductOndcAttributesInTx(
+  tx: Tx,
+  productId: bigint,
+  variantId: bigint | null,
+  items: OndcAttributeInput[],
+) {
+  await tx.productOndcAttribute.deleteMany({ where: { productId, variantId } });
+  if (items.length === 0) return;
+  await tx.productOndcAttribute.createMany({
+    data: items.map((a, i) => ({
+      productId,
+      variantId,
+      attributeKey: a.attributeKey.trim(),
+      attributeValue:
+        a.attributeValue != null && String(a.attributeValue).trim() !== ''
+          ? String(a.attributeValue).trim()
+          : null,
+      colorName:
+        a.colorName != null && String(a.colorName).trim() !== ''
+          ? String(a.colorName).trim()
+          : null,
+      sortOrder: a.sortOrder !== undefined && a.sortOrder >= 0 ? a.sortOrder : i,
     })),
   });
 }
@@ -276,6 +308,9 @@ async function insertVariantTreeInTx(
     if (node.images?.length) {
       await replaceVariantImagesInTx(tx, row.id, node.images);
     }
+    if (node.ondcAttributes !== undefined) {
+      await replaceProductOndcAttributesInTx(tx, productId, row.id, node.ondcAttributes);
+    }
   }
 }
 
@@ -284,7 +319,7 @@ async function createVariantWithImagesInTx(tx: Tx, productId: bigint, data: Crea
   if (isTreeVariantNode(data)) {
     throw new Error('INTERNAL_USE_insertVariantTreeInTx');
   }
-  const { images: vImages, ...rest } = data as FlatVariantRow;
+  const { images: vImages, ondcAttributes, ...rest } = data as FlatVariantRow;
   const row = await tx.productVariant.create({
     data: {
       ...variantDataForCreate(productId, rest),
@@ -300,6 +335,9 @@ async function createVariantWithImagesInTx(tx: Tx, productId: bigint, data: Crea
         : {}),
     },
   });
+  if (ondcAttributes !== undefined) {
+    await replaceProductOndcAttributesInTx(tx, productId, row.id, ondcAttributes);
+  }
   return row;
 }
 
@@ -449,8 +487,10 @@ class ProductService {
             variants: {
               include: {
                 variantImages: { orderBy: { sortOrder: 'asc' } },
+                ondcAttributes: { orderBy: { sortOrder: 'asc' } },
               },
             },
+            ondcAttributes: { orderBy: { sortOrder: 'asc' } },
             images: true,
           },
           orderBy: {
@@ -483,7 +523,7 @@ class ProductService {
     data: CreateProductDTO,
   ) => {
     try {
-      const { images, variants, attributes, ...core } = data;
+      const { images, variants, attributes, ondcAttributes, ...core } = data;
       const withVariants = variants && variants.length > 0;
       const variantList = withVariants ? variants! : [];
       const anyTreeNode = withVariants && variantList.some(isTreeVariantNode);
@@ -666,6 +706,10 @@ class ProductService {
           await replaceProductAttributesInTx(tx, created.id, attributes);
         }
 
+        if (ondcAttributes != null) {
+          await replaceProductOndcAttributesInTx(tx, created.id, null, ondcAttributes);
+        }
+
         return tx.product.findUniqueOrThrow({
           where: { id: created.id },
           include: {
@@ -674,8 +718,10 @@ class ProductService {
             variants: {
               include: {
                 variantImages: { orderBy: { sortOrder: 'asc' } },
+                ondcAttributes: { orderBy: { sortOrder: 'asc' } },
               },
             },
+            ondcAttributes: { orderBy: { sortOrder: 'asc' } },
             images: true,
           },
         });
@@ -710,8 +756,15 @@ class ProductService {
     data: UpdateProductDTO,
   ) => {
     try {
-      const { images, variants, removeVariantIds, replaceVariantTree, attributes, ...fieldData } =
-        data;
+      const {
+        images,
+        variants,
+        removeVariantIds,
+        replaceVariantTree,
+        attributes,
+        ondcAttributes,
+        ...fieldData
+      } = data;
       const product = await db.product.findUnique({
         where: { id: productId },
       });
@@ -811,7 +864,9 @@ class ProductService {
 
       if (removeVariantIds && removeVariantIds.length > 0 && !replaceVariantTree) {
         const vcount = await db.productVariant.count({ where: { productId } });
-        const newVariantsCount = variants ? variants.filter((v) => !isVariantUpdateItem(v)).length : 0;
+        const newVariantsCount = variants
+          ? variants.filter((v) => !isVariantUpdateItem(v)).length
+          : 0;
         if (vcount - removeVariantIds.length + newVariantsCount < 1) {
           return ApiResponse.badRequest(res, 'A product must have at least one variant');
         }
@@ -991,12 +1046,16 @@ class ProductService {
               if (isVariantUpdateItem(item)) {
                 const { id, ...rest } = item;
                 const vImages = rest.images;
+                const vOndcAttributes = rest.ondcAttributes;
                 const patch = buildVariantUpdatePatch(rest as UpdateVariantDTO);
                 if (Object.keys(patch).length > 0) {
                   await tx.productVariant.update({ where: { id }, data: patch });
                 }
                 if (vImages !== undefined) {
                   await replaceVariantImagesInTx(tx, id, vImages);
+                }
+                if (vOndcAttributes !== undefined) {
+                  await replaceProductOndcAttributesInTx(tx, productId, id, vOndcAttributes);
                 }
               } else {
                 await createVariantWithImagesInTx(tx, productId, item as CreateVariantDTO);
@@ -1013,8 +1072,13 @@ class ProductService {
           await replaceProductAttributesInTx(tx, productId, attributes);
         }
 
+        if (ondcAttributes !== undefined) {
+          await replaceProductOndcAttributesInTx(tx, productId, null, ondcAttributes);
+        }
+
         const n = await tx.productVariant.count({ where: { productId } });
-        const hasModifiedVariants = replaceVariantTree || (removeVariantIds && removeVariantIds.length > 0);
+        const hasModifiedVariants =
+          replaceVariantTree || (removeVariantIds && removeVariantIds.length > 0);
         if (hasModifiedVariants || (variants && variants.length > 0)) {
           if (n < 1) throw new Error('PRODUCT_HAS_NO_VARIANTS');
         }
@@ -1028,8 +1092,10 @@ class ProductService {
             variants: {
               include: {
                 variantImages: { orderBy: { sortOrder: 'asc' } },
+                ondcAttributes: { orderBy: { sortOrder: 'asc' } },
               },
             },
+            ondcAttributes: { orderBy: { sortOrder: 'asc' } },
             images: true,
           },
         });
@@ -1645,8 +1711,12 @@ class ProductService {
           category: true,
           attributes: true,
           variants: {
-            include: { variantImages: { orderBy: { sortOrder: 'asc' } } },
+            include: {
+              variantImages: { orderBy: { sortOrder: 'asc' } },
+              ondcAttributes: { orderBy: { sortOrder: 'asc' } },
+            },
           },
+          ondcAttributes: { orderBy: { sortOrder: 'asc' } },
           images: { orderBy: { sortOrder: 'asc' } },
         },
       });
