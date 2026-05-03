@@ -4,6 +4,11 @@ import { publicProductService } from '~/service/product/publicProduct.service';
 export const listPublicProducts = (req: Request, res: Response) =>
   publicProductService.listCatalog(req, res);
 
+//added of admin show Product
+export const listAdminProducts = (req: Request, res: Response) => {
+  return publicProductService.listProductsForAdmin(req, res);
+};
+
 export const searchPublicProducts = (req: Request, res: Response) =>
   publicProductService.listCatalog(req, res);
 

@@ -342,6 +342,247 @@ class PublicProductService {
     }
   };
 
+  //   public listProductsForAdmin = async (req: Request, res: Response) => {
+  //   try {
+  //     const rows = await sqlQuery<any>(
+  //       `
+  //       SELECT
+  //         p.*,
+
+  //         v.approval_status AS approval_status,
+  //         v.reason AS rejection_reason,
+
+  //         s.id AS store_id_join,
+  //         s.store_name,
+
+  //         c.id AS category_id_join,
+  //         c.name AS category_name
+
+  //       FROM products p
+
+  //       LEFT JOIN product_verification v
+  //         ON v.product_id = p.id
+
+  //       LEFT JOIN stores s
+  //         ON s.id = p.store_id
+
+  //       LEFT JOIN categories c
+  //         ON c.id = p.category_id
+
+  //       ORDER BY p.created_at DESC
+  //       `
+  //     );
+
+  //     const products = await hydrateProducts(
+  //       rows.map((r) => ({
+  //         ...r,
+
+  //         approval_status: r.approval_status || "pending",
+  //         rejection_reason: r.rejection_reason,
+
+  //         store: {
+  //           id: r.store_id_join,
+  //           storeName: r.store_name,
+  //         },
+
+  //         category: {
+  //           id: r.category_id_join,
+  //           name: r.category_name,
+  //         },
+  //       })),
+  //       { variantLimit: 12, withServiceability: false }
+  //     );
+
+  //     return ApiResponse.success(
+  //       res,
+  //       "Admin products fetched successfully",
+  //       products
+  //     );
+  //   } catch (error) {
+  //     return ApiResponse.serverError(
+  //       res,
+  //       "Error fetching admin products",
+  //       error
+  //     );
+  //   }
+  // };
+
+  //   public listCatalog = async (req: Request, res: Response) => {
+  //   try {
+  //     const parsed = publicCatalogQuerySchema.safeParse(req.query);
+  //     if (!parsed.success) {
+  //       return ApiResponse.badRequest(res, "Invalid query parameters", parsed.error);
+  //     }
+
+  //     const q = parsed.data;
+
+  //     const where = this.buildListWhereSql(q);
+  //     if (!where) {
+  //       return ApiResponse.badRequest(res, "Invalid categoryId or storeId");
+  //     }
+
+  //     const page = q.page;
+  //     const limit = q.limit;
+  //     const skip = (page - 1) * limit;
+
+  //     const orderBy = orderByForSort(q.sort);
+
+  //     const [baseRows, totalRows] = await Promise.all([
+  //       sqlQuery<any>(
+  //         `SELECT
+  //             p.*,
+
+  //             v.approval_status AS approval_status,
+  //             v.reason AS rejection_reason,
+
+  //             s.id AS store_id_join,
+  //             s.store_name,
+  //             s.store_slug,
+  //             s.description AS store_description,
+  //             s.is_active AS store_is_active,
+
+  //             c.id AS category_id_join,
+  //             c.name AS category_name,
+  //             c.slug AS category_slug,
+  //             c.domain AS category_domain,
+  //             c.is_active AS category_is_active
+
+  //          FROM products p
+  //          JOIN stores s ON s.id = p.store_id
+  //          JOIN categories c ON c.id = p.category_id
+  //          JOIN product_verification v ON v.product_id = p.id
+
+  //          WHERE ${where.whereSql}
+  //            AND v.approval_status = 'approved'
+
+  //          ORDER BY ${orderBy}
+  //          LIMIT ? OFFSET ?`,
+  //         [...where.args, limit, skip],
+  //       ),
+
+  //       sqlQuery<{ total: number }>(
+  //         `SELECT COUNT(*) AS total
+  //          FROM products p
+  //          JOIN stores s ON s.id = p.store_id
+  //          JOIN categories c ON c.id = p.category_id
+  //          JOIN product_verification v ON v.product_id = p.id
+
+  //          WHERE ${where.whereSql}
+  //            AND v.approval_status = 'approved'`,
+  //         where.args,
+  //       ),
+  //     ]);
+
+  //     const total = Number(totalRows?.[0]?.total ?? 0);
+
+  //     const rows = await hydrateProducts(
+  //       baseRows.map((r) => ({
+  //         ...r,
+
+  //         approval_status: r.approval_status,
+  //         rejection_reason: r.rejection_reason,
+
+  //         id: r.id,
+  //         store: {
+  //           id: r.store_id_join,
+  //           storeName: r.store_name,
+  //           storeSlug: r.store_slug,
+  //           description: r.store_description,
+  //           isActive: !!r.store_is_active,
+  //         },
+  //         category: {
+  //           id: r.category_id_join,
+  //           name: r.category_name,
+  //           slug: r.category_slug,
+  //           domainCode: r.category_domain,
+  //           isActive: !!r.category_is_active,
+  //         },
+  //       })),
+  //       { variantLimit: 12, withServiceability: false },
+  //     );
+
+  //     const totalPages = Math.ceil(total / limit);
+
+  //     return ApiResponse.success(res, "Products fetched successfully", rows, {
+  //       page,
+  //       limit,
+  //       total,
+  //       totalPages,
+  //     });
+  //   } catch (error) {
+  //     return ApiResponse.serverError(res, "Error fetching products", error);
+  //   }
+  // };
+
+  public listProductsForAdmin = async (req: Request, res: Response) => {
+    try {
+      // ✅ Get page & limit from query (default: page=1, limit=20)
+      const page = Number(req.query.page) || 1;
+      const limit = Number(req.query.limit) || 20;
+      const offset = (page - 1) * limit;
+
+      const rows = await sqlQuery<any>(
+        `
+      SELECT 
+        p.*,
+
+        v.approval_status AS approval_status,
+        v.reason AS rejection_reason,
+
+        s.id AS store_id_join,
+        s.store_name,
+
+        c.id AS category_id_join,
+        c.name AS category_name
+
+      FROM products p
+
+      LEFT JOIN product_verification v 
+        ON v.product_id = p.id
+
+      LEFT JOIN stores s 
+        ON s.id = p.store_id
+
+      LEFT JOIN categories c 
+        ON c.id = p.category_id
+
+      ORDER BY p.created_at DESC
+      LIMIT ? OFFSET ?
+      `,
+        [limit, offset], // ✅ safe binding
+      );
+
+      const products = await hydrateProducts(
+        rows.map((r) => ({
+          ...r,
+
+          approval_status: r.approval_status || 'pending',
+          rejection_reason: r.rejection_reason,
+
+          store: {
+            id: r.store_id_join,
+            storeName: r.store_name,
+          },
+
+          category: {
+            id: r.category_id_join,
+            name: r.category_name,
+          },
+        })),
+        { variantLimit: 12, withServiceability: false },
+      );
+
+      return ApiResponse.success(res, 'Admin products fetched successfully', {
+        page,
+        limit,
+        count: products.length,
+        data: products,
+      });
+    } catch (error) {
+      return ApiResponse.serverError(res, 'Error fetching admin products', error);
+    }
+  };
+
   public listByCategorySlug = async (req: Request, res: Response) => {
     try {
       const slug = slugParam(req.params.slug).trim();
@@ -504,6 +745,9 @@ class PublicProductService {
 
       const base = await sqlQuery<any>(
         `SELECT p.*, 
+              v.approval_status AS approval_status,   -- ✅ ADD THIS
+              v.reason AS rejection_reason,           -- ✅ OPTIONAL
+
             s.id as store_id_join, s.store_name, s.store_slug, s.description as store_description, s.support_email, s.support_phone, s.is_active as store_is_active,
             c.id as category_id_join, c.name as category_name, c.slug as category_slug, c.domain as category_domain, c.is_active as category_is_active
          FROM products p
