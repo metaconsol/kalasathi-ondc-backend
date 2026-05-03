@@ -44,6 +44,42 @@ function orderByForSort(sort: string): string {
   }
 }
 
+function normalizeFilterToken(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-');
+}
+
+function toPublicProductCard(product: any) {
+  const price = Number(product.default_price ?? product.defaultPrice ?? 0);
+  const mrp = Number(product.mrp ?? 0);
+  return {
+    ...product,
+    productName: product.product_name ?? product.productName,
+    categoryId: product.category_id ?? product.category?.id,
+    categoryName: product.category_name ?? product.category?.name,
+    storeId: product.store_id ?? product.store?.id,
+    storeName: product.store_name ?? product.store?.storeName,
+    storeSlug: product.store_slug ?? product.store?.storeSlug,
+    createdAt: product.created_at ?? product.createdAt,
+    hasVariants: Number(product.no_of_variants ?? 0) > 0,
+    aliasSlug: product.alias_slug ?? product.aliasSlug,
+    price,
+    mrp,
+    discountPercent: mrp > price && price > 0 ? Math.round(((mrp - price) / mrp) * 100) : null,
+    unitCount: Number(product.unit_count ?? product.unitCount ?? product.stock ?? 0),
+    isOutOfStock: Boolean(product.force_out_of_stock) || Number(product.stock ?? 0) <= 0,
+    hasLimitedStock: Number(product.stock ?? 0) > 0 && Number(product.stock ?? 0) <= 5,
+    minPurchaseQty: product.min_purchase_limit ?? product.minPurchaseLimit ?? 1,
+    maxPurchaseQty: product.max_purchase_limit ?? product.maxPurchaseLimit ?? null,
+    thumbnail: {
+      url: product.images?.[0]?.imageUrl ?? null,
+      alt: product.images?.[0]?.altText ?? null,
+    },
+  };
+}
+
 async function hydrateProducts(
   products: any[],
   opts: { withServiceability?: boolean; variantLimit?: number; withStoreSupport?: boolean },
@@ -188,9 +224,11 @@ class PublicProductService {
     categoryId?: string | undefined;
     categoryIds?: bigint[] | undefined;
     storeId?: string | undefined;
+    district?: string | undefined;
     search?: string | undefined;
     minPrice?: number | undefined;
     maxPrice?: number | undefined;
+    filters?: Record<string, string[]> | undefined;
   }): { whereSql: string; args: any[] } | null {
     const args: any[] = [];
     let whereSql =
@@ -235,7 +273,149 @@ class PublicProductService {
       args.push(q.district.trim());
     }
 
+    for (const [slug, values] of Object.entries(q.filters ?? {})) {
+      const cleanValues = values.map(normalizeFilterToken).filter(Boolean);
+      if (!cleanValues.length) continue;
+      whereSql += ` AND EXISTS (
+        SELECT 1
+        FROM (
+          SELECT pa.product_id, pa.attribute_key, pa.attribute_value as attribute_value
+          FROM product_attributes pa
+          UNION ALL
+          SELECT poa.product_id, poa.attribute_key, poa.attribute_value as attribute_value
+          FROM product_ondc_attributes poa
+          UNION ALL
+          SELECT poa.product_id, poa.attribute_key, poa.color_name as attribute_value
+          FROM product_ondc_attributes poa
+          WHERE poa.color_name IS NOT NULL
+        ) filter_attrs
+        WHERE filter_attrs.product_id = p.id
+          AND LOWER(REPLACE(REPLACE(TRIM(filter_attrs.attribute_key), ' ', '_'), '-', '_')) = ?
+          AND LOWER(REPLACE(REPLACE(TRIM(filter_attrs.attribute_value), ' ', '-'), '_', '-')) IN (${cleanValues.map(() => '?').join(',')})
+      )`;
+      args.push(
+        slug
+          .trim()
+          .toLowerCase()
+          .replace(/[\s-]+/g, '_'),
+        ...cleanValues,
+      );
+    }
+
     return { whereSql, args };
+  }
+
+  private async getCategoryScopeIds(where: { whereSql: string; args: any[] }): Promise<bigint[]> {
+    const rows = await sqlQuery<any>(
+      `SELECT DISTINCT p.category_id as categoryId
+       FROM products p
+       JOIN stores s ON s.id = p.store_id
+       JOIN categories c ON c.id = p.category_id
+       JOIN product_verification v ON v.product_id = p.id
+       WHERE ${where.whereSql}
+         AND v.approval_status = 'approved'`,
+      where.args,
+    );
+    return rows.map((row) => BigInt(row.categoryId));
+  }
+
+  private async listFiltersForCategories(
+    categoryIds: bigint[],
+    where: { whereSql: string; args: any[] },
+  ) {
+    if (!categoryIds.length) return [];
+    const categoryPlaceholders = categoryIds.map(() => '?').join(',');
+
+    const filterRows = await sqlQuery<any>(
+      `SELECT
+          f.id, f.name, f.slug, f.group_type, f.sort_order,
+          MAX(cf.is_required) as is_required,
+          MIN(cf.sort_order) as category_sort_order
+       FROM category_filters cf
+       JOIN cms_filters f ON f.id = cf.filter_id
+       WHERE cf.category_id IN (${categoryPlaceholders})
+         AND cf.is_active = 1
+         AND f.is_active = 1
+       GROUP BY f.id, f.name, f.slug, f.group_type, f.sort_order
+       ORDER BY category_sort_order ASC, f.sort_order ASC, f.name ASC`,
+      categoryIds,
+    );
+
+    if (!filterRows.length) return [];
+    const filterIds = filterRows.map((row) => BigInt(row.id));
+    const filterPlaceholders = filterIds.map(() => '?').join(',');
+
+    const [valueRows, countRows] = await Promise.all([
+      sqlQuery<any>(
+        `SELECT id, filter_id, label, value, sort_order
+         FROM cms_filter_values
+         WHERE filter_id IN (${filterPlaceholders})
+           AND is_active = 1
+         ORDER BY sort_order ASC, label ASC`,
+        filterIds,
+      ),
+      sqlQuery<any>(
+        `SELECT
+            f.id as filterId,
+            fv.value,
+            COUNT(DISTINCT p.id) as productCount
+         FROM cms_filters f
+         JOIN cms_filter_values fv ON fv.filter_id = f.id AND fv.is_active = 1
+         JOIN category_filters cf ON cf.filter_id = f.id AND cf.is_active = 1
+         JOIN products p ON p.category_id = cf.category_id
+         JOIN stores s ON s.id = p.store_id
+         JOIN categories c ON c.id = p.category_id
+         JOIN product_verification v ON v.product_id = p.id
+         JOIN (
+           SELECT pa.product_id, pa.attribute_key, pa.attribute_value as attribute_value
+           FROM product_attributes pa
+           UNION ALL
+           SELECT poa.product_id, poa.attribute_key, poa.attribute_value as attribute_value
+           FROM product_ondc_attributes poa
+           UNION ALL
+           SELECT poa.product_id, poa.attribute_key, poa.color_name as attribute_value
+           FROM product_ondc_attributes poa
+           WHERE poa.color_name IS NOT NULL
+         ) filter_attrs ON filter_attrs.product_id = p.id
+         WHERE f.id IN (${filterPlaceholders})
+           AND p.category_id IN (${categoryPlaceholders})
+           AND ${where.whereSql}
+           AND v.approval_status = 'approved'
+           AND LOWER(REPLACE(REPLACE(TRIM(filter_attrs.attribute_key), ' ', '_'), '-', '_')) = LOWER(REPLACE(REPLACE(TRIM(f.slug), ' ', '_'), '-', '_'))
+           AND LOWER(REPLACE(REPLACE(TRIM(filter_attrs.attribute_value), ' ', '-'), '_', '-')) = LOWER(REPLACE(REPLACE(TRIM(fv.value), ' ', '-'), '_', '-'))
+         GROUP BY f.id, fv.value`,
+        [...filterIds, ...categoryIds, ...where.args],
+      ),
+    ]);
+
+    const valuesByFilter = new Map<string, any[]>();
+    for (const row of valueRows) {
+      const key = String(row.filter_id);
+      const list = valuesByFilter.get(key) ?? [];
+      list.push(row);
+      valuesByFilter.set(key, list);
+    }
+
+    const counts = new Map<string, number>();
+    for (const row of countRows) {
+      counts.set(`${String(row.filterId)}:${String(row.value)}`, Number(row.productCount ?? 0));
+    }
+
+    return filterRows.map((filter) => ({
+      id: filter.id,
+      name: filter.name,
+      slug: filter.slug,
+      group_type: filter.group_type,
+      is_required: Boolean(filter.is_required),
+      values:
+        filter.group_type === 'range'
+          ? []
+          : (valuesByFilter.get(String(filter.id)) ?? []).map((value) => ({
+              label: value.label,
+              value: value.value,
+              productCount: counts.get(`${String(filter.id)}:${String(value.value)}`) ?? 0,
+            })),
+    }));
   }
 
   private async getActiveCategoryDescendantIds(slug: string): Promise<bigint[] | null> {
@@ -270,7 +450,22 @@ class PublicProductService {
       }
       const q = parsed.data;
 
-      const where = this.buildListWhereSql(q);
+      const hasCategoryId = q.categoryId !== undefined && q.categoryId !== '';
+      let categoryFilterIds: bigint[] | undefined;
+      let queryForWhere = q;
+      if (hasCategoryId) {
+        const catId = parseOptionalBigintParam(q.categoryId);
+        if (catId !== null) categoryFilterIds = [catId];
+      } else if (q.categorySlug !== undefined && q.categorySlug.trim() !== '') {
+        const categoryIds = await this.getActiveCategoryDescendantIds(q.categorySlug.trim());
+        if (!categoryIds) {
+          return ApiResponse.notFound(res, 'Category not found');
+        }
+        categoryFilterIds = categoryIds;
+        queryForWhere = { ...q, categoryIds };
+      }
+
+      const where = this.buildListWhereSql(queryForWhere);
       if (!where) {
         return ApiResponse.badRequest(res, 'Invalid categoryId or storeId');
       }
@@ -330,13 +525,23 @@ class PublicProductService {
       );
 
       const totalPages = Math.ceil(total / limit);
+      const categoryScopeIds = categoryFilterIds ?? (await this.getCategoryScopeIds(where));
+      const filters = await this.listFiltersForCategories(categoryScopeIds, where);
 
-      return ApiResponse.success(res, 'Products fetched successfully', rows, {
-        page,
-        limit,
-        total,
-        totalPages,
-      });
+      return ApiResponse.success(
+        res,
+        'Products fetched successfully',
+        {
+          filters,
+          products: rows.map(toPublicProductCard),
+        },
+        {
+          page,
+          limit,
+          total,
+          totalPages,
+        },
+      );
     } catch (error) {
       return ApiResponse.serverError(res, 'Error fetching products', error);
     }
@@ -660,14 +865,23 @@ class PublicProductService {
         })),
         { variantLimit: 12, withServiceability: false },
       );
+      const filters = await this.listFiltersForCategories(categoryIds, where);
 
-      return ApiResponse.success(res, 'Products fetched by category successfully', rows, {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-        categorySlug: slug,
-      });
+      return ApiResponse.success(
+        res,
+        'Products fetched by category successfully',
+        {
+          filters,
+          products: rows.map(toPublicProductCard),
+        },
+        {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+          categorySlug: slug,
+        },
+      );
     } catch (error) {
       return ApiResponse.serverError(res, 'Error fetching products by category', error);
     }

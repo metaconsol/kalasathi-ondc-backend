@@ -11,6 +11,7 @@ export interface IResponseData {
     total?: number;
     totalPages?: number;
   };
+  pagination?: any;
 }
 
 export class ApiResponse {
@@ -22,6 +23,22 @@ export class ApiResponse {
       data: this.processData(data),
       meta: this.processData(meta),
     };
+    if (
+      meta &&
+      (meta.page !== undefined || meta.total !== undefined || meta.totalPages !== undefined)
+    ) {
+      response.pagination = this.processData({
+        currentPage: meta.page,
+        totalPages: meta.totalPages,
+        totalItems: meta.total,
+        itemsPerPage: meta.limit,
+        hasNextPage:
+          meta.page !== undefined && meta.totalPages !== undefined
+            ? meta.page < meta.totalPages
+            : undefined,
+        hasPrevPage: meta.page !== undefined ? meta.page > 1 : undefined,
+      });
+    }
     return res.status(200).json(response);
   }
 

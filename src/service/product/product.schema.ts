@@ -604,12 +604,39 @@ export const publicCatalogQuerySchema = z.preprocess(
   (raw) => {
     if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return raw;
     const q = raw as Record<string, unknown>;
+    const reserved = new Set([
+      'page',
+      'limit',
+      'sort',
+      'categoryId',
+      'category_id',
+      'categorySlug',
+      'category_slug',
+      'category',
+      'storeId',
+      'store_id',
+      'district',
+      'search',
+      'minPrice',
+      'min_price',
+      'maxPrice',
+      'max_price',
+    ]);
+    const filters: Record<string, string[]> = {};
+    for (const [key, rawValue] of Object.entries(q)) {
+      if (reserved.has(key) || rawValue == null || rawValue === '') continue;
+      const values = Array.isArray(rawValue) ? rawValue : String(rawValue).split(',');
+      const clean = values.map((value) => String(value).trim()).filter(Boolean);
+      if (clean.length > 0) filters[key] = clean;
+    }
     return {
       ...q,
       categoryId: q.categoryId ?? q.category_id,
+      categorySlug: q.categorySlug ?? q.category_slug ?? q.category,
       storeId: q.storeId ?? q.store_id,
       minPrice: q.minPrice ?? q.min_price,
       maxPrice: q.maxPrice ?? q.max_price,
+      filters,
     };
   },
   z.object({
@@ -617,11 +644,13 @@ export const publicCatalogQuerySchema = z.preprocess(
     limit: z.coerce.number().int().min(1).max(100).default(20),
     sort: z.enum(['popular', 'newest', 'price_asc', 'price_desc']).default('popular'),
     categoryId: z.string().optional(),
+    categorySlug: z.string().optional(),
     storeId: z.string().optional(),
     district: z.string().optional(),
     search: z.string().optional(),
     minPrice: z.coerce.number().optional(),
     maxPrice: z.coerce.number().optional(),
+    filters: z.record(z.string(), z.array(z.string())).default({}),
   }),
 );
 
