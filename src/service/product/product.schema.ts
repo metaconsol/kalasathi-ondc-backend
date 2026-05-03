@@ -160,6 +160,9 @@ export function normalizeProductNestedInBody(
   if (b.variants != null) b.variants = tryParseJsonValue(b.variants) ?? b.variants;
   if (b.images != null) b.images = tryParseJsonValue(b.images) ?? b.images;
   if (b.attributes != null) b.attributes = tryParseJsonValue(b.attributes) ?? b.attributes;
+  if (b.ondcAttributes == null && b.ondc_attributes != null) b.ondcAttributes = b.ondc_attributes;
+  if (b.ondcAttributes != null)
+    b.ondcAttributes = tryParseJsonValue(b.ondcAttributes) ?? b.ondcAttributes;
   if (b.replaceVariantTree == null && b.replace_variant_tree != null) {
     const v = b.replace_variant_tree;
     b.replaceVariantTree = v === true || v === 'true' || v === 1 || v === '1';
@@ -179,6 +182,9 @@ export function normalizeProductNestedInBody(
   if (Array.isArray(b.attributes)) {
     b.attributes = b.attributes.map((item) => coerceProductAttributePayloadItem(item));
   }
+  if (Array.isArray(b.ondcAttributes)) {
+    b.ondcAttributes = b.ondcAttributes.map((item) => coerceOndcAttributePayloadItem(item));
+  }
   return b;
 }
 
@@ -197,6 +203,24 @@ function coerceProductAttributePayloadItem(raw: unknown): unknown {
   if (val !== undefined) {
     out.attributeValue = val === null || val === '' ? null : String(val);
   }
+  return out;
+}
+
+function coerceOndcAttributePayloadItem(raw: unknown): unknown {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return raw;
+  }
+  const r = raw as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  const key = r.attributeKey ?? r.attribute_key;
+  if (key != null && String(key).trim() !== '') out.attributeKey = String(key).trim();
+  const val = r.attributeValue ?? r.attribute_value;
+  if (val !== undefined) out.attributeValue = val === null || val === '' ? null : String(val);
+  const colorName = r.colorName ?? r.color_name;
+  if (colorName !== undefined)
+    out.colorName = colorName === null || colorName === '' ? null : String(colorName);
+  const sortOrder = r.sortOrder ?? r.sort_order;
+  if (sortOrder !== undefined) out.sortOrder = sortOrder;
   return out;
 }
 
@@ -245,6 +269,13 @@ function normalizeEmbeddedVariantItem(raw: unknown): Record<string, unknown> {
     const parsed = Array.isArray(n.images) ? n.images : tryParseJsonValue(n.images);
     n.images = Array.isArray(parsed) ? parsed.map((x) => normalizeVariantImageItem(x)) : n.images;
   }
+  const attrs = n.ondcAttributes ?? (r as { ondc_attributes?: unknown }).ondc_attributes;
+  if (attrs != null) {
+    const parsed = Array.isArray(attrs) ? attrs : tryParseJsonValue(attrs);
+    n.ondcAttributes = Array.isArray(parsed)
+      ? parsed.map((x) => coerceOndcAttributePayloadItem(x))
+      : attrs;
+  }
   return n;
 }
 
@@ -262,6 +293,20 @@ const variantImagePayloadItemSchema = z
   .strict();
 
 const variantImagesField = z.array(variantImagePayloadItemSchema).optional();
+
+const ondcAttributePayloadItemSchema = z.preprocess(
+  coerceOndcAttributePayloadItem,
+  z
+    .object({
+      attributeKey: z.string().min(1, 'attributeKey is required').max(255),
+      attributeValue: z.union([z.string().max(65535), z.null()]).optional(),
+      colorName: z.union([z.string().max(255), z.null()]).optional(),
+      sortOrder: z.coerce.number().int().min(0).optional(),
+    })
+    .strict(),
+);
+
+const ondcAttributesPayloadSchema = z.array(ondcAttributePayloadItemSchema);
 
 /** Single sellable row (no hierarchy). */
 export const flatVariantCreateSchema = z.object({
@@ -284,6 +329,7 @@ export const flatVariantCreateSchema = z.object({
   maxPurchaseLimit: z.coerce.number().int().optional(),
   standardPackageQty: z.coerce.number().int().optional(),
   images: variantImagesField,
+  ondcAttributes: ondcAttributesPayloadSchema.optional(),
   /** Maps to `inventory.qty_on_hand` for this SKU (per default store location). */
   stock: z.coerce.number().int().min(0).optional(),
 });
@@ -318,6 +364,7 @@ export const treeVariantShapeSchema = z.object({
   standardPackageQty: z.coerce.number().int().optional(),
   colorCode: z.string().max(255).optional(),
   images: variantImagesField,
+  ondcAttributes: ondcAttributesPayloadSchema.optional(),
   /** Per-leaf qty on hand → `inventory` row (default store location). */
   stock: z.coerce.number().int().min(0).optional(),
 });
@@ -482,6 +529,7 @@ export const createProductSchema = productCoreSchema.extend({
   images: z.array(productImagePayloadItemSchema).optional(),
   variants: z.array(createVariantSchema).optional(),
   attributes: productAttributesPayloadSchema.optional(),
+  ondcAttributes: ondcAttributesPayloadSchema.optional(),
 });
 
 const updateVariantInPayload = flatVariantCreateSchema
@@ -500,6 +548,8 @@ export const updateProductSchema = productCoreSchema.partial().extend({
   variants: z.array(variantItemForUpdateSchema).optional(),
   /** If present (including `[]`), replaces all `product_attributes` rows for this product. Omit to leave unchanged. */
   attributes: productAttributesPayloadSchema.optional(),
+  /** If present (including `[]`), replaces product-level `product_ondc_attributes` rows (`variant_id IS NULL`). */
+  ondcAttributes: ondcAttributesPayloadSchema.optional(),
   removeVariantIds: z
     .array(z.coerce.bigint().refine((b) => b > 0n, { message: 'Variant id must be positive' }))
     .optional(),
