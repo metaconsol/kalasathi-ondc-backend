@@ -6,6 +6,7 @@ import { env } from '~/config/env.config';
 
 const uploadsRootDir = path.join(process.cwd(), 'public', 'uploads');
 const productImagesDir = path.join(uploadsRootDir, 'productImages');
+const sizeChartsDir = path.join(uploadsRootDir, 'sizeCharts');
 
 const ensureDir = (dirPath: string) => {
   if (!fs.existsSync(dirPath)) {
@@ -15,6 +16,7 @@ const ensureDir = (dirPath: string) => {
 
 ensureDir(uploadsRootDir);
 ensureDir(productImagesDir);
+ensureDir(sizeChartsDir);
 
 const createDiskStorage = (destinationDir: string) =>
   multer.diskStorage({
@@ -32,6 +34,9 @@ const storage = createDiskStorage(uploadsRootDir);
 const productImageStorage = env.isS3Configured
   ? multer.memoryStorage()
   : createDiskStorage(productImagesDir);
+const sizeChartStorage = env.isS3Configured
+  ? multer.memoryStorage()
+  : createDiskStorage(sizeChartsDir);
 const cmsUploadStorage = env.isS3Configured
   ? multer.memoryStorage()
   : createDiskStorage(uploadsRootDir);
@@ -86,6 +91,14 @@ export const productImageUpload = multer({
   storage: productImageStorage,
   limits: {
     fileSize: 15 * 1024 * 1024, // 15MB
+  },
+  fileFilter,
+});
+
+export const sizeChartUpload = multer({
+  storage: sizeChartStorage,
+  limits: {
+    fileSize: 15 * 1024 * 1024,
   },
   fileFilter,
 });
