@@ -2,6 +2,7 @@ import express from 'express';
 import { optionalAccessToken } from '~/middleware/optionalAccess.middleware';
 import {
   listPublicProducts,
+  listAdminProducts,
   searchPublicProducts,
   listPublicProductCategoryTree,
   listPublicProductsByCategory,
@@ -21,6 +22,7 @@ const router = express.Router();
  * GET /ui/products — catalog list (filters: page, limit, sort, categoryId, storeId, search, minPrice, maxPrice)
  */
 router.get('/', listPublicProducts);
+router.get('/admin/products', listAdminProducts);
 
 /**
  * GET /ui/products/search — same behavior as list (category / price filters)
