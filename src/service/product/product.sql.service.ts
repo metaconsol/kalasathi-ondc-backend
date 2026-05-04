@@ -98,6 +98,58 @@ async function upsertInventoryForVariant(
   }
 }
 
+async function replaceProductFilters(
+  tx: SqlTx,
+  productId: bigint,
+  categoryId: bigint,
+  input: Array<{ filterId?: bigint; filterValueId: bigint }>,
+): Promise<void> {
+  await sqlExec('DELETE FROM product_filters WHERE product_id = ?', [productId], tx);
+  if (!Array.isArray(input) || input.length === 0) return;
+
+  const valueIds = Array.from(new Set(input.map((x) => String(x.filterValueId)).filter(Boolean)));
+  if (!valueIds.length) return;
+
+  const rows = await sqlQuery<{
+    filter_value_id: bigint | string;
+    filter_id: bigint | string;
+  }>(
+    `SELECT fv.id AS filter_value_id, fv.filter_id
+     FROM cms_filter_values fv
+     JOIN cms_filters f ON f.id = fv.filter_id AND f.is_active = 1
+     JOIN category_filters cf ON cf.filter_id = fv.filter_id
+       AND cf.category_id = ?
+       AND cf.is_active = 1
+     WHERE fv.is_active = 1
+       AND fv.id IN (${valueIds.map(() => '?').join(',')})`,
+    [categoryId, ...valueIds],
+    tx,
+  );
+
+  const allowedByValue = new Map(
+    rows.map((r) => [String(r.filter_value_id), BigInt(String(r.filter_id))]),
+  );
+  const seen = new Set<string>();
+  for (const item of input) {
+    const valueKey = String(item.filterValueId);
+    const filterId = allowedByValue.get(valueKey);
+    if (!filterId) {
+      throw new Error('INVALID_PRODUCT_FILTER');
+    }
+    if (item.filterId != null && BigInt(String(item.filterId)) !== filterId) {
+      throw new Error('INVALID_PRODUCT_FILTER');
+    }
+    const uniqueKey = `${String(filterId)}:${valueKey}`;
+    if (seen.has(uniqueKey)) continue;
+    seen.add(uniqueKey);
+    await sqlExec(
+      'INSERT INTO product_filters (product_id, filter_id, filter_value_id) VALUES (?, ?, ?)',
+      [productId, filterId, item.filterValueId],
+      tx,
+    );
+  }
+}
+
 /**
  * Inserts Mrignayanee-style variant tree rows and optional `inventory` for leaf SKUs.
  */
@@ -232,13 +284,32 @@ async function loadProductHydrated(storeId: bigint, productId: bigint) {
 
   const storeIdForInv = BigInt(p.store_id);
 
-  const [images, attributes, variants, vimgs] = await Promise.all([
+  const [images, attributes, productFilters, variants, vimgs] = await Promise.all([
     sqlQuery<any>('SELECT * FROM product_images WHERE product_id = ? ORDER BY sort_order ASC', [
       productId,
     ]),
     sqlQuery<any>('SELECT * FROM product_attributes WHERE product_id = ? ORDER BY id ASC', [
       productId,
     ]),
+    sqlQuery<any>(
+      `SELECT
+         pf.id,
+         pf.product_id,
+         pf.filter_id,
+         pf.filter_value_id,
+         f.name AS filter_name,
+         f.slug AS filter_slug,
+         f.group_type,
+         fv.label AS value_label,
+         fv.value,
+         pf.created_at
+       FROM product_filters pf
+       JOIN cms_filters f ON f.id = pf.filter_id
+       JOIN cms_filter_values fv ON fv.id = pf.filter_value_id
+       WHERE pf.product_id = ?
+       ORDER BY f.sort_order ASC, fv.sort_order ASC, fv.label ASC`,
+      [productId],
+    ),
     sqlQuery<any>('SELECT * FROM product_variants WHERE product_id = ? ORDER BY id ASC', [
       productId,
     ]),
@@ -354,6 +425,18 @@ async function loadProductHydrated(storeId: bigint, productId: bigint) {
       attributeValue: r.attribute_value,
       createdAt: r.created_at,
     })),
+    productFilters: productFilters.map((r) => ({
+      id: r.id,
+      productId: r.product_id,
+      filterId: r.filter_id,
+      filterValueId: r.filter_value_id,
+      filterName: r.filter_name,
+      filterSlug: r.filter_slug,
+      groupType: r.group_type,
+      label: r.value_label,
+      value: r.value,
+      createdAt: r.created_at,
+    })),
     variants: variantsOut,
   };
 }
@@ -407,6 +490,60 @@ class ProductSqlService {
       return ApiResponse.success(res, 'Category tree fetched successfully', roots);
     } catch (error) {
       return ApiResponse.serverError(res, 'Error building category tree', error);
+    }
+  };
+
+  public listCategoryFilters = async (res: Response, categoryId: bigint) => {
+    try {
+      const rows = await sqlQuery<any>(
+        `SELECT
+           f.id AS filter_id,
+           f.name,
+           f.slug,
+           f.group_type,
+           cf.is_required,
+           fv.id AS value_id,
+           fv.label,
+           fv.value
+         FROM category_filters cf
+         JOIN cms_filters f ON f.id = cf.filter_id
+         LEFT JOIN cms_filter_values fv ON fv.filter_id = f.id AND fv.is_active = 1
+         WHERE cf.category_id = ?
+           AND cf.is_active = 1
+           AND f.is_active = 1
+         ORDER BY cf.sort_order ASC, f.sort_order ASC, f.name ASC, fv.sort_order ASC, fv.label ASC`,
+        [categoryId],
+      );
+
+      const byFilter = new Map<string, any>();
+      for (const row of rows) {
+        const key = String(row.filter_id);
+        if (!byFilter.has(key)) {
+          byFilter.set(key, {
+            id: row.filter_id,
+            name: row.name,
+            slug: row.slug,
+            group_type: row.group_type,
+            is_required: Boolean(row.is_required),
+            values: [],
+          });
+        }
+        if (row.value_id != null) {
+          byFilter.get(key).values.push({
+            id: row.value_id,
+            label: row.label,
+            value: row.value,
+          });
+        }
+      }
+
+      return ApiResponse.success(
+        res,
+        'Category filters fetched successfully',
+        Array.from(byFilter.values()),
+      );
+    } catch (error) {
+      return ApiResponse.serverError(res, 'Error fetching category filters', error);
     }
   };
 
@@ -663,6 +800,14 @@ class ProductSqlService {
             );
           }
         }
+        if (Array.isArray((body as any).productFilters)) {
+          await replaceProductFilters(
+            tx,
+            pid,
+            BigInt(String(body.categoryId)),
+            (body as any).productFilters,
+          );
+        }
         if (Array.isArray((body as any).variants)) {
           await insertVariantTreeFromPayload(tx, storeId, pid, (body as any).variants as any[]);
         }
@@ -688,7 +833,13 @@ class ProductSqlService {
         'Product created successfully',
         await expandS3RefsDeep(product),
       );
-    } catch (error) {
+    } catch (error: any) {
+      if (String(error?.message) === 'INVALID_PRODUCT_FILTER') {
+        return ApiResponse.badRequest(
+          res,
+          'Selected product filter is not valid for this category',
+        );
+      }
       return ApiResponse.serverError(res, 'Error creating product', error);
     }
   };
@@ -753,7 +904,7 @@ class ProductSqlService {
     try {
       await withSqlTransaction(async (tx) => {
         const current = await sqlQuery<any>(
-          'SELECT id FROM products WHERE id = ? AND store_id = ? LIMIT 1',
+          'SELECT id, category_id FROM products WHERE id = ? AND store_id = ? LIMIT 1',
           [productId, storeId],
           tx,
         );
@@ -830,6 +981,13 @@ class ProductSqlService {
             );
           }
         }
+        if (Array.isArray((body as any).productFilters)) {
+          const categoryId =
+            (body as any).categoryId != null
+              ? BigInt(String((body as any).categoryId))
+              : BigInt(String(current[0].category_id ?? current[0].categoryId));
+          await replaceProductFilters(tx, productId, categoryId, (body as any).productFilters);
+        }
 
         const replaceTree =
           (body as any).replaceVariantTree === true || (body as any).replaceVariantTree === 'true';
@@ -858,6 +1016,12 @@ class ProductSqlService {
     } catch (error: any) {
       if (String(error?.message) === 'NOT_FOUND')
         return ApiResponse.notFound(res, 'Product not found');
+      if (String(error?.message) === 'INVALID_PRODUCT_FILTER') {
+        return ApiResponse.badRequest(
+          res,
+          'Selected product filter is not valid for this category',
+        );
+      }
       return ApiResponse.serverError(res, 'Error updating product', error);
     }
   };

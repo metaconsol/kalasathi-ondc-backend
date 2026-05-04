@@ -278,20 +278,12 @@ class PublicProductService {
       if (!cleanValues.length) continue;
       whereSql += ` AND EXISTS (
         SELECT 1
-        FROM (
-          SELECT pa.product_id, pa.attribute_key, pa.attribute_value as attribute_value
-          FROM product_attributes pa
-          UNION ALL
-          SELECT poa.product_id, poa.attribute_key, poa.attribute_value as attribute_value
-          FROM product_ondc_attributes poa
-          UNION ALL
-          SELECT poa.product_id, poa.attribute_key, poa.color_name as attribute_value
-          FROM product_ondc_attributes poa
-          WHERE poa.color_name IS NOT NULL
-        ) filter_attrs
-        WHERE filter_attrs.product_id = p.id
-          AND LOWER(REPLACE(REPLACE(TRIM(filter_attrs.attribute_key), ' ', '_'), '-', '_')) = ?
-          AND LOWER(REPLACE(REPLACE(TRIM(filter_attrs.attribute_value), ' ', '-'), '_', '-')) IN (${cleanValues.map(() => '?').join(',')})
+        FROM product_filters pf
+        JOIN cms_filters f ON f.id = pf.filter_id
+        JOIN cms_filter_values fv ON fv.id = pf.filter_value_id
+        WHERE pf.product_id = p.id
+          AND LOWER(REPLACE(REPLACE(TRIM(f.slug), ' ', '_'), '-', '_')) = ?
+          AND LOWER(REPLACE(REPLACE(TRIM(fv.value), ' ', '-'), '_', '-')) IN (${cleanValues.map(() => '?').join(',')})
       )`;
       args.push(
         slug
@@ -366,23 +358,13 @@ class PublicProductService {
          JOIN stores s ON s.id = p.store_id
          JOIN categories c ON c.id = p.category_id
          JOIN product_verification v ON v.product_id = p.id
-         JOIN (
-           SELECT pa.product_id, pa.attribute_key, pa.attribute_value as attribute_value
-           FROM product_attributes pa
-           UNION ALL
-           SELECT poa.product_id, poa.attribute_key, poa.attribute_value as attribute_value
-           FROM product_ondc_attributes poa
-           UNION ALL
-           SELECT poa.product_id, poa.attribute_key, poa.color_name as attribute_value
-           FROM product_ondc_attributes poa
-           WHERE poa.color_name IS NOT NULL
-         ) filter_attrs ON filter_attrs.product_id = p.id
+         JOIN product_filters pf ON pf.product_id = p.id
+           AND pf.filter_id = f.id
+           AND pf.filter_value_id = fv.id
          WHERE f.id IN (${filterPlaceholders})
            AND p.category_id IN (${categoryPlaceholders})
            AND ${where.whereSql}
            AND v.approval_status = 'approved'
-           AND LOWER(REPLACE(REPLACE(TRIM(filter_attrs.attribute_key), ' ', '_'), '-', '_')) = LOWER(REPLACE(REPLACE(TRIM(f.slug), ' ', '_'), '-', '_'))
-           AND LOWER(REPLACE(REPLACE(TRIM(filter_attrs.attribute_value), ' ', '-'), '_', '-')) = LOWER(REPLACE(REPLACE(TRIM(fv.value), ' ', '-'), '_', '-'))
          GROUP BY f.id, fv.value`,
         [...filterIds, ...categoryIds, ...where.args],
       ),

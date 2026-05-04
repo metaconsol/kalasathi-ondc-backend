@@ -85,6 +85,7 @@ export function normalizeSellerProductBody(raw: unknown): Record<string, unknown
     n.packageHeightCm = r.shipping_pkg_height_cm;
   if (n.ondcSubcategory == null && r.ondc_subcategory != null)
     n.ondcSubcategory = r.ondc_subcategory;
+  if (n.productFilters == null && r.product_filters != null) n.productFilters = r.product_filters;
   return n;
 }
 
@@ -523,6 +524,13 @@ const productCoreSchema = z.object({
   ondcSubcategory: z.string().max(512).optional(),
 });
 
+const productFiltersPayloadSchema = z.array(
+  z.object({
+    filterId: z.coerce.bigint().positive('Filter ID must be a positive number').optional(),
+    filterValueId: z.coerce.bigint().positive('Filter value ID must be a positive number'),
+  }),
+);
+
 /** @desc Create product. Omit `variants` or `[]` → one default sellable variant; set `variants` to pre-seed many rows.
  *  `alias_slug` / `aliasSlug`: optional; if omitted or empty, server assigns `{normalized_name}_{id}` after insert (name: spaces/special chars → `_`). */
 export const createProductSchema = productCoreSchema.extend({
@@ -530,6 +538,7 @@ export const createProductSchema = productCoreSchema.extend({
   variants: z.array(createVariantSchema).optional(),
   attributes: productAttributesPayloadSchema.optional(),
   ondcAttributes: ondcAttributesPayloadSchema.optional(),
+  productFilters: productFiltersPayloadSchema.optional(),
 });
 
 const updateVariantInPayload = flatVariantCreateSchema
@@ -550,6 +559,8 @@ export const updateProductSchema = productCoreSchema.partial().extend({
   attributes: productAttributesPayloadSchema.optional(),
   /** If present (including `[]`), replaces product-level `product_ondc_attributes` rows (`variant_id IS NULL`). */
   ondcAttributes: ondcAttributesPayloadSchema.optional(),
+  /** If present (including `[]`), replaces the selected CMS filter values for this product. */
+  productFilters: productFiltersPayloadSchema.optional(),
   removeVariantIds: z
     .array(z.coerce.bigint().refine((b) => b > 0n, { message: 'Variant id must be positive' }))
     .optional(),
