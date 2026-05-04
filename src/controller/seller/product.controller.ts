@@ -137,6 +137,35 @@ export const uploadSellerProductImage = async (req: Request, res: Response) => {
 };
 
 /**
+ * @desc    Upload one size chart image file; returns public `imageUrl` for sizeChartUrl
+ * @route   POST /api/v1/seller/size-charts/upload  (multipart field `file`)
+ */
+export const uploadSellerSizeChart = async (req: Request, res: Response) => {
+  try {
+    const f = (req as Request & { file?: Express.Multer.File }).file;
+    if (!f) {
+      return ApiResponse.badRequest(res, 'file is required');
+    }
+    if (isS3Enabled()) {
+      const buf = f.buffer;
+      if (!buf?.length) {
+        return ApiResponse.badRequest(res, 'empty file');
+      }
+      const key = buildObjectKey('uploads/sizeCharts', f.originalname);
+      await putS3Object(key, buf, f.mimetype);
+      const storageRef = `s3:${key}`;
+      const imageUrl = await resolveS3KeyToUrl(key);
+      return ApiResponse.success(res, 'Uploaded', { imageUrl, storageRef });
+    }
+    const prefix = env.serverUrl.replace(/\/$/, '');
+    const imageUrl = `${prefix}/uploads/sizeCharts/${f.filename}`;
+    return ApiResponse.success(res, 'Uploaded', { imageUrl, storageRef: imageUrl });
+  } catch (error) {
+    return ApiResponse.serverError(res, 'Error uploading size chart', error);
+  }
+};
+
+/**
  * @desc    List all products for a store
  * @route   GET /api/v1/seller/stores/:store_id/products
  */

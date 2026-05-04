@@ -35,8 +35,9 @@ import {
   listCatalogCategoryFilters,
   listCatalogCategoryTree,
   uploadSellerProductImage,
+  uploadSellerSizeChart,
 } from '~/controller/seller/product.controller';
-import { productImageUpload } from '~/middleware/multer';
+import { productImageUpload, sizeChartUpload } from '~/middleware/multer';
 
 const router = express.Router();
 
@@ -53,6 +54,7 @@ router.get('/categories', listCatalogCategories);
 router.get('/categories/tree', listCatalogCategoryTree);
 router.get('/categories/:category_id/filters', listCatalogCategoryFilters);
 router.post('/product-images/upload', productImageUpload.single('file'), uploadSellerProductImage);
+router.post('/size-charts/upload', sizeChartUpload.single('file'), uploadSellerSizeChart);
 
 router.get('/profile', getSellerProfileHandler);
 router.put('/profile', validate({ body: UpdateSellerProfileBodySchema }), putSellerProfileHandler);

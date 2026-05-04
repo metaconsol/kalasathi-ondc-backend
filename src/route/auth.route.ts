@@ -31,7 +31,11 @@ import {
   forgotPasswordResend,
   forgotPasswordVerify,
   forgotPasswordReset,
+  SellerRegister,
+  CreateSellerProfile,
+  CreateStoreForSeller,
 } from '~/controller/auth.controller';
+import { sellerAuthMiddleware } from '~/middleware/seller.middleware';
 
 const router = express.Router();
 
@@ -129,5 +133,15 @@ router.post('/forgot-password/verify', validate({ body: OTPVerifySchema }), forg
  * @desc    Reset the password after OTP verification
  */
 router.post('/forgot-password/reset', validate({ body: ResetPasswordSchema }), forgotPasswordReset);
+
+/**
+ * @route   POST /api/v1/auth/Sellerregister
+ * @desc    Register a  SellerRegister (creates account + sends OTP for verification)
+ *  Four Way verification Process
+ */
+
+router.post('/seller/register', validate({ body: RegisterSchema }), SellerRegister);
+router.post('/seller/register/profile', authMiddleware, CreateSellerProfile);
+router.post('/seller/register/store', sellerAuthMiddleware, CreateStoreForSeller);
 
 export { router as authRouter };
