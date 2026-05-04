@@ -71,6 +71,22 @@ export const listCatalogCategoryTree = async (req: Request, res: Response) => {
 };
 
 /**
+ * @desc    CMS filters and values assigned to one catalog category
+ * @route   GET /api/v1/seller/categories/:category_id/filters
+ */
+export const listCatalogCategoryFilters = async (req: Request, res: Response) => {
+  try {
+    const categoryId = parseRequiredBigintParam(req.params.category_id);
+    if (categoryId === null) {
+      return ApiResponse.badRequest(res, 'Invalid category_id');
+    }
+    return productService.listCategoryFilters(res, categoryId);
+  } catch (error) {
+    return ApiResponse.serverError(res, 'Error listing category filters', error);
+  }
+};
+
+/**
  * @desc    Get one product (seller / admin)
  * @route   GET /api/v1/seller/stores/:store_id/products/:product_id
  *          GET /api/v1/seller/products/:product_id

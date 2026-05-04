@@ -32,6 +32,7 @@ import {
 import { sellerProductRouter } from './seller/product.route';
 import {
   listCatalogCategories,
+  listCatalogCategoryFilters,
   listCatalogCategoryTree,
   uploadSellerProductImage,
   uploadSellerSizeChart,
@@ -51,6 +52,7 @@ router.use(sellerAuthMiddleware);
 
 router.get('/categories', listCatalogCategories);
 router.get('/categories/tree', listCatalogCategoryTree);
+router.get('/categories/:category_id/filters', listCatalogCategoryFilters);
 router.post('/product-images/upload', productImageUpload.single('file'), uploadSellerProductImage);
 router.post('/size-charts/upload', sizeChartUpload.single('file'), uploadSellerSizeChart);
 
