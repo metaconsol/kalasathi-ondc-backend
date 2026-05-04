@@ -79,6 +79,18 @@ export const register = async (req: Request, res: Response) => {
   return authService.register(req, res);
 };
 
+export const SellerRegister = async (req: Request, res: Response) => {
+  return authService.SellerRegister(req, res);
+};
+
+export const CreateSellerProfile = async (req: Request, res: Response) => {
+  return authService.createSellerProfile(req, res);
+};
+
+export const CreateStoreForSeller = async (req: Request, res: Response) => {
+  return authService.createStoreLocation(req, res);
+};
+
 /**
  * @desc    Logout the current user
  * @route   DELETE /api/v1/auth/logout

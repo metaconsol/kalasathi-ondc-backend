@@ -151,6 +151,200 @@ class AuthService {
     });
   };
 
+  public SellerRegister = async (req: Request, res: Response) => {
+    const { fullName: name, email, phoneNumber, password } = req.body;
+
+    const existing = await sqlQuery<{ id: number }>(
+      'SELECT `id` FROM `User` WHERE `phoneNumber` = ? LIMIT 1',
+      [phoneNumber],
+    );
+    const isExist = existing[0] ?? null;
+
+    if (isExist && isExist?.id) {
+      return ApiResponse.badRequest(res, 'Phone number is already registered');
+    }
+    if (email) {
+      const existingEmail = await sqlQuery<{ id: number }>(
+        'SELECT `id` FROM `User` WHERE `email` = ? LIMIT 1',
+        [email],
+      );
+
+      if (existingEmail[0]?.id) {
+        return ApiResponse.badRequest(res, 'Email is already registered');
+      }
+    }
+    const hashedPassword: string = await AuthUtil.getHashedPassword(password);
+    const token = await withSqlTransaction(async (tx) => {
+      const username = randomUUID();
+      const userRes = await sqlExec(
+        'INSERT INTO `User` (`username`, `name`, `email`, `phoneNumber`, `password`, `role`) VALUES (?, ?, ?, ?, ?, ?)',
+        [username, name, email ?? null, phoneNumber, hashedPassword, UserRole.SELLER],
+        tx,
+      );
+      const userId = Number(userRes.insertId);
+      if (!userId) {
+        throw ApiError.INTERNAL_SERVER_ERROR('Failed to user create');
+      }
+
+      await sqlExec('INSERT INTO `Profile` (`userId`) VALUES (?)', [userId], tx);
+
+      await sqlExec(
+        'INSERT INTO `Account` (`id`, `userId`, `type`, `provider`, `providerAccountId`, `status`) VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          randomUUID(),
+          userId,
+          AccountType.CREDENTIALS,
+          AccountProvider.CREDENTIALS,
+          userId.toString(),
+          AccountStatus.PENDING,
+        ],
+        tx,
+      );
+
+      const verificationToken = await otpService.sendOTP(
+        {
+          name,
+          email: email ?? null,
+          phoneNumber,
+          tokenType: AuthTokenType.VERIFICATION,
+        },
+        tx,
+      );
+      if (!verificationToken) {
+        throw ApiError.INTERNAL_SERVER_ERROR('Failed to send OTP');
+      }
+
+      return verificationToken;
+    });
+
+    return ApiResponse.created(res, 'Registered successfully', {
+      tokens: [
+        {
+          key: AuthTokenType.VERIFICATION,
+          value: token,
+        },
+      ],
+    });
+  };
+
+  public createSellerProfile = async (req: Request, res: Response) => {
+    const { gstin, pan, bank_account_no, bank_ifsc, upi_id } = req.body;
+
+    // ✅ AUTO USER ID (login user se)
+    const user_id = req.user?.id; // ⚠️ middleware required
+
+    if (!user_id) {
+      return ApiResponse.badRequest(res, 'User not authenticated');
+    }
+
+    // ✅ Check if already exists
+    const existing = await sqlQuery<{ user_id: number }>(
+      'SELECT `user_id` FROM `seller_profiles` WHERE `user_id` = ? LIMIT 1',
+      [user_id],
+    );
+
+    if (existing[0]?.user_id) {
+      return ApiResponse.badRequest(res, 'Seller profile already exists');
+    }
+
+    // ✅ Insert
+    await sqlExec(
+      `INSERT INTO seller_profiles 
+    (user_id, gstin, pan, bank_account_no, bank_ifsc, upi_id, kyc_status) 
+    VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        user_id,
+        gstin ?? null,
+        pan ?? null,
+        bank_account_no ?? null,
+        bank_ifsc ?? null,
+        upi_id ?? null,
+        'pending',
+      ],
+    );
+
+    return ApiResponse.created(res, 'Seller profile created successfully');
+  };
+
+  public createStoreLocation = async (req: Request, res: Response) => {
+    const user_id = (req as any).user?.id;
+
+    if (!user_id) {
+      return ApiResponse.badRequest(res, 'User not authenticated');
+    }
+
+    const {
+      location_type,
+      address_line1,
+      address_line2,
+      city,
+      state,
+      country,
+      pincode,
+      latitude,
+      longitude,
+      radius,
+      opening_time,
+      closing_time,
+      serviceability,
+      is_active,
+    } = req.body;
+
+    // ✅ Get store_id from logged-in user
+    const store = await sqlQuery<{ id: number }>(
+      'SELECT `id` FROM `stores` WHERE `seller_user_id` = ? LIMIT 1',
+      [user_id],
+    );
+
+    if (!store[0]?.id) {
+      return ApiResponse.badRequest(res, 'Store not found for this user');
+    }
+
+    const store_id = store[0].id;
+
+    // ✅ Insert location
+    await sqlExec(
+      `INSERT INTO store_locations
+    (
+      store_id,
+      location_type,
+      address_line1,
+      address_line2,
+      city,
+      state,
+      country,
+      pincode,
+      latitude,
+      longitude,
+      radius,
+      opening_time,
+      closing_time,
+      serviceability,
+      is_active
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        store_id,
+        location_type ?? null,
+        address_line1 ?? null,
+        address_line2 ?? null,
+        city ?? null,
+        state ?? null,
+        country ?? 'India',
+        pincode ?? null,
+        latitude ?? null,
+        longitude ?? null,
+        radius ?? null,
+        opening_time ?? null,
+        closing_time ?? null,
+        serviceability ?? null,
+        is_active ?? true,
+      ],
+    );
+
+    return ApiResponse.created(res, 'Store location created successfully');
+  };
+
   /** Same as `register`, but creates the account with the SELLER role (no GSTIN/PAN verification). */
   public registerSeller = async (req: Request, res: Response) => {
     const { fullName: name, email, phoneNumber, password } = req.body;
