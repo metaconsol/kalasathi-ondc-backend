@@ -5,6 +5,51 @@ export type ReviewStatus = 'pending' | 'approved' | 'rejected';
 /**
  * Create Review
  */
+// export const createReview = async (data: {
+//   productId: number;
+//   userId: number;
+//   rating: number;
+//   reviewText?: string;
+//   reviewImage?: string;
+// }) => {
+//   // check product exist
+//   const product = await sqlQuery('SELECT id FROM products WHERE id = ? LIMIT 1', [data.productId]);
+
+//   if (!product.length) {
+//     throw new Error('Product not found');
+//   }
+
+//   // prevent duplicate review
+//   const existing = await sqlQuery(
+//     'SELECT id FROM product_reviews WHERE product_id = ? AND user_id = ? LIMIT 1',
+//     [data.productId, data.userId],
+//   );
+
+//   if (existing.length) {
+//     throw new Error('You already reviewed this product');
+//   }
+
+//   const res = await sqlExec(
+//     `INSERT INTO product_reviews
+//     (product_id, user_id, rating, review_text, review_image, status)
+//     VALUES (?, ?, ?, ?, ?, ?)`,
+//     [
+//       data.productId,
+//       data.userId,
+//       data.rating,
+//       data.reviewText ?? null,
+//       data.reviewImage ?? null,
+//       'pending',
+//     ],
+//   );
+
+//   const rows = await sqlQuery('SELECT * FROM product_reviews WHERE id = ? LIMIT 1', [
+//     Number(res.insertId),
+//   ]);
+
+//   return rows[0] ?? null;
+// };
+
 export const createReview = async (data: {
   productId: number;
   userId: number;
@@ -19,6 +64,27 @@ export const createReview = async (data: {
     throw new Error('Product not found');
   }
 
+  // rating validation
+  if (data.rating < 1 || data.rating > 5) {
+    throw new Error('Rating must be between 1 and 5');
+  }
+
+  // check purchase (recommended)
+  const hasPurchased = await sqlQuery(
+    `SELECT oi.id
+     FROM order_items oi
+     JOIN orders o ON o.id = oi.order_id
+     WHERE oi.product_id = ?
+     AND o.user_id = ?
+     AND o.order_status = 'delivered'
+     LIMIT 1`,
+    [data.productId, data.userId],
+  );
+
+  // if (!hasPurchased.length) {
+  //   throw new Error('You can review only purchased products');
+  // }
+
   // prevent duplicate review
   const existing = await sqlQuery(
     'SELECT id FROM product_reviews WHERE product_id = ? AND user_id = ? LIMIT 1',
@@ -29,18 +95,12 @@ export const createReview = async (data: {
     throw new Error('You already reviewed this product');
   }
 
+  // insert review
   const res = await sqlExec(
     `INSERT INTO product_reviews
     (product_id, user_id, rating, review_text, review_image, status)
-    VALUES (?, ?, ?, ?, ?, ?)`,
-    [
-      data.productId,
-      data.userId,
-      data.rating,
-      data.reviewText ?? null,
-      data.reviewImage ?? null,
-      'pending',
-    ],
+    VALUES (?, ?, ?, ?, ?, 'pending')`,
+    [data.productId, data.userId, data.rating, data.reviewText ?? null, data.reviewImage ?? null],
   );
 
   const rows = await sqlQuery('SELECT * FROM product_reviews WHERE id = ? LIMIT 1', [
@@ -193,10 +253,40 @@ export const getAllReviews = async (status?: ReviewStatus) => {
 /**
  * Admin: Update Review Status
  */
-export const updateReviewStatus = async (id: number, status: ReviewStatus) => {
+export const updateReviewStatuss = async (id: number, status: ReviewStatus) => {
   await sqlExec('UPDATE product_reviews SET status = ? WHERE id = ?', [status, id]);
 
   const rows = await sqlQuery('SELECT * FROM product_reviews WHERE id = ? LIMIT 1', [id]);
 
   return rows[0] ?? null;
+};
+
+export const updateReviewStatus = async (data: {
+  reviewId: number;
+  sellerId: number;
+  status: 'approved' | 'rejected';
+}) => {
+  // validate status
+  if (!['approved', 'rejected'].includes(data.status)) {
+    throw new Error('Invalid status');
+  }
+
+  const res: any = await sqlExec(
+    `UPDATE product_reviews pr
+     JOIN products p ON p.id = pr.product_id
+     JOIN stores s ON s.id = p.store_id
+     SET pr.status = ?, pr.updated_at = NOW()
+     WHERE pr.id = ? 
+     AND s.seller_user_id = ?`, // ✅ FIXED HERE
+    [data.status, data.reviewId, data.sellerId],
+  );
+
+  if (res.affectedRows === 0) {
+    throw new Error('Review not found or you are not allowed to update it');
+  }
+
+  return {
+    review_id: data.reviewId,
+    status: data.status,
+  };
 };
