@@ -1,19 +1,159 @@
 import { sqlExec, sqlQuery, withSqlTransaction } from '~/lib/sql';
 
+// export const createOrder = async (userId: number, data: any) => {
+//   const { cart_id, billing_address, shipping_address, currency = 'INR' } = data;
+
+//   const parsedCartId = BigInt(cart_id);
+
+//   // Validate Cart
+//   const cartRows = await sqlQuery<any>('SELECT * FROM `carts` WHERE `id` = ? LIMIT 1', [
+//     parsedCartId,
+//   ]);
+//   const cart = cartRows[0] ?? null;
+
+//   if (!cart) {
+//     throw new Error('Cart not found');
+//   }
+
+//   if (cart.user_id !== null && BigInt(cart.user_id) !== BigInt(userId)) {
+//     throw new Error('Cart belongs to a different user');
+//   }
+
+//   const items = await sqlQuery<any>(
+//     'SELECT * FROM `cart_items` WHERE `cart_id` = ? ORDER BY `id` ASC',
+//     [parsedCartId],
+//   );
+//   if (items.length === 0) {
+//     throw new Error('Cart is empty');
+//   }
+
+//   // Calculate total amount
+//   let totalAmount = 0;
+//   items.forEach((item: any) => {
+//     totalAmount += item.qty * Number(item.price_snapshot);
+//   });
+
+//   // Determine the date prefix (e.g., ORD-20260425-)
+//   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+//   const prefix = `ORD-${dateStr}-`;
+
+//   // We'll generate a placeholder order_no first since we need the auto-increment ID
+//   const temp_order_no = `TEMP-${Date.now()}`;
+
+//   // Addresses
+//   const billingAddress = { ...billing_address, type: 'billing' };
+//   const shippingAddress = shipping_address
+//     ? { ...shipping_address, type: 'shipping' }
+//     : { ...billing_address, type: 'shipping' };
+
+//   // Run transaction
+//   const result = await withSqlTransaction(async (tx) => {
+//     // 1. Create Order with temp order_no
+//     const orderRes = await sqlExec(
+//       'INSERT INTO `orders` (`order_no`, `user_id`, `cart_id`, `status`, `payment_status`, `currency`, `total_amount`, `created_at`, `updated_at`) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
+//       [temp_order_no, userId, parsedCartId, 'pending', 'pending', currency, totalAmount],
+//       tx,
+//     );
+//     const orderId = BigInt(orderRes.insertId as any);
+
+//     // 2. Update final order_no
+//     const final_order_no = `${prefix}${String(orderId).padStart(4, '0')}`;
+//     await sqlExec(
+//       'UPDATE `orders` SET `order_no` = ?, `updated_at` = NOW() WHERE `id` = ?',
+//       [final_order_no, orderId],
+//       tx,
+//     );
+
+//     // 3. Create OrderItems
+//     for (const item of items) {
+//       await sqlExec(
+//         'INSERT INTO `order_items` (`order_id`, `product_id`, `variant_id`, `qty`, `price`, `total`, `item_status`, `created_at`, `updated_at`) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
+//         [
+//           orderId,
+//           item.product_id,
+//           item.variant_id,
+//           item.qty,
+//           item.price_snapshot,
+//           item.qty * Number(item.price_snapshot),
+//           'pending',
+//         ],
+//         tx,
+//       );
+//     }
+
+//     // 4. Create Addresses
+//     for (const addr of [billingAddress, shippingAddress]) {
+//       await sqlExec(
+//         'INSERT INTO `order_addresses` (`order_id`, `type`, `full_name`, `phone`, `address_line1`, `address_line2`, `city`, `district_id`, `state`, `state_id`, `country`, `pincode`, `created_at`, `updated_at`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
+//         [
+//           orderId,
+//           addr.type,
+//           addr.full_name,
+//           addr.phone,
+//           addr.address_line1,
+//           addr.address_line2 ?? null,
+//           addr.city,
+//           addr.city_id ?? null,
+//           addr.state,
+//           addr.state_id ?? null,
+//           addr.country,
+//           addr.pincode,
+//         ],
+//         tx,
+//       );
+//     }
+
+//     // 5. Seller units
+//     const storeIds = [...new Set(items.map((it: any) => String(it.store_id)))];
+//     if (storeIds.length) {
+//       const storeRows = await sqlQuery<any>(
+//         `SELECT \`id\`, \`seller_user_id\` as sellerUserId FROM \`stores\` WHERE \`id\` IN (${storeIds
+//           .map(() => '?')
+//           .join(',')})`,
+//         storeIds.map((s) => BigInt(s)),
+//         tx,
+//       );
+//       const storeMap = new Map(storeRows.map((s: any) => [String(s.id), s.sellerUserId]));
+//       for (const sid of storeIds) {
+//         await sqlExec(
+//           'INSERT INTO `seller_units` (`order_id`, `store_id`, `seller_id`, `status`, `created_at`, `updated_at`) VALUES (?, ?, ?, ?, NOW(), NOW())',
+//           [orderId, BigInt(sid), storeMap.get(sid) ?? 0, 'pending'],
+//           tx,
+//         );
+//       }
+//     }
+
+//     // 6. Clear cart
+//     await sqlExec('DELETE FROM `cart_items` WHERE `cart_id` = ?', [parsedCartId], tx);
+//     await sqlExec(
+//       'UPDATE `carts` SET `status` = ?, `updated_at` = NOW() WHERE `id` = ?',
+//       ['converted', parsedCartId],
+//       tx,
+//     );
+
+//     const orders = await sqlQuery<any>(
+//       'SELECT * FROM `orders` WHERE `id` = ? LIMIT 1',
+//       [orderId],
+//       tx,
+//     );
+//     return orders[0] ?? null;
+//   });
+
+//   return result;
+// };
+
 export const createOrder = async (userId: number, data: any) => {
   const { cart_id, billing_address, shipping_address, currency = 'INR' } = data;
 
   const parsedCartId = BigInt(cart_id);
 
-  // Validate Cart
   const cartRows = await sqlQuery<any>('SELECT * FROM `carts` WHERE `id` = ? LIMIT 1', [
     parsedCartId,
   ]);
+
   const cart = cartRows[0] ?? null;
 
-  if (!cart) {
-    throw new Error('Cart not found');
-  }
+  if (!cart) throw new Error('Cart not found');
 
   if (cart.user_id !== null && BigInt(cart.user_id) !== BigInt(userId)) {
     throw new Error('Cart belongs to a different user');
@@ -23,68 +163,170 @@ export const createOrder = async (userId: number, data: any) => {
     'SELECT * FROM `cart_items` WHERE `cart_id` = ? ORDER BY `id` ASC',
     [parsedCartId],
   );
-  if (items.length === 0) {
-    throw new Error('Cart is empty');
-  }
 
-  // Calculate total amount
-  let totalAmount = 0;
-  items.forEach((item: any) => {
-    totalAmount += item.qty * Number(item.price_snapshot);
-  });
+  if (items.length === 0) throw new Error('Cart is empty');
 
-  // Determine the date prefix (e.g., ORD-20260425-)
+  const subtotal = items.reduce((sum: number, item: any) => {
+    return sum + Number(item.qty) * Number(item.price_snapshot);
+  }, 0);
+
+  const totalItems = items.reduce((sum: number, item: any) => {
+    return sum + Number(item.qty);
+  }, 0);
+
+  const taxTotal = Number(data.tax_total ?? 0);
+  const shippingTotal = Number(data.shipping_total ?? 0);
+  const discountTotal = Number(data.discount_total ?? 0);
+  const grandTotal = subtotal + taxTotal + shippingTotal - discountTotal;
+
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const prefix = `ORD-${dateStr}-`;
+  const tempOrderNo = `TEMP-${Date.now()}`;
 
-  // We'll generate a placeholder order_no first since we need the auto-increment ID
-  const temp_order_no = `TEMP-${Date.now()}`;
-
-  // Addresses
   const billingAddress = { ...billing_address, type: 'billing' };
-  const shippingAddress = shipping_address
+  const finalShippingAddress = shipping_address
     ? { ...shipping_address, type: 'shipping' }
     : { ...billing_address, type: 'shipping' };
 
-  // Run transaction
   const result = await withSqlTransaction(async (tx) => {
-    // 1. Create Order with temp order_no
     const orderRes = await sqlExec(
-      'INSERT INTO `orders` (`order_no`, `user_id`, `cart_id`, `status`, `payment_status`, `currency`, `total_amount`, `created_at`, `updated_at`) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
-      [temp_order_no, userId, parsedCartId, 'pending', 'pending', currency, totalAmount],
+      `INSERT INTO orders
+      (
+        order_no,
+        user_id,
+        cart_id,
+        order_status,
+        total_items,
+        subtotal,
+        tax_total,
+        shipping_total,
+        discount_total,
+        grand_total,
+        payment_status,
+        currency,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        tempOrderNo,
+        userId,
+        parsedCartId,
+        'CREATED',
+        totalItems,
+        subtotal,
+        taxTotal,
+        shippingTotal,
+        discountTotal,
+        grandTotal,
+        'PENDING',
+        currency,
+      ],
       tx,
     );
-    const orderId = BigInt(orderRes.insertId as any);
 
-    // 2. Update final order_no
-    const final_order_no = `${prefix}${String(orderId).padStart(4, '0')}`;
+    const orderId = BigInt(orderRes.insertId as any);
+    const finalOrderNo = `${prefix}${String(orderId).padStart(4, '0')}`;
+
     await sqlExec(
       'UPDATE `orders` SET `order_no` = ?, `updated_at` = NOW() WHERE `id` = ?',
-      [final_order_no, orderId],
+      [finalOrderNo, orderId],
       tx,
     );
 
-    // 3. Create OrderItems
+    // ✅ Create seller_units FIRST
+    const storeIds = [...new Set(items.map((it: any) => String(it.store_id)))];
+
+    const sellerUnitMap = new Map<string, bigint>();
+
+    if (storeIds.length) {
+      const storeRows = await sqlQuery<any>(
+        `SELECT id, seller_user_id AS sellerUserId
+         FROM stores
+         WHERE id IN (${storeIds.map(() => '?').join(',')})`,
+        storeIds.map((s) => BigInt(s)),
+        tx,
+      );
+
+      const storeMap = new Map(storeRows.map((s: any) => [String(s.id), s.sellerUserId]));
+
+      for (const sid of storeIds) {
+        const sellerUnitRes = await sqlExec(
+          `INSERT INTO seller_units
+          (
+            order_id,
+            store_id,
+            seller_id,
+            status,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, NOW(), NOW())`,
+          [orderId, BigInt(sid), storeMap.get(sid) ?? 0, 'pending'],
+          tx,
+        );
+
+        sellerUnitMap.set(String(sid), BigInt(sellerUnitRes.insertId as any));
+      }
+    }
+
+    // ✅ Then create order_items with order_seller_unit_id
     for (const item of items) {
+      const itemTotal = Number(item.qty) * Number(item.price_snapshot);
+      const orderSellerUnitId = sellerUnitMap.get(String(item.store_id)) ?? null;
+
       await sqlExec(
-        'INSERT INTO `order_items` (`order_id`, `product_id`, `variant_id`, `qty`, `price`, `total`, `item_status`, `created_at`, `updated_at`) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
+        `INSERT INTO order_items
+        (
+          order_id,
+          order_seller_unit_id,
+          product_id,
+          variant_id,
+          qty,
+          price_snapshot,
+          tax_snapshot,
+          discount_snapshot,
+          total_snapshot,
+          item_status,
+          created_at,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
         [
           orderId,
+          orderSellerUnitId,
           item.product_id,
-          item.variant_id,
+          item.variant_id ?? 0,
           item.qty,
           item.price_snapshot,
-          item.qty * Number(item.price_snapshot),
+          0,
+          0,
+          itemTotal,
           'pending',
         ],
         tx,
       );
     }
 
-    // 4. Create Addresses
-    for (const addr of [billingAddress, shippingAddress]) {
+    // ✅ Address insert without district_id/state_id
+    for (const addr of [billingAddress, finalShippingAddress]) {
       await sqlExec(
-        'INSERT INTO `order_addresses` (`order_id`, `type`, `full_name`, `phone`, `address_line1`, `address_line2`, `city`, `district_id`, `state`, `state_id`, `country`, `pincode`, `created_at`, `updated_at`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())',
+        `INSERT INTO order_addresses
+        (
+          order_id,
+          type,
+          full_name,
+          phone,
+          address_line1,
+          address_line2,
+          city,
+          state,
+          country,
+          pincode,
+          created_at,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
         [
           orderId,
           addr.type,
@@ -93,49 +335,24 @@ export const createOrder = async (userId: number, data: any) => {
           addr.address_line1,
           addr.address_line2 ?? null,
           addr.city,
-          addr.city_id ?? null,
           addr.state,
-          addr.state_id ?? null,
-          addr.country,
+          addr.country ?? 'India',
           addr.pincode,
         ],
         tx,
       );
     }
 
-    // 5. Seller units
-    const storeIds = [...new Set(items.map((it: any) => String(it.store_id)))];
-    if (storeIds.length) {
-      const storeRows = await sqlQuery<any>(
-        `SELECT \`id\`, \`seller_user_id\` as sellerUserId FROM \`stores\` WHERE \`id\` IN (${storeIds
-          .map(() => '?')
-          .join(',')})`,
-        storeIds.map((s) => BigInt(s)),
-        tx,
-      );
-      const storeMap = new Map(storeRows.map((s: any) => [String(s.id), s.sellerUserId]));
-      for (const sid of storeIds) {
-        await sqlExec(
-          'INSERT INTO `seller_units` (`order_id`, `store_id`, `seller_id`, `status`, `created_at`, `updated_at`) VALUES (?, ?, ?, ?, NOW(), NOW())',
-          [orderId, BigInt(sid), storeMap.get(sid) ?? 0, 'pending'],
-          tx,
-        );
-      }
-    }
+    await sqlExec('DELETE FROM cart_items WHERE cart_id = ?', [parsedCartId], tx);
 
-    // 6. Clear cart
-    await sqlExec('DELETE FROM `cart_items` WHERE `cart_id` = ?', [parsedCartId], tx);
     await sqlExec(
-      'UPDATE `carts` SET `status` = ?, `updated_at` = NOW() WHERE `id` = ?',
+      'UPDATE carts SET status = ?, updated_at = NOW() WHERE id = ?',
       ['converted', parsedCartId],
       tx,
     );
 
-    const orders = await sqlQuery<any>(
-      'SELECT * FROM `orders` WHERE `id` = ? LIMIT 1',
-      [orderId],
-      tx,
-    );
+    const orders = await sqlQuery<any>('SELECT * FROM orders WHERE id = ? LIMIT 1', [orderId], tx);
+
     return orders[0] ?? null;
   });
 
