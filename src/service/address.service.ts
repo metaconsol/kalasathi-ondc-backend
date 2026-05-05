@@ -1,69 +1,77 @@
-import { db } from '../lib/db';
+import { sqlExec, sqlQuery } from '../lib/sql';
 
 export const createAddress = async (userId: number, data: any) => {
   const { isDefault, ...addressData } = data;
 
   if (isDefault) {
     // Unset other default addresses for this user
-    await db.userAddress.updateMany({
-      where: { userId, isDefault: true },
-      data: { isDefault: false },
-    });
+    await sqlExec('UPDATE user_addresses SET is_default = 0 WHERE user_id = ? AND is_default = 1', [
+      userId,
+    ]);
   }
 
   // If this is the first address, make it default
-  const count = await db.userAddress.count({ where: { userId } });
-  const finalIsDefault = count === 0 ? true : !!isDefault;
+  const countRows = await sqlQuery<any>(
+    'SELECT COUNT(*) as count FROM user_addresses WHERE user_id = ?',
+    [userId],
+  );
+  const count = Number(countRows[0].count);
+  const finalIsDefault = count === 0 ? 1 : isDefault ? 1 : 0;
 
-  return db.userAddress.create({
-    data: {
-      ...addressData,
-      userId,
-      isDefault: finalIsDefault,
-    },
-  });
+  const keys = Object.keys(addressData).map((k) => k.replace(/([A-Z])/g, '_$1').toLowerCase());
+  const values = Object.values(addressData);
+
+  const placeholders = keys.map(() => '?').join(', ');
+  const sql = `INSERT INTO user_addresses (${keys.join(', ')}, user_id, is_default, created_at) 
+               VALUES (${placeholders}, ?, ?, CURRENT_TIMESTAMP(3))`;
+
+  const res = await sqlExec(sql, [...values, userId, finalIsDefault]);
+  const [newAddress] = await sqlQuery<any>('SELECT * FROM user_addresses WHERE id = ?', [
+    res.insertId,
+  ]);
+  return newAddress;
 };
 
 export const listAddresses = async (userId: number) => {
-  return db.userAddress.findMany({
-    where: { userId },
-    orderBy: { createdAt: 'desc' },
-  });
+  return sqlQuery<any>('SELECT * FROM user_addresses WHERE user_id = ? ORDER BY created_at DESC', [
+    userId,
+  ]);
 };
 
 export const updateAddress = async (id: number, userId: number, data: any) => {
   const { isDefault, ...addressData } = data;
 
   if (isDefault) {
-    await db.userAddress.updateMany({
-      where: { userId, isDefault: true, NOT: { id } },
-      data: { isDefault: false },
-    });
+    await sqlExec('UPDATE user_addresses SET is_default = 0 WHERE user_id = ? AND id != ?', [
+      userId,
+      id,
+    ]);
   }
 
-  return db.userAddress.update({
-    where: { id, userId },
-    data: {
-      ...addressData,
-      isDefault,
-    },
-  });
+  const keys = Object.keys(addressData).map(
+    (k) => `${k.replace(/([A-Z])/g, '_$1').toLowerCase()} = ?`,
+  );
+  const values = Object.values(addressData);
+
+  const sql = `UPDATE user_addresses SET ${keys.join(', ')}, is_default = ? WHERE id = ? AND user_id = ?`;
+  await sqlExec(sql, [...values, isDefault ? 1 : 0, id, userId]);
+
+  const [updatedAddress] = await sqlQuery<any>('SELECT * FROM user_addresses WHERE id = ?', [id]);
+  return updatedAddress;
 };
 
 export const deleteAddress = async (id: number, userId: number) => {
-  return db.userAddress.delete({
-    where: { id, userId },
-  });
+  return sqlExec('DELETE FROM user_addresses WHERE id = ? AND user_id = ?', [id, userId]);
 };
 
 export const setDefaultAddress = async (id: number, userId: number) => {
-  await db.userAddress.updateMany({
-    where: { userId, isDefault: true },
-    data: { isDefault: false },
-  });
+  await sqlExec('UPDATE user_addresses SET is_default = 0 WHERE user_id = ?', [userId]);
 
-  return db.userAddress.update({
-    where: { id, userId },
-    data: { isDefault: true },
-  });
+  await sqlExec('UPDATE user_addresses SET is_default = 1 WHERE id = ? AND user_id = ?', [
+    id,
+    userId,
+  ]);
+
+  const [address] = await sqlQuery<any>('SELECT * FROM user_addresses WHERE id = ?', [id]);
+  return address;
 };

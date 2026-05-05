@@ -1,8 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import * as orderService from '~/service/order.service';
 import { ApiResponse } from '~/lib/response';
-import { db } from '~/lib/db';
-import { UserRole } from '~/generated/prisma/enums';
+import { sqlExec, sqlQuery } from '~/lib/sql';
 import * as fs from 'fs';
 
 export const createOrder = async (req: Request, res: Response, next: NextFunction) => {
@@ -22,19 +21,22 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
       }
 
       // Find or create guest user
-      let user = await db.user.findUnique({
-        where: { phoneNumber: guestPhone },
-      });
+      const users = await sqlQuery<any>('SELECT id FROM user WHERE phoneNumber = ? LIMIT 1', [
+        guestPhone,
+      ]);
+      let user = users[0];
 
       if (!user) {
-        user = await db.user.create({
-          data: {
-            phoneNumber: guestPhone,
-            name: orderData.billing_address.full_name || 'Guest User',
-            email: orderData.billing_address.email || null,
-            role: UserRole.USER,
-          },
-        });
+        const res = await sqlExec(
+          'INSERT INTO user (phoneNumber, name, email, role, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
+          [
+            guestPhone,
+            orderData.billing_address.full_name || 'Guest User',
+            orderData.billing_address.email || null,
+            'USER',
+          ],
+        );
+        user = { id: res.insertId };
       }
       userId = user.id;
     }

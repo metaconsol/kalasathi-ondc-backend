@@ -1,12 +1,10 @@
 import type { Request, Response, NextFunction } from 'express';
-import { db } from '~/lib/db';
+import { sqlQuery } from '~/lib/sql';
 import { ApiResponse } from '~/lib/response';
 
 export const getStates = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const states = await db.state.findMany({
-      orderBy: { name: 'asc' },
-    });
+    const states = await sqlQuery<any>('SELECT * FROM states ORDER BY name ASC');
     return ApiResponse.success(res, 'States fetched successfully', states);
   } catch (error) {
     next(error);
@@ -21,10 +19,10 @@ export const getDistricts = async (req: Request, res: Response, next: NextFuncti
       return ApiResponse.badRequest(res, 'stateId is required');
     }
 
-    const districts = await db.district.findMany({
-      where: { stateId: Number(stateId) },
-      orderBy: { name: 'asc' },
-    });
+    const districts = await sqlQuery<any>(
+      'SELECT * FROM districts WHERE stateId = ? ORDER BY name ASC',
+      [Number(stateId)],
+    );
 
     return ApiResponse.success(res, 'Districts fetched successfully', districts);
   } catch (error) {
