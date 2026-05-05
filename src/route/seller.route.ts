@@ -47,11 +47,13 @@ router.post(
   onboardingStep1Register,
 );
 
+router.get('/categories/tree', listCatalogCategoryTree);
+
 /** Bearer access token or refresh cookie; role must be SELLER or ADMIN */
 router.use(sellerAuthMiddleware);
 
 router.get('/categories', listCatalogCategories);
-router.get('/categories/tree', listCatalogCategoryTree);
+
 router.get('/categories/:category_id/filters', listCatalogCategoryFilters);
 router.post('/product-images/upload', productImageUpload.single('file'), uploadSellerProductImage);
 router.post('/size-charts/upload', sizeChartUpload.single('file'), uploadSellerSizeChart);
