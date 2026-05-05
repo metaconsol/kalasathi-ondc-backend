@@ -151,10 +151,36 @@ export const updateReviewStatus = async (req: Request, res: Response, next: Next
       return ApiResponse.badRequest(res, 'Invalid review status');
     }
 
-    const data = await reviewService.updateReviewStatus(id, status);
+    const data = await reviewService.updateReviewStatuss(id, status);
 
     return ApiResponse.success(res, 'Review status updated successfully', data);
   } catch (error) {
     next(error);
+  }
+};
+
+export const updateReviewStatusBySeller = async (req: any, res: any, next: any) => {
+  try {
+    const sellerId = req.user?.id;
+    const { review_id } = req.params;
+    const { status } = req.body;
+
+    if (!sellerId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const data = await reviewService.updateReviewStatus({
+      reviewId: Number(review_id),
+      sellerId: Number(sellerId),
+      status,
+    });
+
+    return res.json({
+      success: true,
+      message: `Review ${status} successfully`,
+      data,
+    });
+  } catch (err) {
+    next(err);
   }
 };

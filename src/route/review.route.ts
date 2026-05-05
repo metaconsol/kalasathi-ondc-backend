@@ -25,4 +25,12 @@ reviewRouter.get('/', authMiddleware, reviewController.getAllReviews);
 // 🔹 Admin: approve/reject review
 reviewRouter.patch('/:id/status', authMiddleware, reviewController.updateReviewStatus);
 
+reviewRouter.patch(
+  '/seller/reviews/:review_id/status',
+  authMiddleware,
+  reviewController.updateReviewStatusBySeller,
+);
+
 export { reviewRouter };
+
+// updateReviewStatusBySeller
