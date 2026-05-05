@@ -16,6 +16,7 @@ import { addressRouter } from './address.route';
 import { userRouter } from './user.route';
 import { districtRouter } from './district.route';
 import { wishlistRouter } from './wishlist.route';
+import { reviewRouter } from './review.route';
 
 const router = express.Router();
 
@@ -52,5 +53,8 @@ router.use('/', adminRouter); // Mounted at root as it has prefix in admin.route
 router.use('/test', testRouter);
 
 router.use('/ui/products', uiProductRouter);
+
+// Review Route.
+router.use('/review', reviewRouter);
 
 export default router;
