@@ -17,6 +17,7 @@ import { userRouter } from './user.route';
 import { districtRouter } from './district.route';
 import { wishlistRouter } from './wishlist.route';
 import { reviewRouter } from './review.route';
+import { ticketRouter } from './ticket.route';
 
 const router = express.Router();
 
@@ -56,5 +57,8 @@ router.use('/ui/products', uiProductRouter);
 
 // Review Route.
 router.use('/review', reviewRouter);
+
+//ticket
+router.use('/tickets', ticketRouter);
 
 export default router;
