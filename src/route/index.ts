@@ -15,6 +15,7 @@ import locationRouter from './location.route';
 import { addressRouter } from './address.route';
 import { userRouter } from './user.route';
 import { districtRouter } from './district.route';
+import { wishlistRouter } from './wishlist.route';
 import { reviewRouter } from './review.route';
 
 const router = express.Router();
@@ -40,6 +41,7 @@ router.use('/contact', contactRoutes);
 router.use('/cart', cartRouter);
 router.use('/orders', orderRouter);
 router.use('/user', userRouter);
+router.use('/user/wishlist', wishlistRouter);
 router.use('/addresses', addressRouter);
 router.use('/locations', locationRouter);
 router.use('/districts', districtRouter);

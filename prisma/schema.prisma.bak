@@ -1,0 +1,951 @@
+generator client {
+    provider = "prisma-client"
+    output   = "../src/generated/prisma"
+}
+
+datasource db {
+    provider = "mysql"
+    url      = env("DATABASE_URL")
+}
+
+model User {
+    id                 Int      @id @default(autoincrement())
+    username           String   @unique @default(cuid())
+    name               String
+    email              String?
+    phoneNumber        String   @unique
+    password           String?
+    avatar             String?
+    role               UserRole @default(USER)
+    isTwoFactorEnabled Boolean  @default(false)
+
+    createdAt DateTime? @default(now())
+    updatedAt DateTime  @updatedAt
+
+    accounts      Account[]
+    profile       Profile?
+    sellerProfile SellerProfile?
+    stores        Store[]
+    orders        Order[]
+    addresses     UserAddress[]
+}
+
+enum UserRole {
+    ADMIN
+    USER
+    SELLER
+}
+
+model Account {
+    id                    String          @id @default(cuid())
+    userId                Int
+    type                  AccountType
+    provider              AccountProvider
+    providerAccountId     String
+    refreshToken          String?         @db.Text
+    accessToken           String?         @db.Text
+    expiresAt             Int?
+    tokenType             String?
+    scope                 String?
+    idToken               String?         @db.Text
+    sessionState          String?
+    status                AccountStatus   @default(ACTIVE)
+    phoneNumberVerifiedAt DateTime?
+    emailVerifiedAt       DateTime?
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@unique([provider, providerAccountId])
+}
+
+enum AccountType {
+    CREDENTIALS
+    GOOGLE
+    GITHUB
+}
+
+enum AccountProvider {
+    CREDENTIALS
+    GOOGLE
+    GITHUB
+}
+
+enum AccountStatus {
+    ACTIVE
+    INACTIVE
+    PENDING
+    BLOCKED
+}
+
+model Otp {
+    id          Int       @id @default(autoincrement())
+    phoneNumber String
+    code        String
+    createdAt   DateTime  @default(now())
+    expiresAt   DateTime
+    usedAt      DateTime?
+
+    authToken    String?
+    authTokenRef AuthToken? @relation(fields: [authToken], references: [token], onDelete: Cascade)
+}
+
+model AuthToken {
+    token       String        @id @default(uuid())
+    phoneNumber String
+    createdAt   DateTime      @default(now())
+    expiresAt   DateTime
+    type        AuthTokenType
+    usedAt      DateTime?
+
+    otp Otp[]
+
+    @@unique([phoneNumber, token])
+}
+
+enum AuthTokenType {
+    RESET_PASSWORD
+    VERIFICATION
+    FORGOT_PASSWORD
+}
+
+model Profile {
+    id        Int      @id @default(autoincrement())
+    userId    Int      @unique
+    about     String?
+    region    String?
+    user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+}
+
+model cmsSlider {
+    id            BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+    pageId        BigInt? @db.UnsignedBigInt
+    imageUploadId BigInt? @db.UnsignedBigInt
+    imageUrl      String? @db.VarChar(800)
+
+    image       String?
+    imageMobile String?
+
+    heading        String  @db.VarChar(200)
+    subheading     String? @db.VarChar(240)
+    buttonText     String? @db.VarChar(60)
+    buttonRedirect String? @map("button_redirect") @db.VarChar(500)
+
+    sortOrder Int     @default(0)
+    isActive  Boolean @default(true)
+
+    createdBy BigInt?   @db.UnsignedBigInt
+    createdAt DateTime  @default(now())
+    updatedAt DateTime? @updatedAt
+    deletedAt DateTime?
+}
+
+// ─── Media Feature ───────────────────────────────────────────────────────────
+
+enum FileType {
+    IMAGE
+    PDF
+    DOC
+    OTHER
+}
+
+enum StorageProvider {
+    LOCAL
+    S3
+    CDN
+}
+
+model MediaFile {
+    id              String          @id @default(uuid())
+    fileType        FileType        @map("file_type")
+    originalName    String          @map("original_name")
+    mimeType        String          @map("mime_type")
+    fileSizeBytes   Int             @map("file_size_bytes")
+    storageProvider StorageProvider @default(LOCAL) @map("storage_provider")
+    storagePath     String          @map("storage_path")
+    publicUrl       String          @map("public_url")
+    checksumSha256  String          @map("checksum_sha256")
+    uploadedBy      Int?            @map("uploaded_by")
+    createdAt       DateTime        @default(now()) @map("created_at")
+    deletedAt       DateTime?       @map("deleted_at")
+
+    @@map("media_files")
+}
+
+// ─── Announcement Feature ───
+model Announcement {
+    id           Int       @id @default(autoincrement())
+    text         String
+    contactPhone String?
+    contactEmail String?
+    isPublished  Boolean   @default(false)
+    startAt      DateTime?
+    endAt        DateTime?
+    createdAt    DateTime  @default(now())
+    updatedAt    DateTime  @updatedAt
+    deletedAt    DateTime?
+
+    @@index([isPublished])
+    @@index([startAt, endAt])
+}
+
+// ─── Testimonials Feature ───
+model Testimonial {
+    id               Int     @id @default(autoincrement())
+    customerName     String  @db.VarChar(100)
+    location         String? @db.VarChar(100)
+    testimonialText  String  @db.Text
+    rating           Int     @default(5)
+    customerPhoto    String? @db.VarChar(255)
+    productOrService String? @db.VarChar(100)
+    isPublished      Boolean @default(false)
+
+    createdAt DateTime  @default(now())
+    updatedAt DateTime  @updatedAt
+    deletedAt DateTime?
+
+    @@index([isPublished])
+}
+
+// ─── Contact Message Feature ───
+model ContactMessage {
+    id          Int                   @id @default(autoincrement())
+    fullName    String
+    email       String
+    orderNumber String?
+    topic       ContactMessage_topic
+    message     String
+    status      ContactMessage_status @default(UNRESOLVED)
+    adminNotes  String?
+    resolvedBy  Int?
+    resolvedAt  DateTime?
+    createdAt   DateTime              @default(now())
+    updatedAt   DateTime              @updatedAt
+}
+
+enum ContactMessage_topic {
+    GENERAL_INQUIRY
+    ORDER_STATUS
+    RETURNS
+}
+
+enum ContactMessage_status {
+    RESOLVED
+    UNRESOLVED
+}
+
+// ─── Seller / Store (marketplace) ───────────────────────────────────────────
+
+enum KycStatus {
+    PENDING
+    SUBMITTED
+    IN_REVIEW
+    VERIFIED
+    REJECTED
+}
+
+enum StoreLocationType {
+    DELIVERY
+    SELF_PICKUP
+    RETURN
+}
+
+model SellerProfile {
+    userId        Int       @id @map("user_id")
+    gstin         String?   @db.VarChar(15)
+    pan           String?   @db.VarChar(10)
+    bankAccountNo String?   @map("bank_account_no") @db.VarChar(34)
+    bankIfsc      String?   @map("bank_ifsc") @db.VarChar(11)
+    upiId         String?   @map("upi_id") @db.VarChar(256)
+    kycStatus     KycStatus @default(PENDING) @map("kyc_status")
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@map("seller_profiles")
+}
+
+model Store {
+    id           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+    sellerUserId Int       @map("seller_user_id")
+    storeName    String    @map("store_name") @db.VarChar(255)
+    storeSlug    String    @unique @map("store_slug") @db.VarChar(255)
+    description  String?   @db.Text
+    supportEmail String?   @map("support_email") @db.VarChar(255)
+    supportPhone String?   @map("support_phone") @db.VarChar(20)
+    isActive     Boolean   @default(true) @map("is_active")
+    deletedAt    DateTime? @map("deleted_at")
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    seller    User            @relation(fields: [sellerUserId], references: [id], onDelete: Cascade)
+    locations StoreLocation[]
+    cartItems CartItem[]
+    products  Product[]
+
+    @@index([sellerUserId])
+    @@index([sellerUserId, deletedAt])
+    @@map("stores")
+}
+
+model StoreLocation {
+    id             BigInt            @id @default(autoincrement()) @db.UnsignedBigInt
+    storeId        BigInt            @map("store_id") @db.UnsignedBigInt
+    locationType   StoreLocationType @map("location_type")
+    addressLine1   String            @map("address_line1") @db.VarChar(255)
+    addressLine2   String?           @map("address_line2") @db.VarChar(255)
+    city           String            @db.VarChar(120)
+    state          String            @db.VarChar(120)
+    country        String            @db.VarChar(120)
+    pincode        String            @db.VarChar(20)
+    latitude       Decimal?          @db.Decimal(10, 7)
+    longitude      Decimal?          @db.Decimal(10, 7)
+    radiusKm       BigInt?           @map("radius") @db.UnsignedBigInt
+    openingTime    Int?              @map("opening_time")
+    closingTime    Int?              @map("closing_time")
+    serviceability Int               @map("serviceability")
+    isActive       Boolean           @default(true) @map("is_active")
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    store     Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+    inventory Inventory[]
+
+    @@index([storeId])
+    @@index([storeId, locationType])
+    @@map("store_locations")
+}
+
+// ─── Cart (aligned with production cart / cart_item tables) ───────────────
+
+enum CartStatus {
+    active
+    abandoned
+    converted
+}
+
+model Cart {
+    id        BigInt     @id @default(autoincrement()) @db.UnsignedBigInt
+    userId    BigInt?    @unique @map("user_id")
+    sessionId String?    @unique @map("session_id") @db.VarChar(100)
+    status    CartStatus @default(active) @map("status")
+    currency  String?    @default("INR") @map("currency") @db.Char(3)
+    createdAt DateTime   @default(now()) @map("created_at")
+    updatedAt DateTime   @updatedAt @map("updated_at")
+
+    items CartItem[]
+
+    @@index([userId])
+    @@index([sessionId])
+    @@map("carts")
+}
+
+model CartItem {
+    id               BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+    cartId           BigInt   @map("cart_id") @db.UnsignedBigInt
+    storeId          BigInt   @map("store_id") @db.UnsignedBigInt
+    productId        BigInt   @map("product_id") @db.UnsignedBigInt
+    /// `0` = no variant. Pricing/validation uses existing `products` / `product_variants` tables via SQL.
+    variantId        BigInt   @default(0) @map("variant_id") @db.UnsignedBigInt
+    qty              Int
+    priceSnapshot    Decimal  @map("price_snapshot") @db.Decimal(12, 2)
+    mrpSnapshot      Decimal? @map("mrp_snapshot") @db.Decimal(12, 2)
+    taxSnapshot      Decimal? @map("tax_snapshot") @db.Decimal(12, 2)
+    discountSnapshot Decimal? @map("discount_snapshot") @db.Decimal(12, 2)
+    createdAt        DateTime @default(now()) @map("created_at")
+    updatedAt        DateTime @updatedAt @map("updated_at")
+
+    cart  Cart  @relation(fields: [cartId], references: [id], onDelete: Cascade)
+    store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+    @@index([cartId])
+    @@index([storeId])
+    @@index([productId])
+    @@index([variantId])
+    @@map("cart_items")
+}
+
+// ─── Blog Feature ───
+model Blog {
+    id            Int       @id @default(autoincrement())
+    title         String    @db.VarChar(255)
+    subheading    String?   @db.VarChar(255)
+    content       String    @db.LongText
+    featuredImage String?   @db.VarChar(500)
+    slug          String    @unique @db.VarChar(255)
+    isPublished   Boolean   @default(true)
+    createdAt     DateTime  @default(now())
+    updatedAt     DateTime  @updatedAt
+    deletedAt     DateTime?
+
+    @@index([isPublished])
+    @@map("blogs")
+}
+
+// ─── Product Management Feature ───────────────────────────────────────────────
+
+/// Product / variant unit (MySQL ENUM; matches catalog spec).
+enum UnitType {
+    unit
+    gram
+    kilogram
+    tonne
+    millilitre
+    litre
+    dozen
+}
+
+enum PublishStatus {
+    draft
+    publish
+    unpublish
+}
+
+enum Visibility {
+    PUBLIC
+    BUSINESS
+}
+
+enum AvailabilityMode {
+    SELLER_DEFAULT
+    ALL_INDIA
+    CITIES
+    PINCODES
+}
+
+enum OrderMode {
+    ONLINE
+    BUYQ
+    BOTH
+}
+
+enum Cancellable {
+    DEFAULT
+    YES
+    NO
+}
+
+enum Returnable {
+    DEFAULT
+    YES
+    NO
+}
+
+enum TimeToShipUnit {
+    MINUTES
+    HOURS
+    DAYS
+}
+
+model Category {
+    id         BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+    parentId   BigInt? @map("parent_id") @db.UnsignedBigInt
+    /// ONDC / catalog domain code (diagram: domain enum)
+    domainCode String? @map("domain") @db.VarChar(100)
+    name       String  @db.VarChar(255)
+    slug       String  @unique @db.VarChar(255)
+    sortOrder  Int     @default(0) @map("sort_order")
+    isActive   Boolean @default(true) @map("is_active")
+
+    parent           Category?         @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+    children         Category[]        @relation("CategoryTree")
+    products         Product[]
+    categoryMappings CategoryMapping[]
+
+    @@index([parentId])
+    @@map("categories")
+}
+
+model Product {
+    id                  BigInt           @id @default(autoincrement()) @db.UnsignedBigInt
+    storeId             BigInt           @map("store_id") @db.UnsignedBigInt
+    categoryId          BigInt           @map("category_id") @db.UnsignedBigInt
+    productName         String           @map("product_name") @db.VarChar(255)
+    district            String           @map("district") @db.VarChar(255)
+    description         String?          @db.Text
+    hsnSacCode          String?          @map("hsn_sac_code") @db.VarChar(255)
+    gstPercent          Int              @default(0) @map("gst_percent")
+    gtinEan             String?          @map("gtin_ean") @db.VarChar(255)
+    stock               BigInt           @default(0)
+    forceOutOfStock     Boolean          @default(false) @map("force_out_of_stock")
+    unitCount           Decimal?         @map("unit_count") @db.Decimal(10, 2)
+    unitType            UnitType?        @map("unit_type")
+    brand               String?          @db.VarChar(255)
+    manufacturingMonth  String?          @map("manufacturing_month") @db.VarChar(50)
+    expiryDate          DateTime?        @map("expiry_date") @db.Date
+    countryOfOrigin     String?          @map("country_of_origin") @db.VarChar(100)
+    sortOrder           Int              @default(0) @map("sort_order")
+    returnDaysWindow    Int?             @map("return_days_window")
+    sellerPickupReturn  Boolean          @default(false) @map("seller_pickup_return")
+    isCodAvailable      Boolean          @default(true) @map("is_cod_available")
+    publishStatus       PublishStatus    @default(draft) @map("publish_status")
+    isManufacturer      Boolean          @default(false) @map("is_manufacturer")
+    manufacturerName    String?          @map("manufacturer_name") @db.VarChar(255)
+    manufacturerAddress String?          @map("manufacturer_address") @db.Text
+    currency            String           @default("INR") @db.Char(3)
+    defaultPrice        Decimal          @map("default_price") @db.Decimal(12, 2)
+    mrp                 Decimal          @db.Decimal(12, 2)
+    avgRating           Decimal          @default(0) @map("avg_rating") @db.Decimal(10, 2)
+    reviewCount         Int              @default(0) @map("review_count")
+    minPurchaseLimit    Int?             @default(1) @map("min_purchase_limit")
+    maxPurchaseLimit    Int?             @map("max_purchase_limit")
+    standardPackageQty  Int?             @map("standard_package_qty")
+    lowStockQty         Int?             @map("low_stock_qty")
+    orderMode           OrderMode        @default(ONLINE) @map("order_mode")
+    visibility          Visibility       @default(PUBLIC)
+    aliasSlug           String?          @unique @map("alias_slug") @db.VarChar(255)
+    seoTitle            String?          @map("seo_title") @db.VarChar(255)
+    seoDescription      String?          @map("seo_description") @db.VarChar(500)
+    seoKeywords         String?          @map("seo_keywords") @db.VarChar(500)
+    disableForBots      Boolean          @default(false) @map("disable_for_bots")
+    availabilityMode    AvailabilityMode @default(SELLER_DEFAULT) @map("availability_mode")
+    cancellable         Cancellable      @default(DEFAULT) @map("cancellable")
+    returnable          Returnable       @default(DEFAULT) @map("returnable")
+    timeToShipValue     Int?             @map("time_to_ship_value")
+    timeToShipUnit      TimeToShipUnit?  @map("time_to_ship_unit")
+    instructions        String?          @db.Text
+    storageConditions   String?          @map("storage_conditions") @db.Text
+    includedItems       String?          @map("included_items") @db.Text
+    sizeChartUrl        String?          @map("size_chart_url") @db.VarChar(500)
+    giTag               Boolean          @default(false) @map("gi_tag")
+    silkMark            Boolean          @default(false) @map("silk_mark")
+    noOfVariants        Int              @default(0) @map("no_of_variants")
+    haveOndcAttributes  Boolean          @default(false) @map("have_ondc_attributes")
+    createdAt           DateTime         @default(now()) @map("created_at")
+    updatedAt           DateTime         @updatedAt @map("updated_at")
+
+    store               Store                       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+    category            Category                    @relation(fields: [categoryId], references: [id])
+    variants            ProductVariant[]
+    images              ProductImage[]
+    attributes          ProductAttribute[]
+    ondcAttributes      ProductOndcAttribute[]
+    ondcCategoryMaps    OndcCategoryMapping[]
+    reviews             ProductReview[]
+    serviceableCities   ProductServiceableCity[]
+    serviceablePincodes ProductServiceablePincode[]
+
+    @@index([storeId])
+    @@index([categoryId])
+    @@index([publishStatus])
+    @@map("products")
+}
+
+model ProductVariant {
+    id                  BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+    productId           BigInt    @map("product_id") @db.UnsignedBigInt
+    parentVariantId     BigInt?   @map("parent_variant_id") @db.UnsignedBigInt
+    /// Variant tree level (e.g. color vs size), diagram: level_index tinyint
+    levelIndex          Int?      @map("level_index") @db.UnsignedTinyInt
+    levelName           String?   @map("level_name") @db.VarChar(255)
+    attributeValue      String?   @map("attribute_value") @db.VarChar(255)
+    colorCode           String?   @map("color_code") @db.VarChar(255)
+    variantName         String    @map("variant_name") @db.VarChar(255)
+    /// Sellable leaves use a real SKU; intermediate tree nodes may omit SKU (Mrignayanee-style hierarchy).
+    sku                 String?   @unique @db.VarChar(255)
+    gtinEan             String?   @map("gtin_ean") @db.VarChar(255)
+    price               Decimal?  @db.Decimal(12, 2)
+    mrp                 Decimal?  @db.Decimal(12, 2)
+    unitCount           Decimal?  @map("unit_count") @db.Decimal(10, 2)
+    unitType            UnitType? @map("unit_type")
+    productWeightGm     Int?      @map("product_weight_gm")
+    productLengthCm     Decimal?  @map("product_length_cm") @db.Decimal(8, 2)
+    productWidthCm      Decimal?  @map("product_width_cm") @db.Decimal(8, 2)
+    productHeightCm     Decimal?  @map("product_height_cm") @db.Decimal(8, 2)
+    shippingPkgWeightGm Int?      @map("shipping_pkg_weight_gm")
+    shippingPkgLengthCm Decimal?  @map("shipping_pkg_length_cm") @db.Decimal(8, 2)
+    shippingPkgWidthCm  Decimal?  @map("shipping_pkg_width_cm") @db.Decimal(8, 2)
+    shippingPkgHeightCm Decimal?  @map("shipping_pkg_height_cm") @db.Decimal(8, 2)
+    minPurchaseLimit    Int?      @map("min_purchase_limit")
+    maxPurchaseLimit    Int?      @map("max_purchase_limit")
+    standardPackageQty  Int?      @map("standard_package_qty")
+    isActive            Boolean   @default(true) @map("is_active")
+    createdAt           DateTime  @default(now()) @map("created_at")
+    updatedAt           DateTime  @updatedAt @map("updated_at")
+
+    product        Product                @relation(fields: [productId], references: [id], onDelete: Cascade)
+    parentVariant  ProductVariant?        @relation("VariantHierarchy", fields: [parentVariantId], references: [id], onDelete: SetNull)
+    childVariants  ProductVariant[]       @relation("VariantHierarchy")
+    variantImages  VariantImage[]
+    ondcAttributes ProductOndcAttribute[]
+    inventory      Inventory[]
+
+    @@unique([productId, sku])
+    @@index([productId])
+    @@map("product_variants")
+}
+
+model ProductImage {
+    id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+    productId BigInt   @map("product_id") @db.UnsignedBigInt
+    imageUrl  String   @map("image_url") @db.VarChar(500)
+    altText   String?  @map("alt_text") @db.VarChar(255)
+    sortOrder Int      @default(0) @map("sort_order")
+    createdAt DateTime @default(now()) @map("created_at")
+
+    product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+    @@index([productId])
+    @@map("product_images")
+}
+
+model Inventory {
+    id              BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+    storeLocationId BigInt   @map("store_location_id") @db.UnsignedBigInt
+    variantId       BigInt   @map("variant_id") @db.UnsignedBigInt
+    qtyOnHand       Int      @default(0) @map("qty_on_hand")
+    qtyReserved     Int      @default(0) @map("qty_reserved")
+    updatedAt       DateTime @updatedAt @map("updated_at")
+
+    storeLocation StoreLocation       @relation(fields: [storeLocationId], references: [id], onDelete: Cascade)
+    variant       ProductVariant      @relation(fields: [variantId], references: [id], onDelete: Cascade)
+    movements     InventoryMovement[]
+
+    @@unique([storeLocationId, variantId])
+    @@index([variantId])
+    @@map("inventory")
+}
+
+enum MovementType {
+    IN
+    OUT
+    ADJUSTMENT
+    RETURN
+}
+
+model InventoryMovement {
+    id           BigInt       @id @default(autoincrement()) @db.UnsignedBigInt
+    inventoryId  BigInt       @map("inventory_id") @db.UnsignedBigInt
+    movementType MovementType @map("movement_type")
+    qtyDelta     Int          @map("qty_delta")
+    referenceId  String?      @map("reference_id") @db.VarChar(255)
+    note         String?      @db.Text
+    createdAt    DateTime     @default(now()) @map("created_at")
+
+    inventory Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+
+    @@index([inventoryId])
+    @@map("inventory_movements")
+}
+
+model ProductReview {
+    id         BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+    productId  BigInt   @map("product_id") @db.UnsignedBigInt
+    userId     Int?     @map("user_id")
+    rating     Int      @default(5)
+    reviewText String?  @map("review_text") @db.Text
+    createdAt  DateTime @default(now()) @map("created_at")
+    updatedAt  DateTime @updatedAt @map("updated_at")
+
+    product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+    @@index([productId])
+    @@map("product_reviews")
+}
+
+model ProductServiceableCity {
+    productId BigInt @map("product_id") @db.UnsignedBigInt
+    city      String @db.VarChar(255)
+
+    product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+    @@id([productId, city])
+    @@map("product_serviceable_cities")
+}
+
+model ProductServiceablePincode {
+    productId BigInt @map("product_id") @db.UnsignedBigInt
+    pincode   String @db.VarChar(20)
+
+    product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+    @@id([productId, pincode])
+    @@map("product_serviceable_pincodes")
+}
+
+// ─── Diagram: ONDC & category graph ───────────────────────────────────────────
+
+model OndcCategory {
+    id               BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+    domainCode       String? @map("domain") @db.VarChar(100)
+    ondcCategoryCode String  @map("ondc_category_code") @db.VarChar(255)
+    name             String  @db.VarChar(255)
+    parentId         BigInt? @map("parent_id") @db.UnsignedBigInt
+    isActive         Boolean @default(true) @map("is_active")
+
+    parent           OndcCategory?         @relation("OndcCategoryTree", fields: [parentId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+    children         OndcCategory[]        @relation("OndcCategoryTree")
+    categoryMappings CategoryMapping[]
+    productMaps      OndcCategoryMapping[]
+
+    @@index([parentId])
+    @@map("ondc_categories")
+}
+
+model CategoryMapping {
+    id             BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+    categoryId     BigInt  @map("category_id") @db.UnsignedBigInt
+    ondcCategoryId BigInt  @map("ondc_category_id") @db.UnsignedBigInt
+    domainCode     String? @map("domain") @db.VarChar(100)
+    isDefault      Boolean @default(false) @map("is_default")
+    confidence     String? @map("confidence") @db.VarChar(50)
+    notes          String? @db.VarChar(255)
+
+    category     Category     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+    ondcCategory OndcCategory @relation(fields: [ondcCategoryId], references: [id], onDelete: Cascade)
+
+    @@index([categoryId])
+    @@index([ondcCategoryId])
+    @@map("category_mappings")
+}
+
+model OndcCategoryMapping {
+    id             BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+    productId      BigInt   @map("product_id") @db.UnsignedBigInt
+    domainCode     String?  @map("domain") @db.VarChar(100)
+    domainName     String?  @map("domain_name") @db.VarChar(100)
+    categoryLabel  String?  @map("category") @db.VarChar(255)
+    ondcCategoryId BigInt?  @map("ondc_category_id") @db.UnsignedBigInt
+    createdAt      DateTime @default(now()) @map("created_at")
+    updatedAt      DateTime @updatedAt @map("updated_at")
+
+    product      Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+    ondcCategory OndcCategory? @relation(fields: [ondcCategoryId], references: [id], onDelete: SetNull)
+
+    @@index([productId])
+    @@map("ondc_category_mappings")
+}
+
+// ─── Diagram: product attributes & media ─────────────────────────────────────
+
+model ProductAttribute {
+    id             BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+    productId      BigInt   @map("product_id") @db.UnsignedBigInt
+    attributeKey   String   @map("attribute_key") @db.VarChar(255)
+    attributeValue String?  @map("attribute_value") @db.Text
+    createdAt      DateTime @default(now()) @map("created_at")
+
+    product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+    @@index([productId])
+    @@map("product_attributes")
+}
+
+model ProductOndcAttribute {
+    id             BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+    productId      BigInt   @map("product_id") @db.UnsignedBigInt
+    variantId      BigInt?  @map("variant_id") @db.UnsignedBigInt
+    attributeKey   String   @map("attribute_key") @db.VarChar(255)
+    attributeValue String?  @map("attribute_value") @db.Text
+    colorName      String?  @map("color_name") @db.VarChar(255)
+    sortOrder      Int      @default(0) @map("sort_order")
+    createdAt      DateTime @default(now()) @map("created_at")
+    updatedAt      DateTime @updatedAt @map("updated_at")
+
+    product Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+    variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+    @@index([productId])
+    @@index([variantId])
+    @@map("product_ondc_attributes")
+}
+
+model VariantImage {
+    id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+    variantId BigInt   @map("variant_id") @db.UnsignedBigInt
+    imageUrl  String   @map("image_url") @db.VarChar(500)
+    sortOrder Int      @default(0) @map("sort_order")
+    createdAt DateTime @default(now()) @map("created_at")
+
+    variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+    @@index([variantId])
+    @@map("variant_images")
+}
+
+// ─── Order Feature (Buyer) ───
+
+enum OrderStatus {
+    pending
+    confirmed
+    processing
+    shipped
+    delivered
+    cancelled
+}
+
+enum PaymentStatus {
+    pending
+    paid
+    failed
+    refunded
+}
+
+enum OrderItemStatus {
+    pending
+    confirmed
+    processing
+    shipped
+    delivered
+    cancelled
+    returned
+}
+
+enum RefundMode {
+    original
+    bank_transfer
+    wallet
+    store_credit
+}
+
+enum ReturnStatus {
+    pending
+    approved
+    rejected
+    refunded
+}
+
+enum OrderAddressType {
+    billing
+    shipping
+}
+
+model Order {
+    id             BigInt        @id @default(autoincrement()) @db.UnsignedBigInt
+    order_no       String        @unique @db.VarChar(50)
+    user_id        Int
+    cart_id        BigInt        @db.UnsignedBigInt
+    status         OrderStatus   @default(pending)
+    payment_status PaymentStatus @default(pending)
+    currency       String        @default("INR") @db.Char(3)
+    total_amount   Decimal       @db.Decimal(12, 2)
+    created_at     DateTime      @default(now())
+    updated_at     DateTime      @updatedAt
+
+    user         User           @relation(fields: [user_id], references: [id])
+    items        OrderItem[]
+    addresses    OrderAddress[]
+    returns      Return[]
+    seller_units SellerUnit[]
+
+    @@map("orders")
+}
+
+model OrderItem {
+    id          BigInt          @id @default(autoincrement()) @db.UnsignedBigInt
+    order_id    BigInt          @db.UnsignedBigInt
+    product_id  BigInt          @db.UnsignedBigInt
+    variant_id  BigInt          @default(0) @db.UnsignedBigInt
+    qty         Int
+    price       Decimal         @db.Decimal(12, 2)
+    total       Decimal         @db.Decimal(12, 2)
+    item_status OrderItemStatus @default(pending)
+
+    order   Order    @relation(fields: [order_id], references: [id], onDelete: Cascade)
+    returns Return[]
+
+    @@map("order_items")
+}
+
+model State {
+    id        Int        @id @default(autoincrement())
+    name      String     @unique
+    code      String?    @unique
+    districts District[]
+
+    @@map("states")
+}
+
+model District {
+    id      Int    @id @default(autoincrement())
+    name    String
+    stateId Int
+    state   State  @relation(fields: [stateId], references: [id], onDelete: Cascade)
+
+    @@map("districts")
+}
+
+model OrderAddress {
+    id            BigInt           @id @default(autoincrement()) @db.UnsignedBigInt
+    order_id      BigInt           @db.UnsignedBigInt
+    type          OrderAddressType
+    full_name     String           @db.VarChar(255)
+    phone         String           @db.VarChar(20)
+    address_line1 String           @db.VarChar(255)
+    address_line2 String?          @db.VarChar(255)
+    city          String           @db.VarChar(120)
+    state         String           @db.VarChar(120)
+    state_id      Int?             @map("state_id")
+    district_id   Int?             @map("district_id")
+    country       String           @db.VarChar(120)
+    pincode       String           @db.VarChar(20)
+
+    order Order @relation(fields: [order_id], references: [id], onDelete: Cascade)
+
+    @@map("order_addresses")
+}
+
+model UserAddress {
+    id           Int     @id @default(autoincrement())
+    userId       Int     @map("user_id")
+    fullName     String  @map("full_name") @db.VarChar(255)
+    phone        String  @db.VarChar(20)
+    email        String? @db.VarChar(255)
+    addressLine1 String  @map("address_line1") @db.VarChar(255)
+    addressLine2 String? @map("address_line2") @db.VarChar(255)
+    city         String  @db.VarChar(120)
+    state        String  @db.VarChar(120)
+    stateId      Int?    @map("state_id")
+    cityId       Int?    @map("city_id")
+    country      String  @default("India") @db.VarChar(120)
+    pincode      String  @db.VarChar(20)
+    isDefault    Boolean @default(false) @map("is_default")
+
+    createdAt DateTime @default(now()) @map("created_at")
+    updatedAt DateTime @updatedAt @map("updated_at")
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@map("user_addresses")
+}
+
+model Return {
+    id            BigInt       @id @default(autoincrement()) @db.UnsignedBigInt
+    order_id      BigInt       @db.UnsignedBigInt
+    order_item_id BigInt       @db.UnsignedBigInt
+    reason        String       @db.Text
+    refund_amount Decimal      @db.Decimal(12, 2)
+    refund_mode   RefundMode
+    status        ReturnStatus @default(pending)
+    created_at    DateTime     @default(now())
+    updated_at    DateTime     @updatedAt
+
+    order      Order     @relation(fields: [order_id], references: [id], onDelete: Cascade)
+    order_item OrderItem @relation(fields: [order_item_id], references: [id], onDelete: Cascade)
+
+    @@map("returns")
+}
+
+model SellerUnit {
+    id                 BigInt      @id @default(autoincrement()) @db.UnsignedBigInt
+    order_id           BigInt      @db.UnsignedBigInt
+    seller_id          Int
+    store_id           BigInt      @db.UnsignedBigInt
+    status             OrderStatus @default(pending)
+    tracking_no        String?     @db.VarChar(100)
+    logistics_provider String?     @db.VarChar(100)
+    created_at         DateTime    @default(now())
+    updated_at         DateTime    @updatedAt
+
+    order Order @relation(fields: [order_id], references: [id], onDelete: Cascade)
+
+    @@map("seller_units")
+}
