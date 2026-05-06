@@ -255,7 +255,8 @@ async function insertVariantTreeFromPayload(
         continue;
       }
 
-      const parentRaw = v.parentId ?? v.parent_id ?? null;
+      const parentRaw =
+        v.parentId ?? v.parent_id ?? v.parentVariantId ?? v.parent_variant_id ?? null;
       let parentDb: bigint | null = null;
       if (parentRaw == null || parentRaw === '' || parentRaw === 0 || parentRaw === '0') {
         parentDb = null;
@@ -285,8 +286,11 @@ async function insertVariantTreeFromPayload(
     if (!progressed) break;
   }
 
-  for (const v of pending) {
-    await insertOne(v, null);
+  if (pending.length) {
+    const unresolved = pending
+      .map((v) => String(v.id ?? v.name ?? v.variantName ?? 'unknown'))
+      .join(', ');
+    throw new Error(`UNRESOLVED_VARIANT_PARENT:${unresolved}`);
   }
 }
 

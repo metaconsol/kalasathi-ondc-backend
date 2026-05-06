@@ -94,7 +94,10 @@ export function normalizeVariantBody(raw: unknown): Record<string, unknown> {
   const r = raw as Record<string, unknown>;
   const n: Record<string, unknown> = { ...r };
   if (n.variantName == null && r.variant_name != null) n.variantName = r.variant_name;
+  if (n.parentId == null && r.parentId !== undefined) n.parentId = r.parentId;
   if (n.parentId == null && r.parent_id !== undefined) n.parentId = r.parent_id;
+  if (n.parentId == null && r.parentVariantId !== undefined) n.parentId = r.parentVariantId;
+  if (n.parentId == null && r.parent_variant_id !== undefined) n.parentId = r.parent_variant_id;
   if (n.levelIndex == null && r.level_index != null) n.levelIndex = r.level_index;
   if (n.levelName == null && r.level_name != null) n.levelName = r.level_name;
   if (n.name == null && r.name != null) n.name = r.name;
