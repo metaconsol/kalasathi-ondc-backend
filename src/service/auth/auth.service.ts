@@ -110,7 +110,13 @@ class AuthService {
         throw ApiError.INTERNAL_SERVER_ERROR('Failed to user create');
       }
 
-      await sqlExec('INSERT INTO `Profile` (`userId`) VALUES (?)', [userId], tx);
+      // Fix: Added updatedAt explicitly because DB field doesn't have a default value
+      // await sqlExec('INSERT INTO `Profile` (`userId`) VALUES (?)', [userId], tx);
+      await sqlExec(
+        'INSERT INTO `Profile` (`userId`, `updatedAt`) VALUES (?, ?)',
+        [userId, new Date()],
+        tx,
+      );
 
       await sqlExec(
         'INSERT INTO `Account` (`id`, `userId`, `type`, `provider`, `providerAccountId`, `status`) VALUES (?, ?, ?, ?, ?, ?)',
@@ -186,7 +192,13 @@ class AuthService {
         throw ApiError.INTERNAL_SERVER_ERROR('Failed to user create');
       }
 
-      await sqlExec('INSERT INTO `Profile` (`userId`) VALUES (?)', [userId], tx);
+      // Fix: Added updatedAt explicitly because DB field doesn't have a default value
+      // await sqlExec('INSERT INTO `Profile` (`userId`) VALUES (?)', [userId], tx);
+      await sqlExec(
+        'INSERT INTO `Profile` (`userId`, `updatedAt`) VALUES (?, ?)',
+        [userId, new Date()],
+        tx,
+      );
 
       await sqlExec(
         'INSERT INTO `Account` (`id`, `userId`, `type`, `provider`, `providerAccountId`, `status`) VALUES (?, ?, ?, ?, ?, ?)',
@@ -372,7 +384,13 @@ class AuthService {
         throw ApiError.INTERNAL_SERVER_ERROR('Failed to create user');
       }
 
-      await sqlExec('INSERT INTO `Profile` (`userId`) VALUES (?)', [userId], tx);
+      // Fix: Added updatedAt explicitly because DB field doesn't have a default value
+      // await sqlExec('INSERT INTO `Profile` (`userId`) VALUES (?)', [userId], tx);
+      await sqlExec(
+        'INSERT INTO `Profile` (`userId`, `updatedAt`) VALUES (?, ?)',
+        [userId, new Date()],
+        tx,
+      );
 
       await sqlExec(
         'INSERT INTO `Account` (`id`, `userId`, `type`, `provider`, `providerAccountId`, `status`) VALUES (?, ?, ?, ?, ?, ?)',
@@ -520,7 +538,13 @@ class AuthService {
             throw ApiError.INTERNAL_SERVER_ERROR('Failed to create user');
           }
 
-          await sqlExec('INSERT INTO `Profile` (`userId`) VALUES (?)', [userId], tx);
+          // Fix: Added updatedAt explicitly because DB field doesn't have a default value
+          // await sqlExec('INSERT INTO `Profile` (`userId`) VALUES (?)', [userId], tx);
+          await sqlExec(
+            'INSERT INTO `Profile` (`userId`, `updatedAt`) VALUES (?, ?)',
+            [userId, new Date()],
+            tx,
+          );
           await sqlExec(
             'INSERT INTO `Account` (`id`, `userId`, `type`, `provider`, `providerAccountId`, `status`) VALUES (?, ?, ?, ?, ?, ?)',
             [
