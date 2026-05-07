@@ -27,9 +27,13 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
       let user = users[0];
 
       if (!user) {
+        const generatedUsername = `guest_${guestPhone}`;
         const res = await sqlExec(
-          'INSERT INTO user (phoneNumber, name, email, role, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
+          `INSERT INTO user
+    (username, phoneNumber, name, email, role, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
           [
+            generatedUsername,
             guestPhone,
             orderData.billing_address.full_name || 'Guest User',
             orderData.billing_address.email || null,
