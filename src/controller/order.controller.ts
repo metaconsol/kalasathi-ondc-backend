@@ -3,6 +3,7 @@ import * as orderService from '~/service/order.service';
 import { ApiResponse } from '~/lib/response';
 import { sqlExec, sqlQuery } from '~/lib/sql';
 import * as fs from 'fs';
+import { randomUUID } from 'crypto';
 
 export const createOrder = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -21,15 +22,20 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
       }
 
       // Find or create guest user
-      const users = await sqlQuery<any>('SELECT id FROM user WHERE phoneNumber = ? LIMIT 1', [
+      // Fix: Updated table name to `User` and column names to camelCase to match DB schema
+      const users = await sqlQuery<any>('SELECT id FROM `User` WHERE `phoneNumber` = ? LIMIT 1', [
         guestPhone,
       ]);
       let user = users[0];
 
       if (!user) {
+        // Fix: Added random UUID for username as it's a required field in the User table
+        // Also ensured createdAt/updatedAt use correct camelCase naming
+        // Previous: await sqlExec('INSERT INTO user (phoneNumber, name, email, role, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())', [...], tx);
         const res = await sqlExec(
-          'INSERT INTO user (phoneNumber, name, email, role, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())',
+          'INSERT INTO `User` (`username`, `phoneNumber`, `name`, `email`, `role`, `createdAt`, `updatedAt`) VALUES (?, ?, ?, ?, ?, NOW(), NOW())',
           [
+            randomUUID(),
             guestPhone,
             orderData.billing_address.full_name || 'Guest User',
             orderData.billing_address.email || null,
