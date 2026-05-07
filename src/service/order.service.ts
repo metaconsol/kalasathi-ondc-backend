@@ -191,23 +191,24 @@ export const createOrder = async (userId: number, data: any) => {
   const result = await withSqlTransaction(async (tx) => {
     const orderRes = await sqlExec(
       `INSERT INTO orders
-      (
-        order_no,
-        user_id,
-        cart_id,
-        order_status,
-        total_items,
-        subtotal,
-        tax_total,
-        shipping_total,
-        discount_total,
-        grand_total,
-        payment_status,
-        currency,
-        created_at,
-        updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+  (
+    order_no,
+    user_id,
+    cart_id,
+    order_status,
+    total_items,
+    subtotal,
+    tax_total,
+    shipping_total,
+    discount_total,
+    grand_total,
+    total_amount, -- ✅ ADDED
+    payment_status,
+    currency,
+    created_at,
+    updated_at
+  )
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         tempOrderNo,
         userId,
@@ -219,6 +220,7 @@ export const createOrder = async (userId: number, data: any) => {
         shippingTotal,
         discountTotal,
         grandTotal,
+        grandTotal, // ✅ ADDED
         'PENDING',
         currency,
       ],
@@ -271,34 +273,76 @@ export const createOrder = async (userId: number, data: any) => {
     }
 
     // ✅ Then create order_items with order_seller_unit_id
+    // for (const item of items) {
+    //   const itemTotal = Number(item.qty) * Number(item.price_snapshot);
+    //   const orderSellerUnitId = sellerUnitMap.get(String(item.store_id)) ?? null;
+
+    //   await sqlExec(
+    //     `INSERT INTO order_items
+    //     (
+    //       order_id,
+    //       order_seller_unit_id,
+    //       product_id,
+    //       variant_id,
+    //       qty,
+    //       price_snapshot,
+    //       tax_snapshot,
+    //       discount_snapshot,
+    //       total_snapshot,
+    //       item_status,
+    //       created_at,
+    //       updated_at
+    //     )
+    //     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+    //     [
+    //       orderId,
+    //       orderSellerUnitId,
+    //       item.product_id,
+    //       item.variant_id ?? 0,
+    //       item.qty,
+    //       item.price_snapshot,
+    //       0,
+    //       0,
+    //       itemTotal,
+    //       'pending',
+    //     ],
+    //     tx,
+    //   );
+    // }
     for (const item of items) {
-      const itemTotal = Number(item.qty) * Number(item.price_snapshot);
+      const itemPrice = Number(item.price_snapshot); // ✅ ADDED
+      const itemTotal = Number(item.qty) * itemPrice;
+
       const orderSellerUnitId = sellerUnitMap.get(String(item.store_id)) ?? null;
 
       await sqlExec(
         `INSERT INTO order_items
-        (
-          order_id,
-          order_seller_unit_id,
-          product_id,
-          variant_id,
-          qty,
-          price_snapshot,
-          tax_snapshot,
-          discount_snapshot,
-          total_snapshot,
-          item_status,
-          created_at,
-          updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+    (
+      order_id,
+      order_seller_unit_id,
+      product_id,
+      variant_id,
+      qty,
+      price,              -- ✅ ADDED old required column
+      total,              -- ✅ ADDED old required column
+      price_snapshot,
+      tax_snapshot,
+      discount_snapshot,
+      total_snapshot,
+      item_status,
+      created_at,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
         [
           orderId,
           orderSellerUnitId,
           item.product_id,
           item.variant_id ?? 0,
           item.qty,
-          item.price_snapshot,
+          itemPrice, // ✅ ADDED for price
+          itemTotal, // ✅ ADDED for total
+          itemPrice,
           0,
           0,
           itemTotal,
@@ -312,21 +356,19 @@ export const createOrder = async (userId: number, data: any) => {
     for (const addr of [billingAddress, finalShippingAddress]) {
       await sqlExec(
         `INSERT INTO order_addresses
-        (
-          order_id,
-          type,
-          full_name,
-          phone,
-          address_line1,
-          address_line2,
-          city,
-          state,
-          country,
-          pincode,
-          created_at,
-          updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+    (
+      order_id,
+      type,
+      full_name,
+      phone,
+      address_line1,
+      address_line2,
+      city,
+      state,
+      country,
+      pincode
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           orderId,
           addr.type,
