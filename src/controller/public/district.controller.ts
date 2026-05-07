@@ -4,8 +4,7 @@ import { districtService } from '~/service/district/district.service';
 
 export const listDistricts = async (req: Request, res: Response) => {
   try {
-    const region = req.query.region as string | undefined;
-    const districts = await districtService.getDistrictsWithCounts(region);
+    const districts = await districtService.getDistrictsWithCounts();
     console.log('districts: ', districts);
     return ApiResponse.success(res, 'Districts fetched successfully', districts);
   } catch (error) {
