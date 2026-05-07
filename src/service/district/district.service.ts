@@ -10,8 +10,8 @@ export class DistrictService {
   /**
    * Fetches distinct districts from the products table along with their active product counts.
    */
-  public async getDistrictsWithCounts(region?: string) {
-    let whereSql = `
+  public async getDistrictsWithCounts() {
+    const whereSql = `
       p.publish_status = 'publish' 
       AND p.visibility = 'PUBLIC' 
       AND s.is_active = 1 
@@ -20,18 +20,10 @@ export class DistrictService {
       AND p.district IS NOT NULL
       AND p.district != ''
     `;
-    const args: any[] = [];
-
-    if (region && region !== 'all') {
-      whereSql += ' AND p.region = ?';
-      args.push(region);
-    }
 
     const query = `
       SELECT 
         TRIM(district) as name, 
-        MAX(region) as region,
-        MAX(district_icon) as icon,
         COUNT(*) as productCount
       FROM products p
       JOIN stores s ON s.id = p.store_id
@@ -43,10 +35,8 @@ export class DistrictService {
 
     const rows = await sqlQuery<{
       name: string;
-      region: string;
-      icon: string;
       productCount: number;
-    }>(query, args);
+    }>(query);
     return rows;
   }
 }
