@@ -42,6 +42,32 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
         );
         user = { id: res.insertId };
       }
+
+      if (!user) {
+        const userRes: any = await sqlExec(
+          `INSERT INTO user
+    (
+      phoneNumber,
+      username,
+      name,
+      email,
+      role,
+      createdAt,
+      updatedAt
+    )
+    VALUES (?, ?, ?, ?, ?, NOW(3), NOW(3))`,
+          [
+            guestPhone,
+            `user_${guestPhone}`, // ✅ username
+            orderData.billing_address.full_name || 'Guest User', // ✅ name
+            orderData.billing_address.email || null,
+            'USER',
+          ],
+        );
+
+        user = { id: userRes.insertId };
+      }
+
       userId = user.id;
     }
 

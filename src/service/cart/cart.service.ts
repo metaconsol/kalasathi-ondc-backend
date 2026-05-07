@@ -588,7 +588,8 @@ export async function mergeGuestIntoUser(userId: number, guestSessionId: string)
 
   await withSqlTransaction(async (tx) => {
     const userCartRows = await sqlQuery<CartRow>(
-      'SELECT * FROM `carts` WHERE `user_id` = ? LIMIT 1',
+      // 'SELECT * FROM `carts` WHERE `user_id` = ? LIMIT 1',
+      'SELECT * FROM `carts` WHERE `user_id` = ? AND `status` = ? ORDER BY `id` DESC LIMIT 1',
       [BigInt(userId)],
       tx,
     );
