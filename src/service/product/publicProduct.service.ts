@@ -1424,6 +1424,59 @@ class PublicProductService {
     }
   };
 
+  // public searchProducts2 = async (req: Request, res: Response) => {
+  //   try {
+  //     const search = String(req.query.search || '').trim();
+
+  //     if (!search) {
+  //       return ApiResponse.success(res, 'Products fetched successfully', []);
+  //     }
+
+  //     const likeSearch = `%${search}%`;
+
+  //     const rows = await sqlQuery<any>(
+  //       `
+  //     SELECT
+  //       p.id,
+  //       p.product_name,
+  //       p.slug,
+  //       p.default_price,
+  //       p.mrp,
+  //       p.avg_rating,
+  //       p.review_count,
+  //       p.district,
+  //       p.thumbnail,
+  //       c.name AS category_name,
+  //       s.store_name
+  //     FROM products p
+  //     JOIN stores s ON s.id = p.store_id
+  //     JOIN categories c ON c.id = p.category_id
+  //     JOIN product_verification v ON v.product_id = p.id
+  //     WHERE
+  //       p.publish_status = 'publish'
+  //       AND p.visibility = 'PUBLIC'
+  //       AND s.is_active = 1
+  //       AND s.deleted_at IS NULL
+  //       AND c.is_active = 1
+  //       AND v.approval_status = 'approved'
+  //       AND (
+  //         p.product_name LIKE ?
+  //         OR c.name LIKE ?
+  //         OR s.store_name LIKE ?
+  //         OR p.district LIKE ?
+  //       )
+  //     ORDER BY p.id DESC
+  //     LIMIT 20
+  //     `,
+  //       [likeSearch, likeSearch, likeSearch, likeSearch],
+  //     );
+
+  //     return ApiResponse.success(res, 'Products fetched successfully', rows);
+  //   } catch (error) {
+  //     return ApiResponse.serverError(res, 'Error searching products', error);
+  //   }
+  // };
+
   public searchProducts2 = async (req: Request, res: Response) => {
     try {
       const search = String(req.query.search || '').trim();
@@ -1436,39 +1489,50 @@ class PublicProductService {
 
       const rows = await sqlQuery<any>(
         `
-      SELECT
-        p.id,
-        p.product_name,
-        p.slug,
-        p.default_price,
-        p.mrp,
-        p.avg_rating,
-        p.review_count,
-        p.district,
-        p.thumbnail,
-        c.name AS category_name,
-        s.store_name
-      FROM products p
-      JOIN stores s ON s.id = p.store_id
-      JOIN categories c ON c.id = p.category_id
-      JOIN product_verification v ON v.product_id = p.id
-      WHERE
-        p.publish_status = 'publish'
-        AND p.visibility = 'PUBLIC'
-        AND s.is_active = 1
-        AND s.deleted_at IS NULL
-        AND c.is_active = 1
-        AND v.approval_status = 'approved'
-        AND (
-          p.product_name LIKE ?
-          OR c.name LIKE ?
-          OR s.store_name LIKE ?
-          OR p.district LIKE ?
-        )
-      ORDER BY p.id DESC
-      LIMIT 20
-      `,
-        [likeSearch, likeSearch, likeSearch, likeSearch],
+  SELECT
+    p.id,
+    p.product_name,
+    p.default_price,
+    p.mrp,
+    p.avg_rating,
+    p.review_count,
+    p.district,
+    p.description,
+    c.name AS category_name,
+    s.store_name,
+
+    (
+      SELECT pi.image_url
+      FROM product_images pi
+      WHERE pi.product_id = p.id
+      ORDER BY pi.sort_order ASC
+      LIMIT 1
+    ) AS imageUrl
+
+  FROM products p
+  JOIN stores s ON s.id = p.store_id
+  JOIN categories c ON c.id = p.category_id
+  JOIN product_verification v ON v.product_id = p.id
+
+  WHERE
+    p.publish_status = 'publish'
+    AND p.visibility = 'PUBLIC'
+    AND s.is_active = 1
+    AND s.deleted_at IS NULL
+    AND c.is_active = 1
+    AND v.approval_status = 'approved'
+    AND (
+      p.product_name LIKE ?
+      OR p.description LIKE ?
+      OR c.name LIKE ?
+      OR s.store_name LIKE ?
+      OR p.district LIKE ?
+    )
+
+  ORDER BY p.id DESC
+  LIMIT 20
+  `,
+        [likeSearch, likeSearch, likeSearch, likeSearch, likeSearch],
       );
 
       return ApiResponse.success(res, 'Products fetched successfully', rows);

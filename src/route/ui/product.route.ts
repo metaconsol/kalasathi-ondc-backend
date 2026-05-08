@@ -82,6 +82,6 @@ router.get('/:product_id', getPublicProductById);
 
 // ✅ add this BEFORE router.get('/:product_id', ...)
 
-router.get('/search', searchPublicProducts2);
+router.get('/search/bar', searchPublicProducts2);
 
 export default router;
