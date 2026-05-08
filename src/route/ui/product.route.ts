@@ -14,6 +14,7 @@ import {
   checkProductPincode,
   getVariantStock,
   addProductReview,
+  searchPublicProducts2,
 } from '~/controller/public/product.controller';
 
 const router = express.Router();
@@ -78,5 +79,9 @@ router.post('/:product_id/reviews', optionalAccessToken, addProductReview);
  * GET /ui/products/:product_id
  */
 router.get('/:product_id', getPublicProductById);
+
+// ✅ add this BEFORE router.get('/:product_id', ...)
+
+router.get('/search', searchPublicProducts2);
 
 export default router;

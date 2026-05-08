@@ -41,3 +41,6 @@ export const getVariantStock = (req: Request, res: Response) =>
 
 export const addProductReview = (req: Request, res: Response) =>
   publicProductService.addReview(req, res);
+
+export const searchPublicProducts2 = (req: Request, res: Response) =>
+  publicProductService.searchProducts2(req, res);
