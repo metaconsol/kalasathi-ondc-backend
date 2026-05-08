@@ -1009,6 +1009,12 @@ class ProductSqlService {
         if ((body as any).unitType !== undefined) set('unit_type', (body as any).unitType ?? null);
         if ((body as any).countryOfOrigin !== undefined)
           set('country_of_origin', (body as any).countryOfOrigin ?? null);
+        if ((body as any).isCodAvailable !== undefined)
+          set('is_cod_available', Boolean((body as any).isCodAvailable));
+        if ((body as any).cancellable !== undefined)
+          set('cancellable', (body as any).cancellable ?? 'DEFAULT');
+        if ((body as any).returnable !== undefined)
+          set('returnable', (body as any).returnable ?? 'DEFAULT');
         if ((body as any).minPurchaseLimit !== undefined)
           set('min_purchase_limit', (body as any).minPurchaseLimit ?? null);
         if ((body as any).maxPurchaseLimit !== undefined)
