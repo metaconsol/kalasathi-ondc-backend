@@ -16,8 +16,8 @@ export const getProfile = async (req: Request, res: Response) => {
 
   const [user] = await sqlQuery<any>(
     `SELECT u.*, p.about, p.region 
-     FROM user u 
-     LEFT JOIN profile p ON p.userId = u.id 
+     FROM \`User\` u 
+     LEFT JOIN \`Profile\` p ON p.userId = u.id 
      WHERE u.id = ? LIMIT 1`,
     [userId],
   );
@@ -60,11 +60,11 @@ export const updateProfile = async (req: Request, res: Response) => {
     (firstName && lastName ? `${firstName} ${lastName}` : firstName || lastName || undefined);
 
   await sqlExec(
-    'UPDATE user SET name = COALESCE(?, name), email = COALESCE(?, email) WHERE id = ?',
+    'UPDATE `User` SET name = COALESCE(?, name), email = COALESCE(?, email) WHERE id = ?',
     [fullName || null, email || null, userId],
   );
 
-  const [updatedUser] = await sqlQuery<any>('SELECT * FROM user WHERE id = ?', [userId]);
+  const [updatedUser] = await sqlQuery<any>('SELECT * FROM `User` WHERE id = ?', [userId]);
 
   return ApiResponse.success(res, 'Profile updated successfully', updatedUser);
 };
