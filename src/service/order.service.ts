@@ -191,24 +191,24 @@ export const createOrder = async (userId: number, data: any) => {
   const result = await withSqlTransaction(async (tx) => {
     const orderRes = await sqlExec(
       `INSERT INTO orders
-  (
-    order_no,
-    user_id,
-    cart_id,
-    order_status,
-    total_items,
-    subtotal,
-    tax_total,
-    shipping_total,
-    discount_total,
-    grand_total,
-    total_amount, -- ✅ ADDED
-    payment_status,
-    currency,
-    created_at,
-    updated_at
-  )
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+    (
+      order_no,
+      user_id,
+      cart_id,
+      order_status,
+      total_items,
+      subtotal,
+      tax_total,
+      shipping_total,
+      discount_total,
+      grand_total,
+      total_amount, -- ✅ ADDED
+      payment_status,
+      currency,
+      created_at,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         tempOrderNo,
         userId,
@@ -244,8 +244,8 @@ export const createOrder = async (userId: number, data: any) => {
     if (storeIds.length) {
       const storeRows = await sqlQuery<any>(
         `SELECT id, seller_user_id AS sellerUserId
-         FROM stores
-         WHERE id IN (${storeIds.map(() => '?').join(',')})`,
+          FROM stores
+          WHERE id IN (${storeIds.map(() => '?').join(',')})`,
         storeIds.map((s) => BigInt(s)),
         tx,
       );
@@ -255,15 +255,15 @@ export const createOrder = async (userId: number, data: any) => {
       for (const sid of storeIds) {
         const sellerUnitRes = await sqlExec(
           `INSERT INTO seller_units
-          (
-            order_id,
-            store_id,
-            seller_id,
-            status,
-            created_at,
-            updated_at
-          )
-          VALUES (?, ?, ?, ?, NOW(), NOW())`,
+            (
+              order_id,
+              store_id,
+              seller_id,
+              status,
+              created_at,
+              updated_at
+            )
+            VALUES (?, ?, ?, ?, NOW(), NOW())`,
           [orderId, BigInt(sid), storeMap.get(sid) ?? 0, 'pending'],
           tx,
         );
@@ -317,23 +317,23 @@ export const createOrder = async (userId: number, data: any) => {
 
       await sqlExec(
         `INSERT INTO order_items
-    (
-      order_id,
-      order_seller_unit_id,
-      product_id,
-      variant_id,
-      qty,
-      price,              -- ✅ ADDED old required column
-      total,              -- ✅ ADDED old required column
-      price_snapshot,
-      tax_snapshot,
-      discount_snapshot,
-      total_snapshot,
-      item_status,
-      created_at,
-      updated_at
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      (
+        order_id,
+        order_seller_unit_id,
+        product_id,
+        variant_id,
+        qty,
+        price,             
+        total,              
+        price_snapshot,
+        tax_snapshot,
+        discount_snapshot,
+        total_snapshot,
+          ,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
         [
           orderId,
           orderSellerUnitId,
@@ -356,19 +356,19 @@ export const createOrder = async (userId: number, data: any) => {
     for (const addr of [billingAddress, finalShippingAddress]) {
       await sqlExec(
         `INSERT INTO order_addresses
-    (
-      order_id,
-      type,
-      full_name,
-      phone,
-      address_line1,
-      address_line2,
-      city,
-      state,
-      country,
-      pincode
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (
+        order_id,
+        type,
+        full_name,
+        phone,
+        address_line1,
+        address_line2,
+        city,
+        state,
+        country,
+        pincode
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           orderId,
           addr.type,

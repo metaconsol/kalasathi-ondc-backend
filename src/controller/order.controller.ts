@@ -21,7 +21,7 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
       }
 
       // Find or create guest user
-      const users = await sqlQuery<any>('SELECT id FROM user WHERE phoneNumber = ? LIMIT 1', [
+      const users = await sqlQuery<any>('SELECT id FROM User WHERE phoneNumber = ? LIMIT 1', [
         guestPhone,
       ]);
       let user = users[0];
@@ -29,7 +29,7 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
       if (!user) {
         const generatedUsername = `guest_${guestPhone}`;
         const res = await sqlExec(
-          `INSERT INTO user
+          `INSERT INTO  User
     (username, phoneNumber, name, email, role, createdAt, updatedAt)
     VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
           [
@@ -45,7 +45,7 @@ export const createOrder = async (req: Request, res: Response, next: NextFunctio
 
       if (!user) {
         const userRes: any = await sqlExec(
-          `INSERT INTO user
+          `INSERT INTO User
     (
       phoneNumber,
       username,
