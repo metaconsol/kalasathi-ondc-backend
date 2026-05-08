@@ -1,9 +1,12 @@
 import { sqlExec, sqlQuery } from '../lib/sql';
 
 export const createAddress = async (userId: number, data: any) => {
-  const { isDefault, ...addressData } = data;
+  // Fix: Handle both isDefault and is_default from frontend
+  // const { isDefault, ...addressData } = data;
+  const { isDefault, is_default, ...addressData } = data;
+  const isDefaultFlag = isDefault !== undefined ? isDefault : is_default;
 
-  if (isDefault) {
+  if (isDefaultFlag) {
     // Unset other default addresses for this user
     await sqlExec('UPDATE user_addresses SET is_default = 0 WHERE user_id = ? AND is_default = 1', [
       userId,
@@ -16,7 +19,7 @@ export const createAddress = async (userId: number, data: any) => {
     [userId],
   );
   const count = Number(countRows[0].count);
-  const finalIsDefault = count === 0 ? 1 : isDefault ? 1 : 0;
+  const finalIsDefault = count === 0 ? 1 : isDefaultFlag ? 1 : 0;
 
   const keys = Object.keys(addressData).map((k) => k.replace(/([A-Z])/g, '_$1').toLowerCase());
   const values = Object.values(addressData);
@@ -39,9 +42,12 @@ export const listAddresses = async (userId: number) => {
 };
 
 export const updateAddress = async (id: number, userId: number, data: any) => {
-  const { isDefault, ...addressData } = data;
+  // Fix: Handle both isDefault and is_default
+  // const { isDefault, ...addressData } = data;
+  const { isDefault, is_default, ...addressData } = data;
+  const isDefaultFlag = isDefault !== undefined ? isDefault : is_default;
 
-  if (isDefault) {
+  if (isDefaultFlag) {
     await sqlExec('UPDATE user_addresses SET is_default = 0 WHERE user_id = ? AND id != ?', [
       userId,
       id,
@@ -54,7 +60,7 @@ export const updateAddress = async (id: number, userId: number, data: any) => {
   const values = Object.values(addressData);
 
   const sql = `UPDATE user_addresses SET ${keys.join(', ')}, is_default = ? WHERE id = ? AND user_id = ?`;
-  await sqlExec(sql, [...values, isDefault ? 1 : 0, id, userId]);
+  await sqlExec(sql, [...values, isDefaultFlag ? 1 : 0, id, userId]);
 
   const [updatedAddress] = await sqlQuery<any>('SELECT * FROM user_addresses WHERE id = ?', [id]);
   return updatedAddress;

@@ -3,6 +3,7 @@ import * as orderService from '~/service/order.service';
 import { ApiResponse } from '~/lib/response';
 import { sqlExec, sqlQuery } from '~/lib/sql';
 import * as fs from 'fs';
+import { randomUUID } from 'crypto';
 
 export const createOrder = async (req: Request, res: Response, next: NextFunction) => {
   try {
