@@ -329,7 +329,7 @@ export const createOrder = async (userId: number, data: any) => {
         tax_snapshot,
         discount_snapshot,
         total_snapshot,
-          ,
+         item_status ,
         created_at,
         updated_at
       )
