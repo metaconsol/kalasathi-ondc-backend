@@ -1535,7 +1535,11 @@ class PublicProductService {
         [likeSearch, likeSearch, likeSearch, likeSearch, likeSearch],
       );
 
-      return ApiResponse.success(res, 'Products fetched successfully', rows);
+      return ApiResponse.success(
+        res,
+        'Products fetched successfully',
+        await expandS3RefsDeep(rows),
+      );
     } catch (error) {
       return ApiResponse.serverError(res, 'Error searching products', error);
     }

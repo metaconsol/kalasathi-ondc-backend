@@ -64,15 +64,18 @@ export const env = {
   awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || process.env.AWS_SECRET_KEY || '',
   awsBucketName: process.env.AWS_BUCKET_NAME || '',
   awsRegion: process.env.AWS_REGION || '',
-  /** Presigned GET expiry (seconds). Default 7 days. */
+  /** Presigned GET expiry (seconds). S3 SigV4 presigned URLs cannot exceed 7 days. */
   awsS3SignedUrlExpiresSeconds: parseInt(
     process.env.AWS_S3_SIGNED_URL_EXPIRES_SECONDS || '604800',
     10,
   ),
-  /**
-   * If true, API returns virtual-host public object URLs instead of presigned URLs (bucket/objects must allow public read).
-   */
-  awsS3UsePublicUrl: process.env.AWS_S3_USE_PUBLIC_URL === 'true',
+  /** Public object URLs are always returned for uploaded media. Kept for backward-compatible env parsing. */
+  awsS3UsePublicUrl: process.env.AWS_S3_USE_PUBLIC_URL !== 'false',
+  /** Cache metadata applied to uploaded objects. */
+  awsS3ObjectCacheControl:
+    process.env.AWS_S3_OBJECT_CACHE_CONTROL || 'public, max-age=31536000, immutable',
+  /** HTTP Expires metadata applied to uploaded objects. Default 10 years. */
+  awsS3ObjectExpiresDays: parseInt(process.env.AWS_S3_OBJECT_EXPIRES_DAYS || '3650', 10),
 
   isS3Configured: !!(
     (process.env.AWS_BUCKET_NAME || '').trim() &&

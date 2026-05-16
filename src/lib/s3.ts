@@ -37,12 +37,18 @@ export function buildObjectKey(prefixDir: string, originalName: string): string 
 
 export async function putS3Object(key: string, body: Buffer, contentType: string): Promise<void> {
   const c = getClient();
+  const expiresDays = Number.isFinite(env.awsS3ObjectExpiresDays)
+    ? env.awsS3ObjectExpiresDays
+    : 3650;
+  const expires = new Date(Date.now() + expiresDays * 24 * 60 * 60 * 1000);
   await c.send(
     new PutObjectCommand({
       Bucket: env.awsBucketName,
       Key: key,
       Body: body,
       ContentType: contentType || 'application/octet-stream',
+      CacheControl: env.awsS3ObjectCacheControl,
+      Expires: expires,
     }),
   );
 }
@@ -74,10 +80,7 @@ export async function getSignedGetUrl(key: string, expiresIn?: number): Promise<
   });
 }
 
-/** Readable URL for browsers (`<img src>`): signed GET by default, or virtual-host URL if `AWS_S3_USE_PUBLIC_URL=true`. */
+/** Permanent readable URL for browsers (`<img src>`). Bucket/objects must allow public read. */
 export async function resolveS3KeyToUrl(key: string): Promise<string> {
-  if (env.awsS3UsePublicUrl) {
-    return buildS3VirtualHostPublicUrl(key);
-  }
-  return getSignedGetUrl(key);
+  return buildS3VirtualHostPublicUrl(key);
 }
