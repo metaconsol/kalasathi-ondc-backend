@@ -5,10 +5,11 @@ import {
   getBulkOrder,
   updateBulkOrderStatus,
 } from '~/controller/bulkOrder.controller';
+import { upload } from '~/middleware/multer';
 
 const router = express.Router();
 
-router.post('/', submitBulkOrder);
+router.post('/', upload.single('attachment'), submitBulkOrder);
 router.get('/', listBulkOrders);
 router.get('/:id', getBulkOrder);
 router.patch('/:id/status', updateBulkOrderStatus);

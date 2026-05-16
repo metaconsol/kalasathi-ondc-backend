@@ -9,6 +9,7 @@ import {
   type BulkOrderStatus,
 } from '~/service/bulkOrder.service';
 import { logger } from '~/lib/logger';
+import { isS3Enabled, putS3Object, buildObjectKey, resolveS3KeyToUrl } from '~/lib/s3';
 
 export async function submitBulkOrder(req: Request, res: Response) {
   try {
@@ -19,7 +20,20 @@ export async function submitBulkOrder(req: Request, res: Response) {
       return ApiResponse.error(res, 'Required fields are missing', 400);
     }
 
-    await saveBulkOrder(data);
+    let attachmentUrl = null;
+    const file = req.file;
+
+    if (file) {
+      if (isS3Enabled()) {
+        const key = buildObjectKey('uploads/bulk-orders', file.originalname);
+        await putS3Object(key, file.buffer, file.mimetype);
+        attachmentUrl = await resolveS3KeyToUrl(key);
+      } else {
+        attachmentUrl = `/uploads/${file.filename}`;
+      }
+    }
+
+    await saveBulkOrder({ ...data, attachmentUrl });
 
     return ApiResponse.success(res, 'Bulk order enquiry submitted successfully');
   } catch (error) {
