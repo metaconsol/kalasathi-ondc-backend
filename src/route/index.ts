@@ -18,6 +18,7 @@ import { districtRouter } from './district.route';
 import { wishlistRouter } from './wishlist.route';
 import { reviewRouter } from './review.route';
 import { ticketRouter } from './ticket.route';
+import bulkOrderRouter from './bulkOrder.route';
 
 const router = express.Router();
 
@@ -60,6 +61,9 @@ router.use('/review', reviewRouter);
 
 //ticket
 router.use('/tickets', ticketRouter);
+
+// Bulk Order
+router.use('/bulk-order', bulkOrderRouter);
 
 //Search
 
