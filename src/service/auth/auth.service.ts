@@ -240,16 +240,26 @@ class AuthService {
   };
 
   public createSellerProfile = async (req: Request, res: Response) => {
-    const { gstin, pan, bank_account_no, bank_ifsc, upi_id } = req.body;
+    const {
+      business_type,
+      gstin,
+      business_name,
+      enrollment_number,
+      aadhar_number,
+      pan,
+      bank_account_no,
+      bank_ifsc,
+      upi_id,
+    } = req.body;
 
-    // ✅ AUTO USER ID (login user se)
-    const user_id = req.user?.id; // ⚠️ middleware required
+    // ✅ AUTO USER ID
+    const user_id = req.user?.id;
 
     if (!user_id) {
       return ApiResponse.badRequest(res, 'User not authenticated');
     }
 
-    // ✅ Check if already exists
+    // ✅ Check existing
     const existing = await sqlQuery<{ user_id: number }>(
       'SELECT `user_id` FROM `seller_profiles` WHERE `user_id` = ? LIMIT 1',
       [user_id],
@@ -259,14 +269,40 @@ class AuthService {
       return ApiResponse.badRequest(res, 'Seller profile already exists');
     }
 
-    // ✅ Insert
+    // ✅ GST / NON GST LOGIC
+    const finalGstin = business_type === 'GST' ? gstin?.trim()?.toUpperCase() || null : null;
+
+    const finalBusinessName = business_type === 'Non-GST' ? business_name?.trim() || null : null;
+
+    const finalEnrollmentNumber =
+      business_type === 'Non-GST' ? enrollment_number?.trim() || null : null;
+
+    const finalAadharNumber = business_type === 'Non-GST' ? aadhar_number?.trim() || null : null;
+
+    // ✅ INSERT
     await sqlExec(
       `INSERT INTO seller_profiles 
-    (user_id, gstin, pan, bank_account_no, bank_ifsc, upi_id, kyc_status) 
-    VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    (
+      user_id,
+      business_type,
+      gstin,
+      business_name,
+      enrollment_number,
+      aadhar_number,
+      pan,
+      bank_account_no,
+      bank_ifsc,
+      upi_id,
+      kyc_status
+    ) 
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         user_id,
-        gstin ?? null,
+        business_type ?? null,
+        finalGstin,
+        finalBusinessName,
+        finalEnrollmentNumber,
+        finalAadharNumber,
         pan ?? null,
         bank_account_no ?? null,
         bank_ifsc ?? null,
