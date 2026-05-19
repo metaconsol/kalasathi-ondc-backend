@@ -1,5 +1,7 @@
 import { sqlExec, sqlQuery, withSqlTransaction } from '~/lib/sql';
 import { ApiError } from '~/lib/response';
+import { mailServiceAsync } from '../mail/mail.service';
+import { SellerMailTemplate } from '../mail/seller.mail.template';
 export type KycStatus = 'PENDING' | 'SUBMITTED' | 'IN_REVIEW' | 'VERIFIED' | 'REJECTED';
 export type StoreLocationType = 'DELIVERY' | 'SELF_PICKUP' | 'RETURN';
 
@@ -203,7 +205,29 @@ export async function upsertSellerProfile(
   const out = await sqlQuery<any>('SELECT * FROM `seller_profiles` WHERE `user_id` = ? LIMIT 1', [
     userId,
   ]);
-  return out[0] ?? null;
+  // return out[0] ?? null;
+  const profile = out[0] ?? null;
+
+  /**
+   * Send KYC submitted mail
+   */
+  const users = await sqlQuery<{
+    name: string;
+    email: string | null;
+  }>('SELECT `name`, `email` FROM `User` WHERE `id` = ? LIMIT 1', [userId]);
+
+  const user = users[0] ?? null;
+
+  if (user?.email && profile?.kyc_status === 'SUBMITTED') {
+    void mailServiceAsync({
+      to: user.email,
+      subject: 'Seller KYC Submitted Successfully',
+      html: SellerMailTemplate.sellerProfileSubmitted(user.name),
+      text: 'Your seller profile has been submitted successfully.',
+    });
+  }
+
+  return profile;
 }
 
 export async function listStoresForSeller(sellerUserId: number) {
@@ -242,7 +266,32 @@ export async function createStoreForSeller(
     'SELECT `id`, `seller_user_id` as sellerUserId, `store_name` as storeName, `store_slug` as storeSlug, `description`, `support_email` as supportEmail, `support_phone` as supportPhone, `is_active` as isActive, `deleted_at` as deletedAt, `created_at` as createdAt, `updated_at` as updatedAt FROM `stores` WHERE `id` = ? LIMIT 1',
     [BigInt(res.insertId as any)],
   );
-  return serializeStore(rows[0]);
+  // return serializeStore(rows[0]);
+  const store = serializeStore(rows[0]);
+
+  /**
+   * Send store created mail
+   */
+  const users = await sqlQuery<{
+    name: string;
+    email: string | null;
+  }>('SELECT `name`, `email` FROM `User` WHERE `id` = ? LIMIT 1', [sellerUserId]);
+
+  const user = users[0] ?? null;
+
+  if (user?.email) {
+    void mailServiceAsync({
+      to: user.email,
+      subject: 'Store Created Successfully',
+      html: SellerMailTemplate.storeCreated({
+        sellerName: user.name,
+        storeName: body.storeName,
+      }),
+      text: `Your store ${body.storeName} has been created successfully.`,
+    });
+  }
+
+  return store;
 }
 
 export async function getStoreForSeller(
