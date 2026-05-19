@@ -8,6 +8,10 @@ const isValidUrl = (url: string): boolean => {
     return false;
   }
 };
+const parseBoolean = (value: string | undefined, defaultValue = false): boolean => {
+  if (value === undefined) return defaultValue;
+  return value.trim().toLowerCase() === 'true';
+};
 
 export const env = {
   nodeEnv: process.env.NODE_ENV,
@@ -43,7 +47,7 @@ export const env = {
   mailService: process.env.MAIL_SERVICE || 'smtp',
   mailHost: process.env.MAIL_HOST!,
   mailPort: parseInt(process.env.MAIL_PORT || '587', 10),
-  mailPortSecure: process.env.MAIL_PORT_SECURE === 'true',
+  mailPortSecure: process.env.MAIL_PORT_SECURE,
   mailUser: process.env.MAIL_USER!,
   mailPassword: process.env.MAIL_PASSWORD!,
 
