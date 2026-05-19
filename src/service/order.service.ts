@@ -1,4 +1,6 @@
 import { sqlExec, sqlQuery, withSqlTransaction } from '~/lib/sql';
+import { mailServiceAsync } from './mail/mail.service';
+import { BuyerMailTemplate } from './mail/buyer.mail.template';
 
 // export const createOrder = async (userId: number, data: any) => {
 //   const { cart_id, billing_address, shipping_address, currency = 'INR' } = data;
@@ -397,6 +399,25 @@ export const createOrder = async (userId: number, data: any) => {
 
     return orders[0] ?? null;
   });
+  const userRows = await sqlQuery<{
+    name: string;
+    email: string | null;
+  }>('SELECT `name`, `email` FROM `User` WHERE `id` = ? LIMIT 1', [userId]);
+
+  const user = userRows[0] ?? null;
+
+  if (user?.email && result?.order_no) {
+    void mailServiceAsync({
+      to: user.email,
+      subject: `Order Placed - ${result.order_no}`,
+      html: BuyerMailTemplate.orderPlaced({
+        customerName: user.name,
+        orderNo: result.order_no,
+        amount: result.grand_total ?? result.total_amount ?? 0,
+      }),
+      text: `Your order ${result.order_no} has been placed successfully.`,
+    });
+  }
 
   return result;
 };
@@ -508,6 +529,24 @@ export const cancelOrder = async (userId: number, id: string, note?: string) => 
     );
     return updated[0] ?? null;
   });
+  const userRows = await sqlQuery<{
+    name: string;
+    email: string | null;
+  }>('SELECT `name`, `email` FROM `User` WHERE `id` = ? LIMIT 1', [userId]);
+
+  const user = userRows[0] ?? null;
+
+  if (user?.email && result?.order_no) {
+    void mailServiceAsync({
+      to: user.email,
+      subject: `Order Cancelled - ${result.order_no}`,
+      html: BuyerMailTemplate.orderCancelled({
+        customerName: user.name,
+        orderNo: result.order_no,
+      }),
+      text: `Your order ${result.order_no} has been cancelled.`,
+    });
+  }
 
   return result;
 };

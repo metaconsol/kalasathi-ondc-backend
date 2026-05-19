@@ -15,6 +15,9 @@ import { randomUUID } from 'crypto';
 
 import type { NextFunction, Request, Response } from 'express';
 import type { UserPayloadDAO, UserPayloadDTO } from './auth.types';
+import { mailServiceAsync } from '../mail/mail.service';
+import { BuyerMailTemplate } from '../mail/buyer.mail.template';
+import { SellerMailTemplate } from '../mail/seller.mail.template';
 
 class AuthService {
   private constructor() {}
@@ -887,6 +890,30 @@ class AuthService {
       'UPDATE `Account` SET `status` = ? WHERE `provider` = ? AND `providerAccountId` = ?',
       [AccountStatus.ACTIVE, AccountProvider.CREDENTIALS, verifyOTPResponse.userId.toString()],
     );
+    const users = await sqlQuery<{
+      name: string;
+      email: string | null;
+      role: UserRole;
+    }>('SELECT `name`, `email`, `role` FROM `User` WHERE `id` = ? LIMIT 1', [
+      verifyOTPResponse.userId,
+    ]);
+
+    const user = users[0] ?? null;
+
+    if (user?.email) {
+      void mailServiceAsync({
+        to: user.email,
+        subject:
+          user.role === UserRole.SELLER
+            ? 'Welcome to ODOP Mart Seller Portal'
+            : 'Welcome to ODOP Mart',
+        html:
+          user.role === UserRole.SELLER
+            ? SellerMailTemplate.sellerWelcome(user.name)
+            : BuyerMailTemplate.buyerWelcome(user.name),
+        text: `Welcome to ODOP Mart, ${user.name}`,
+      });
+    }
 
     return this.newAuthenticatedResponse(res, {
       userId: verifyOTPResponse.userId,

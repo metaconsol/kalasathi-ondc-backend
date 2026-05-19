@@ -51,7 +51,13 @@ export class MailService {
             errorCodes.MAIL_CONNECTION_FAILURE,
           );
         }
-        return nodemailer.createTransport(this.config.smtp);
+        // return nodemailer.createTransport(this.config.smtp);
+        return nodemailer.createTransport({
+          ...this.config.smtp,
+          tls: {
+            rejectUnauthorized: false,
+          },
+        });
 
       case 'ses':
         if (!this.config.ses) {
@@ -152,11 +158,22 @@ export class MailService {
     try {
       return await this.transporter.sendMail(mailOptions);
     } catch (error) {
+      //debug
+      debugForDev('RAW NODEMAILER ERROR', error);
+
+      const message = error instanceof Error ? error.message : String(error);
+
+      logger.error(`MAIL ERROR: ${message}`);
       const maxRetries = this.config.retryOptions?.maxRetries || 3;
       const delayMs = this.config.retryOptions?.delayMs || 1000;
 
       if (attempt >= maxRetries) {
-        throw new AppError('Error sending mail', 500, true, errorCodes.MAIL_SEND_FAILURE);
+        throw new AppError(
+          `Error sending mail: ${message}`,
+          500,
+          true,
+          errorCodes.MAIL_SEND_FAILURE,
+        );
       }
 
       await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
