@@ -56,6 +56,8 @@ export function normalizeSellerProductBody(raw: unknown): Record<string, unknown
     n.timeToShipValue = r.time_to_ship_value;
   if (n.timeToShipUnit == null && r.time_to_ship_unit != null)
     n.timeToShipUnit = r.time_to_ship_unit;
+  if (r.careInstructions != null) n.instructions = r.careInstructions;
+  if (r.care_instructions != null) n.instructions = r.care_instructions;
   if (n.sizeChartUrl == null && r.size_chart_url != null) n.sizeChartUrl = r.size_chart_url;
   if (n.giTag == null && r.gi_tag != null) n.giTag = r.gi_tag;
   if (n.silkMark == null && r.silk_mark != null) n.silkMark = r.silk_mark;
