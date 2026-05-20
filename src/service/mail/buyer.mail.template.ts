@@ -147,4 +147,55 @@ export class BuyerMailTemplate extends MailTemplate {
       process.env.APP_URL ? { ...template, buttonUrl: process.env.APP_URL } : template,
     );
   }
+  static orderShipped(order: { customerName?: string; orderNo: string }) {
+    const template = {
+      title: 'Order Shipped',
+      subtitle: 'Your order is on the way',
+      content: `
+      <p>Hello ${order.customerName || 'Customer'},</p>
+
+      <p>Your order has been shipped successfully.</p>
+
+      <p><strong>Order No:</strong> ${order.orderNo}</p>
+
+      <p>
+        We will notify you once your order is delivered.
+      </p>
+    `,
+      buttonText: 'Track Order',
+    };
+
+    return this.baseTemplate(
+      process.env.APP_URL ? { ...template, buttonUrl: process.env.APP_URL } : template,
+    );
+  }
+
+  static refundProcessed(order: {
+    customerName?: string;
+    orderNo: string;
+    refundAmount: string | number;
+  }) {
+    const template = {
+      title: 'Refund Processed',
+      subtitle: 'Your refund has been processed successfully',
+      content: `
+      <p>Hello ${order.customerName || 'Customer'},</p>
+
+      <p>Your refund has been processed successfully.</p>
+
+      <p><strong>Order No:</strong> ${order.orderNo}</p>
+
+      <p><strong>Refund Amount:</strong> ₹${order.refundAmount}</p>
+
+      <p>
+        The amount will be credited as per your payment provider timeline.
+      </p>
+    `,
+      buttonText: 'View Orders',
+    };
+
+    return this.baseTemplate(
+      process.env.APP_URL ? { ...template, buttonUrl: process.env.APP_URL } : template,
+    );
+  }
 }
