@@ -47,7 +47,7 @@ export const env = {
   mailService: process.env.MAIL_SERVICE || 'smtp',
   mailHost: process.env.MAIL_HOST!,
   mailPort: parseInt(process.env.MAIL_PORT || '587', 10),
-  mailPortSecure: process.env.MAIL_PORT_SECURE,
+  mailPortSecure: parseBoolean(process.env.MAIL_PORT_SECURE),
   mailUser: process.env.MAIL_USER!,
   mailPassword: process.env.MAIL_PASSWORD!,
 

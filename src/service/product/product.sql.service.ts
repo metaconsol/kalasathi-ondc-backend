@@ -10,6 +10,8 @@ import type {
 } from './product.types';
 import { expandS3RefsDeep } from '~/lib/storageUrls';
 import { deleteS3Object } from '~/lib/s3';
+import { mailServiceAsync } from '../mail/mail.service';
+import { SellerMailTemplate } from '../mail/seller.mail.template';
 
 function decString(v: any): string {
   if (v == null) return '0';
@@ -490,6 +492,162 @@ async function assertStoreExists(storeId: bigint): Promise<boolean> {
   return !!rows[0];
 }
 
+async function sendProductCreatedMails(storeId: bigint, productName: string): Promise<void> {
+  const rows = await sqlQuery<{
+    storeName: string | null;
+    sellerName: string | null;
+    sellerEmail: string | null;
+  }>(
+    `SELECT
+       s.store_name AS storeName,
+       u.name AS sellerName,
+       u.email AS sellerEmail
+     FROM stores s
+     LEFT JOIN \`User\` u ON u.id = s.seller_user_id
+     WHERE s.id = ? AND s.deleted_at IS NULL
+     LIMIT 1`,
+    [storeId],
+  );
+
+  const info = rows[0] ?? null;
+
+  if (info?.sellerEmail) {
+    const sellerMailData: {
+      sellerName?: string;
+      productName: string;
+    } = { productName };
+
+    if (info.sellerName) {
+      sellerMailData.sellerName = info.sellerName;
+    }
+
+    void mailServiceAsync({
+      to: info.sellerEmail,
+      subject: 'Product Submitted Successfully',
+      html: SellerMailTemplate.productSubmitted(sellerMailData),
+      text: `Your product ${productName} has been submitted successfully.`,
+    });
+  }
+
+  if (process.env.ADMIN_EMAIL) {
+    const adminMailData: {
+      productName: string;
+      sellerName?: string;
+      storeName?: string;
+    } = { productName };
+
+    if (info?.sellerName) {
+      adminMailData.sellerName = info.sellerName;
+    }
+
+    if (info?.storeName) {
+      adminMailData.storeName = info.storeName;
+    }
+
+    void mailServiceAsync({
+      to: process.env.ADMIN_EMAIL,
+      subject: `Product Approval Required - ${productName}`,
+      html: SellerMailTemplate.productApprovalRequest(adminMailData),
+      text: `New product approval required: ${productName}`,
+    });
+  }
+}
+
+async function getProductSellerMailInfo(productId: bigint): Promise<{
+  productName: string;
+  sellerName: string | null;
+  sellerEmail: string | null;
+} | null> {
+  const rows = await sqlQuery<{
+    productName: string;
+    sellerName: string | null;
+    sellerEmail: string | null;
+  }>(
+    `SELECT
+       p.product_name AS productName,
+       u.name AS sellerName,
+       u.email AS sellerEmail
+     FROM products p
+     JOIN stores s ON s.id = p.store_id
+     LEFT JOIN \`User\` u ON u.id = s.seller_user_id
+     WHERE p.id = ? AND s.deleted_at IS NULL
+     LIMIT 1`,
+    [productId],
+  );
+
+  return rows[0] ?? null;
+}
+
+async function sendProductApprovedMail(productId: bigint): Promise<void> {
+  const info = await getProductSellerMailInfo(productId);
+  if (!info?.sellerEmail) return;
+
+  const mailData: {
+    sellerName?: string;
+    productName: string;
+  } = { productName: info.productName };
+
+  if (info.sellerName) {
+    mailData.sellerName = info.sellerName;
+  }
+
+  void mailServiceAsync({
+    to: info.sellerEmail,
+    subject: `Product Approved - ${info.productName}`,
+    html: SellerMailTemplate.productApproved(mailData),
+    text: `Your product ${info.productName} has been approved successfully.`,
+  });
+}
+
+async function sendProductRejectedMail(productId: bigint, reason?: string): Promise<void> {
+  const info = await getProductSellerMailInfo(productId);
+  if (!info?.sellerEmail) return;
+
+  const mailData: {
+    sellerName?: string;
+    productName: string;
+    reason?: string;
+  } = { productName: info.productName };
+
+  if (info.sellerName) {
+    mailData.sellerName = info.sellerName;
+  }
+
+  if (reason) {
+    mailData.reason = reason;
+  }
+
+  void mailServiceAsync({
+    to: info.sellerEmail,
+    subject: `Product Rejected - ${info.productName}`,
+    html: SellerMailTemplate.productRejected(mailData),
+    text: reason
+      ? `Your product ${info.productName} has been rejected. Reason: ${reason}`
+      : `Your product ${info.productName} has been rejected.`,
+  });
+}
+
+async function sendProductPublishedMail(productId: bigint): Promise<void> {
+  const info = await getProductSellerMailInfo(productId);
+  if (!info?.sellerEmail) return;
+
+  const mailData: {
+    sellerName?: string;
+    productName: string;
+  } = { productName: info.productName };
+
+  if (info.sellerName) {
+    mailData.sellerName = info.sellerName;
+  }
+
+  void mailServiceAsync({
+    to: info.sellerEmail,
+    subject: `Product Published - ${info.productName}`,
+    html: SellerMailTemplate.productPublished(mailData),
+    text: `Your product ${info.productName} has been published successfully.`,
+  });
+}
+
 class ProductSqlService {
   private constructor() {}
   public static getInstance(): ProductSqlService {
@@ -897,6 +1055,9 @@ class ProductSqlService {
       });
 
       const product = await loadProductHydrated(storeId, productId);
+      if (product?.productName) {
+        await sendProductCreatedMails(storeId, product.productName);
+      }
       return ApiResponse.created(
         res,
         'Product created successfully',
@@ -933,6 +1094,8 @@ class ProductSqlService {
         }
       });
 
+      await sendProductApprovedMail(productId);
+
       return ApiResponse.success(res, 'Product approved successfully');
     } catch (error) {
       return ApiResponse.serverError(res, 'Error approving product', error);
@@ -958,6 +1121,8 @@ class ProductSqlService {
         }
       });
 
+      await sendProductRejectedMail(productId, reason);
+
       return ApiResponse.success(res, 'Product rejected successfully');
     } catch (error) {
       return ApiResponse.serverError(res, 'Error rejecting product', error);
@@ -971,13 +1136,20 @@ class ProductSqlService {
     body: UpdateProductDTO,
   ) => {
     try {
+      let shouldSendProductPublishedMail = false;
+
       await withSqlTransaction(async (tx) => {
         const current = await sqlQuery<any>(
-          'SELECT id, category_id FROM products WHERE id = ? AND store_id = ? LIMIT 1',
+          'SELECT id, category_id, publish_status FROM products WHERE id = ? AND store_id = ? LIMIT 1',
           [productId, storeId],
           tx,
         );
         if (!current[0]) throw new Error('NOT_FOUND');
+        const previousPublishStatus = String(current[0].publish_status ?? '');
+        const nextPublishStatus =
+          (body as any).publishStatus !== undefined ? String((body as any).publishStatus) : null;
+        shouldSendProductPublishedMail =
+          previousPublishStatus !== 'publish' && nextPublishStatus === 'publish';
 
         const fields: string[] = [];
         const args: any[] = [];
@@ -1146,6 +1318,9 @@ class ProductSqlService {
 
       const product = await loadProductHydrated(storeId, productId);
       if (!product) return ApiResponse.notFound(res, 'Product not found');
+      if (shouldSendProductPublishedMail) {
+        await sendProductPublishedMail(productId);
+      }
       return ApiResponse.success(
         res,
         'Product updated successfully',

@@ -1,6 +1,7 @@
 import { sqlExec, sqlQuery, withSqlTransaction } from '~/lib/sql';
 import { mailServiceAsync } from './mail/mail.service';
 import { BuyerMailTemplate } from './mail/buyer.mail.template';
+import { SellerMailTemplate } from './mail/seller.mail.template';
 
 // export const createOrder = async (userId: number, data: any) => {
 //   const { cart_id, billing_address, shipping_address, currency = 'INR' } = data;
@@ -143,6 +144,139 @@ import { BuyerMailTemplate } from './mail/buyer.mail.template';
 
 //   return result;
 // };
+async function sendSellerNewOrderMails(orderId: bigint, orderNo: string, grandTotal: number) {
+  const rows = await sqlQuery<{
+    sellerName: string | null;
+    sellerEmail: string | null;
+  }>(
+    `
+    SELECT DISTINCT
+      u.name AS sellerName,
+      u.email AS sellerEmail
+    FROM seller_units su
+    JOIN stores s ON s.id = su.store_id
+    LEFT JOIN \`User\` u ON u.id = s.seller_user_id
+    WHERE su.order_id = ?
+    `,
+    [orderId],
+  );
+
+  for (const seller of rows) {
+    if (!seller?.sellerEmail) continue;
+
+    const mailData: {
+      sellerName?: string;
+      orderNo: string;
+      totalAmount: number;
+    } = {
+      orderNo,
+      totalAmount: grandTotal,
+    };
+
+    if (seller.sellerName) {
+      mailData.sellerName = seller.sellerName;
+    }
+
+    void mailServiceAsync({
+      to: seller.sellerEmail,
+      subject: `New Order Received - ${orderNo}`,
+      html: SellerMailTemplate.newOrderReceived(mailData),
+      text: `You received a new order ${orderNo}`,
+    });
+  }
+}
+async function getBuyerOrderMailInfo(orderId: bigint) {
+  const rows = await sqlQuery<{
+    customerName: string | null;
+    customerEmail: string | null;
+    orderNo: string;
+  }>(
+    `
+    SELECT
+      u.name AS customerName,
+      u.email AS customerEmail,
+      o.order_no AS orderNo
+    FROM orders o
+    JOIN \`User\` u ON u.id = o.user_id
+    WHERE o.id = ?
+    LIMIT 1
+    `,
+    [orderId],
+  );
+
+  return rows[0] ?? null;
+}
+
+async function sendOrderShippedMail(orderId: bigint) {
+  const info = await getBuyerOrderMailInfo(orderId);
+  if (!info?.customerEmail) return;
+
+  const mailData: {
+    customerName?: string;
+    orderNo: string;
+  } = {
+    orderNo: info.orderNo,
+  };
+
+  if (info.customerName) {
+    mailData.customerName = info.customerName;
+  }
+
+  void mailServiceAsync({
+    to: info.customerEmail,
+    subject: `Order Shipped - ${info.orderNo}`,
+    html: BuyerMailTemplate.orderShipped(mailData),
+    text: `Your order ${info.orderNo} has been shipped.`,
+  });
+}
+
+async function sendOrderDeliveredMail(orderId: bigint) {
+  const info = await getBuyerOrderMailInfo(orderId);
+  if (!info?.customerEmail) return;
+
+  const mailData: {
+    customerName?: string;
+    orderNo: string;
+  } = {
+    orderNo: info.orderNo,
+  };
+
+  if (info.customerName) {
+    mailData.customerName = info.customerName;
+  }
+
+  void mailServiceAsync({
+    to: info.customerEmail,
+    subject: `Order Delivered - ${info.orderNo}`,
+    html: BuyerMailTemplate.orderDelivered(mailData),
+    text: `Your order ${info.orderNo} has been delivered.`,
+  });
+}
+
+async function sendRefundProcessedMail(orderId: bigint, refundAmount: string | number) {
+  const info = await getBuyerOrderMailInfo(orderId);
+  if (!info?.customerEmail) return;
+
+  const mailData: {
+    customerName?: string;
+    orderNo: string;
+    refundAmount: string | number;
+  } = {
+    orderNo: info.orderNo,
+    refundAmount,
+  };
+
+  if (info.customerName) {
+    mailData.customerName = info.customerName;
+  }
+
+  void mailServiceAsync({
+    to: info.customerEmail,
+    subject: `Refund Processed - ${info.orderNo}`,
+    html: BuyerMailTemplate.refundProcessed(mailData),
+    text: `Refund processed for order ${info.orderNo}. Amount: ₹${refundAmount}`,
+  });
+}
 
 export const createOrder = async (userId: number, data: any) => {
   const { cart_id, billing_address, shipping_address, currency = 'INR' } = data;
@@ -418,6 +552,13 @@ export const createOrder = async (userId: number, data: any) => {
       text: `Your order ${result.order_no} has been placed successfully.`,
     });
   }
+  if (result?.id && result?.order_no) {
+    void sendSellerNewOrderMails(
+      BigInt(result.id),
+      result.order_no,
+      Number(result.grand_total ?? result.total_amount ?? 0),
+    );
+  }
 
   return result;
 };
@@ -547,7 +688,45 @@ export const cancelOrder = async (userId: number, id: string, note?: string) => 
       text: `Your order ${result.order_no} has been cancelled.`,
     });
   }
+  if (result?.id && result?.order_no) {
+    const sellers = await sqlQuery<{
+      sellerName: string | null;
+      sellerEmail: string | null;
+    }>(
+      `
+    SELECT DISTINCT
+      u.name AS sellerName,
+      u.email AS sellerEmail
+    FROM seller_units su
+    JOIN stores s ON s.id = su.store_id
+    LEFT JOIN \`User\` u ON u.id = s.seller_user_id
+    WHERE su.order_id = ?
+    `,
+      [BigInt(result.id)],
+    );
 
+    for (const seller of sellers) {
+      if (!seller?.sellerEmail) continue;
+
+      const mailData: {
+        sellerName?: string;
+        orderNo: string;
+      } = {
+        orderNo: result.order_no,
+      };
+
+      if (seller.sellerName) {
+        mailData.sellerName = seller.sellerName;
+      }
+
+      void mailServiceAsync({
+        to: seller.sellerEmail,
+        subject: `Order Cancelled - ${result.order_no}`,
+        html: SellerMailTemplate.orderCancelledByBuyer(mailData),
+        text: `Order ${result.order_no} has been cancelled by buyer.`,
+      });
+    }
+  }
   return result;
 };
 
@@ -654,6 +833,42 @@ export const requestReturn = async (userId: number, id: string, data: any) => {
     );
     return rows[0] ?? null;
   });
+  const sellers = await sqlQuery<{
+    sellerName: string | null;
+    sellerEmail: string | null;
+  }>(
+    `
+  SELECT DISTINCT
+    u.name AS sellerName,
+    u.email AS sellerEmail
+  FROM seller_units su
+  JOIN stores s ON s.id = su.store_id
+  LEFT JOIN \`User\` u ON u.id = s.seller_user_id
+  WHERE su.order_id = ?
+  `,
+    [order.id],
+  );
 
+  for (const seller of sellers) {
+    if (!seller?.sellerEmail) continue;
+
+    const mailData: {
+      sellerName?: string;
+      orderNo: string;
+    } = {
+      orderNo: order.order_no,
+    };
+
+    if (seller.sellerName) {
+      mailData.sellerName = seller.sellerName;
+    }
+
+    void mailServiceAsync({
+      to: seller.sellerEmail,
+      subject: `Return Request - ${order.order_no}`,
+      html: SellerMailTemplate.returnRequestReceived(mailData),
+      text: `A return request was created for ${order.order_no}`,
+    });
+  }
   return result;
 };

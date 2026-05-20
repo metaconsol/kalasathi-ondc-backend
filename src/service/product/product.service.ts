@@ -15,6 +15,8 @@ import type {
 } from './product.types';
 import type { z } from 'zod';
 import { flatVariantCreateSchema, treeVariantCreateSchema } from './product.schema';
+import { mailServiceAsync } from '../mail/mail.service';
+import { SellerMailTemplate } from '../mail/seller.mail.template';
 
 type FlatVariantRow = z.infer<typeof flatVariantCreateSchema>;
 type TreeVariantRow = z.infer<typeof treeVariantCreateSchema>;
@@ -726,6 +728,48 @@ class ProductService {
           },
         });
       });
+      //create product mail
+      const sellerUser = await db.user.findUnique({
+        where: { id: Number(store.sellerUserId) },
+        select: { name: true, email: true },
+      });
+
+      if (sellerUser?.email) {
+        void mailServiceAsync({
+          to: sellerUser.email,
+          subject: 'Product Submitted Successfully',
+          html: SellerMailTemplate.productSubmitted({
+            sellerName: sellerUser.name,
+            productName: product.productName,
+          }),
+          text: `Your product ${product.productName} has been submitted successfully.`,
+        });
+      }
+
+      const adminMailData: {
+        productName: string;
+        sellerName?: string;
+        storeName?: string;
+      } = {
+        productName: product.productName,
+      };
+
+      if (sellerUser?.name) {
+        adminMailData.sellerName = sellerUser.name;
+      }
+
+      if (store.storeName) {
+        adminMailData.storeName = store.storeName;
+      }
+
+      if (process.env.ADMIN_EMAIL) {
+        void mailServiceAsync({
+          to: process.env.ADMIN_EMAIL,
+          subject: `Product Approval Required - ${product.productName}`,
+          html: SellerMailTemplate.productApprovalRequest(adminMailData),
+          text: `New product approval required: ${product.productName}`,
+        });
+      }
 
       return ApiResponse.created(res, 'Product created successfully', product);
     } catch (error: any) {
@@ -1100,6 +1144,28 @@ class ProductService {
           },
         });
       });
+      const stock = Number(updatedProduct.stock ?? 0);
+      const lowStockQty = Number(updatedProduct.lowStockQty ?? 0);
+
+      if (lowStockQty > 0 && stock <= lowStockQty) {
+        const sellerUser = await db.user.findUnique({
+          where: { id: Number(product.storeId) },
+          select: { name: true, email: true },
+        });
+
+        if (sellerUser?.email) {
+          void mailServiceAsync({
+            to: sellerUser.email,
+            subject: `Low Stock Alert - ${updatedProduct.productName}`,
+            html: SellerMailTemplate.lowStockAlert({
+              sellerName: sellerUser.name,
+              productName: updatedProduct.productName,
+              stock,
+            }),
+            text: `Low stock alert for ${updatedProduct.productName}. Remaining stock: ${stock}`,
+          });
+        }
+      }
 
       return ApiResponse.success(res, 'Product updated successfully', updatedProduct);
     } catch (error: any) {
