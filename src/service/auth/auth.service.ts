@@ -317,6 +317,42 @@ class AuthService {
     return ApiResponse.created(res, 'Seller profile created successfully');
   };
 
+  public getSellerProfile = async (req: Request, res: Response) => {
+    const user_id = req.user?.id;
+
+    if (!user_id) {
+      return ApiResponse.badRequest(res, 'User not authenticated');
+    }
+
+    const profile = await sqlQuery<any>(
+      `
+    SELECT
+      user_id,
+      business_type,
+      gstin,
+      business_name,
+      enrollment_number,
+      aadhar_number,
+      pan,
+      bank_account_no,
+      bank_ifsc,
+      upi_id,
+      kyc_status,
+      created_at,
+      updated_at
+    FROM seller_profiles
+    WHERE user_id = ?
+    LIMIT 1
+    `,
+      [user_id],
+    );
+
+    if (!profile.length) {
+      return ApiResponse.notFound(res, 'Seller profile not found');
+    }
+
+    return ApiResponse.success(res, 'Seller profile fetched successfully', profile[0]);
+  };
   public createStoreLocation = async (req: Request, res: Response) => {
     const user_id = (req as any).user?.id;
 

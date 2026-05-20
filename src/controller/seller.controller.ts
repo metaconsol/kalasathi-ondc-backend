@@ -51,6 +51,40 @@ export const listStoresHandler = async (req: Request, res: Response, next: NextF
   }
 };
 
+export const getStoreBySellerUserIdHandler = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const sellerId = Number(req.params.sellerUserId);
+
+    if (!sellerId) {
+      return ApiResponse.badRequest(res, 'sellerUserId is required');
+    }
+
+    const stores = await sellerService.getStoreBySellerUserId(sellerId);
+
+    return ApiResponse.success(res, 'Stores fetched successfully', {
+      stores,
+    });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const getStoreByIdHandler = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const storeId = Number(req.params.storeId);
+
+    const store = await sellerService.getStoreById(storeId);
+
+    return ApiResponse.success(res, 'Store fetched successfully', { store });
+  } catch (e) {
+    next(e);
+  }
+};
+
 export const createStoreHandler = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const store = await sellerService.createStoreForSeller(sellerUserId(req), req.body);

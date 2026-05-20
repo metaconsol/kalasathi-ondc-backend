@@ -238,6 +238,123 @@ export async function listStoresForSeller(sellerUserId: number) {
   return rows.map(serializeStore);
 }
 
+export async function getStoreBySellerUserId(sellerUserId: number) {
+  const rows = await sqlQuery<any>(
+    `
+    SELECT
+      id,
+      seller_user_id AS sellerUserId,
+      store_name AS storeName,
+      store_slug AS storeSlug,
+      description,
+      support_email AS supportEmail,
+      support_phone AS supportPhone,
+      is_active AS isActive,
+      deleted_at AS deletedAt,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM stores
+    WHERE seller_user_id = ?
+      AND deleted_at IS NULL
+    ORDER BY created_at DESC
+    `,
+    [sellerUserId],
+  );
+
+  return rows.map(serializeStore);
+}
+
+// export async function getStoreById(storeId: number) {
+//   const rows = await sqlQuery<any>(
+//     `
+//       SELECT
+//         id,
+//         seller_user_id AS sellerUserId,
+//         store_name AS storeName,
+//         store_slug AS storeSlug,
+//         description,
+//         support_email AS supportEmail,
+//         support_phone AS supportPhone,
+//         is_active AS isActive,
+//         deleted_at AS deletedAt,
+//         created_at AS createdAt,
+//         updated_at AS updatedAt
+//       FROM stores
+//       WHERE id = ?
+//       AND deleted_at IS NULL
+//       LIMIT 1
+//     `,
+//     [storeId],
+//   );
+
+//   return rows?.[0]
+//     ? serializeStore(rows[0])
+//     : null;
+// }
+
+export async function getStoreById(storeId: number) {
+  const storeRows = await sqlQuery<any>(
+    `
+      SELECT
+        id,
+        seller_user_id AS sellerUserId,
+        store_name AS storeName,
+        store_slug AS storeSlug,
+        description,
+        support_email AS supportEmail,
+        support_phone AS supportPhone,
+        is_active AS isActive,
+        deleted_at AS deletedAt,
+        created_at AS createdAt,
+        updated_at AS updatedAt
+      FROM stores
+      WHERE id = ?
+      AND deleted_at IS NULL
+      LIMIT 1
+    `,
+    [storeId],
+  );
+
+  if (!storeRows.length) {
+    return null;
+  }
+
+  const store = serializeStore(storeRows[0]);
+
+  const locations = await sqlQuery<any>(
+    `
+      SELECT
+        id,
+        store_id AS storeId,
+        location_type AS locationType,
+        address_line1 AS addressLine1,
+        address_line2 AS addressLine2,
+        city,
+        state,
+        country,
+        pincode,
+        latitude,
+        longitude,
+        radius,
+        opening_time AS openingTime,
+        closing_time AS closingTime,
+        serviceability,
+        is_active AS isActive,
+        created_at AS createdAt,
+        updated_at AS updatedAt
+      FROM store_locations
+      WHERE store_id = ?
+      ORDER BY created_at DESC
+    `,
+    [storeId],
+  );
+
+  return {
+    ...store,
+    locations,
+  };
+}
+
 export async function createStoreForSeller(
   sellerUserId: number,
   body: {

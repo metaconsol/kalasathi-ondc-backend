@@ -62,7 +62,18 @@ export const getWishlist = async (req: Request, res: Response, next: NextFunctio
 
     // Fetch one image per product
     const images = await sqlQuery<any>(
-      `SELECT * FROM product_images WHERE product_id IN (${inList}) GROUP BY product_id ORDER BY sort_order ASC`,
+      `
+  SELECT pi.*
+  FROM product_images pi
+  INNER JOIN (
+    SELECT product_id, MIN(sort_order) AS first_sort
+    FROM product_images
+    WHERE product_id IN (${inList})
+    GROUP BY product_id
+  ) x
+    ON x.product_id = pi.product_id
+   AND x.first_sort = pi.sort_order
+  `,
       productIds,
     );
 

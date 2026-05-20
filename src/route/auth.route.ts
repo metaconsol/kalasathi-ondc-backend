@@ -34,6 +34,7 @@ import {
   SellerRegister,
   CreateSellerProfile,
   CreateStoreForSeller,
+  GetSellerProfile,
 } from '~/controller/auth.controller';
 import { sellerAuthMiddleware } from '~/middleware/seller.middleware';
 
@@ -142,6 +143,7 @@ router.post('/forgot-password/reset', validate({ body: ResetPasswordSchema }), f
 
 router.post('/seller/register', validate({ body: RegisterSchema }), SellerRegister);
 router.post('/seller/register/profile', authMiddleware, CreateSellerProfile);
+router.get('/seller/profile', authMiddleware, GetSellerProfile);
 router.post('/seller/register/store', sellerAuthMiddleware, CreateStoreForSeller);
 
 export { router as authRouter };
