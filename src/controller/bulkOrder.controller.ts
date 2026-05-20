@@ -61,7 +61,7 @@ export async function listBulkOrders(_req: Request, res: Response) {
 
 export async function getBulkOrder(req: Request, res: Response) {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const order = await getBulkOrderById(id);
 
     if (!order) {
@@ -77,7 +77,7 @@ export async function getBulkOrder(req: Request, res: Response) {
 
 export async function updateBulkOrderStatus(req: Request, res: Response) {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { status } = req.body as { status: BulkOrderStatus };
 
     if (!allowedStatuses.includes(status)) {
@@ -103,7 +103,7 @@ export async function updateBulkOrderStatus(req: Request, res: Response) {
  */
 export async function getAttachmentSignedUrl(req: Request, res: Response) {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const order = await getBulkOrderById(id);
 
     if (!order) {
