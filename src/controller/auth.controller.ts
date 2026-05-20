@@ -87,6 +87,10 @@ export const CreateSellerProfile = async (req: Request, res: Response) => {
   return authService.createSellerProfile(req, res);
 };
 
+export const GetSellerProfile = async (req: Request, res: Response) => {
+  return authService.getSellerProfile(req, res);
+};
+
 export const CreateStoreForSeller = async (req: Request, res: Response) => {
   return authService.createStoreLocation(req, res);
 };

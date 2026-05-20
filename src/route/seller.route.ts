@@ -28,6 +28,8 @@ import {
   onboardingStep2Profile,
   onboardingStep3Store,
   onboardingStep4Pickup,
+  getStoreBySellerUserIdHandler,
+  getStoreByIdHandler,
 } from '~/controller/seller.controller';
 import { sellerProductRouter } from './seller/product.route';
 import {
@@ -65,6 +67,10 @@ router.get('/dashboard/summary', getDashboardSummaryHandler);
 
 router.post('/stores', validate({ body: CreateStoreBodySchema }), createStoreHandler);
 router.get('/stores', listStoresHandler);
+
+router.get('/stores/seller/:sellerUserId', getStoreBySellerUserIdHandler);
+router.get('/stores/:storeId', getStoreByIdHandler);
+
 router.get('/stores/:storeId', validate({ params: StoreIdParamsSchema }), getStoreHandler);
 router.put(
   '/stores/:storeId',
