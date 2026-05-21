@@ -211,3 +211,7 @@ export const forgotPasswordVerify = async (req: Request, res: Response) => {
 export const forgotPasswordReset = async (req: Request, res: Response) => {
   return authService.resetPasswordForCredentialAccount(req, res);
 };
+
+export const getSellerStatus = async (req: Request, res: Response) => {
+  return authService.getSellerStatus(req, res);
+};

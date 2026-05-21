@@ -35,8 +35,10 @@ import {
   CreateSellerProfile,
   CreateStoreForSeller,
   GetSellerProfile,
+  getSellerStatus,
 } from '~/controller/auth.controller';
 import { sellerAuthMiddleware } from '~/middleware/seller.middleware';
+import { requireApprovedSeller } from '~/middleware/requireApprovedSeller.middleware';
 
 const router = express.Router();
 
@@ -145,5 +147,7 @@ router.post('/seller/register', validate({ body: RegisterSchema }), SellerRegist
 router.post('/seller/register/profile', authMiddleware, CreateSellerProfile);
 router.get('/seller/profile', authMiddleware, GetSellerProfile);
 router.post('/seller/register/store', sellerAuthMiddleware, CreateStoreForSeller);
+
+router.get('/seller/dashboard', authMiddleware, getSellerStatus);
 
 export { router as authRouter };
