@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
 
-import { meta } from '~/lib/meta';
+// import { meta } from '~/lib/meta';
 import { logger } from '~/lib/logger';
 import { AppError } from '~/lib/response';
 import { env } from '~/config/env.config';
@@ -14,7 +14,8 @@ export class MailService {
 
   private readonly defaultMailServiceConfig: MailServiceConfig = {
     defaultTransport: env.mailService as MailTransport, // or 'ses' for AWS SES
-    defaultFrom: `${meta.appName} <${env.mailUser}>`,
+    // defaultFrom: `${meta.appName} <${env.mailUser}>`,
+    defaultFrom: env.mailFrom ? `${env.mailFrom} <${env.mailUser}>` : env.mailUser,
     smtp: {
       host: env.mailHost!,
       port: env.mailPort!,
