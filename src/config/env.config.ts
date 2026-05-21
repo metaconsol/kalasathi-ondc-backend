@@ -50,6 +50,7 @@ export const env = {
   mailPortSecure: parseBoolean(process.env.MAIL_PORT_SECURE),
   mailUser: process.env.MAIL_USER!,
   mailPassword: process.env.MAIL_PASSWORD!,
+  mailFrom: process.env.MAIL_FROM || process.env.META_APP_NAME || '',
 
   /** @see https://www.smsgateway.center/docs/api/send-sms-curl/ */
   smsGatewayUrl: process.env.SMS_GATEWAY_URL!,
