@@ -11,7 +11,29 @@ export function optionalAccessToken(req: Request, res: Response, next: NextFunct
     const result = AuthTokenUtil.verifyAccessToken(accessToken);
     if (result.success && result.payload) {
       req.user = result.payload;
+      return next();
     }
   }
+
+  // Fallback to refresh token in cookies if access token is not present or expired
+  const headerCookie = req.headers.cookie || null;
+  if (headerCookie) {
+    const cookies = headerCookie.split(';');
+    let refreshToken: string | null = null;
+    cookies.forEach((cookie) => {
+      const [key, value] = cookie.trim().split('=');
+      if (key === AuthTokenUtil.REFRESH_TOKEN_KEY_NAME) {
+        refreshToken = value as string | null;
+      }
+    });
+
+    if (refreshToken) {
+      const result = AuthTokenUtil.verifyRefreshToken(refreshToken);
+      if (result.success && result.payload) {
+        req.user = result.payload;
+      }
+    }
+  }
+
   next();
 }

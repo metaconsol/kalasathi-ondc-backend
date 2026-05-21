@@ -48,7 +48,7 @@ router.get('/variants/:variant_id/stock', getVariantStock);
 /**
  * GET /ui/products/slug/:slug
  */
-router.get('/slug/:slug', getPublicProductBySlug);
+router.get('/slug/:slug', optionalAccessToken, getPublicProductBySlug);
 
 /**
  * GET /ui/products/:product_id/reviews/stats
@@ -78,7 +78,7 @@ router.post('/:product_id/reviews', optionalAccessToken, addProductReview);
 /**
  * GET /ui/products/:product_id
  */
-router.get('/:product_id', getPublicProductById);
+router.get('/:product_id', optionalAccessToken, getPublicProductById);
 
 // ✅ add this BEFORE router.get('/:product_id', ...)
 

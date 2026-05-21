@@ -938,6 +938,9 @@ class PublicProductService {
       if (id === null) {
         return ApiResponse.badRequest(res, 'Invalid product id');
       }
+      const user = (req as any).user;
+      const isSellerOrAdmin =
+        user && (user.role?.toLowerCase() === 'seller' || user.role?.toLowerCase() === 'admin');
 
       const base = await sqlQuery<any>(
         `SELECT p.*, 
@@ -949,9 +952,8 @@ class PublicProductService {
          FROM products p
          JOIN stores s ON s.id = p.store_id
          JOIN categories c ON c.id = p.category_id
-           JOIN product_verification v ON v.product_id = p.id 
-         WHERE p.id = ? AND p.publish_status = 'publish' AND p.visibility = 'PUBLIC' AND s.is_active = 1 AND s.deleted_at IS NULL AND c.is_active = 1
-             AND v.approval_status = 'approved'
+           LEFT JOIN product_verification v ON v.product_id = p.id 
+         WHERE ${isSellerOrAdmin ? 'p.id = ? AND s.deleted_at IS NULL' : "p.id = ? AND p.publish_status = 'publish' AND p.visibility = 'PUBLIC' AND s.is_active = 1 AND s.deleted_at IS NULL AND c.is_active = 1 AND v.approval_status = 'approved'"}
          LIMIT 1`,
         [id],
       );
@@ -996,6 +998,9 @@ class PublicProductService {
       if (!slug) {
         return ApiResponse.badRequest(res, 'Invalid slug');
       }
+      const user = (req as any).user;
+      const isSellerOrAdmin =
+        user && (user.role?.toLowerCase() === 'seller' || user.role?.toLowerCase() === 'admin');
 
       const base = await sqlQuery<any>(
         `SELECT p.*, 
@@ -1004,9 +1009,8 @@ class PublicProductService {
          FROM products p  
          JOIN stores s ON s.id = p.store_id
          JOIN categories c ON c.id = p.category_id
-         JOIN product_verification v ON v.product_id = p.id
-         WHERE p.alias_slug = ? AND p.publish_status = 'publish' AND p.visibility = 'PUBLIC' AND s.is_active = 1 AND s.deleted_at IS NULL AND c.is_active = 1
-          AND v.approval_status = 'approved'
+         LEFT JOIN product_verification v ON v.product_id = p.id
+         WHERE ${isSellerOrAdmin ? 'p.alias_slug = ? AND s.deleted_at IS NULL' : "p.alias_slug = ? AND p.publish_status = 'publish' AND p.visibility = 'PUBLIC' AND s.is_active = 1 AND s.deleted_at IS NULL AND c.is_active = 1 AND v.approval_status = 'approved'"}
          LIMIT 1`,
         [slug],
       );
