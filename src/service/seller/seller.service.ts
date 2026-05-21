@@ -235,7 +235,51 @@ export async function listStoresForSeller(sellerUserId: number) {
     'SELECT `id`, `seller_user_id` as sellerUserId, `store_name` as storeName, `store_slug` as storeSlug, `description`, `support_email` as supportEmail, `support_phone` as supportPhone, `is_active` as isActive, `deleted_at` as deletedAt, `created_at` as createdAt, `updated_at` as updatedAt FROM `stores` WHERE `seller_user_id` = ? AND `deleted_at` IS NULL ORDER BY `created_at` DESC',
     [sellerUserId],
   );
-  return rows.map(serializeStore);
+  if (rows.length === 0) return [];
+
+  const storeIds = rows.map((row) => row.id);
+  const placeholders = storeIds.map(() => '?').join(', ');
+  const locationRows = await sqlQuery<any>(
+    `
+      SELECT
+        id,
+        store_id AS storeId,
+        location_type AS locationType,
+        address_line1 AS addressLine1,
+        address_line2 AS addressLine2,
+        city,
+        state,
+        country,
+        pincode,
+        latitude,
+        longitude,
+        radius,
+        opening_time AS openingTime,
+        closing_time AS closingTime,
+        serviceability,
+        is_active AS isActive,
+        created_at AS createdAt,
+        updated_at AS updatedAt
+      FROM store_locations
+      WHERE store_id IN (${placeholders})
+      ORDER BY created_at DESC
+    `,
+    storeIds,
+  );
+  const locationsByStoreId = new Map<string, any[]>();
+  for (const location of locationRows) {
+    const storeId = String(location.storeId);
+    const existing = locationsByStoreId.get(storeId) ?? [];
+    existing.push(location);
+    locationsByStoreId.set(storeId, existing);
+  }
+
+  return rows.map((row) =>
+    serializeStore({
+      ...row,
+      locations: locationsByStoreId.get(String(row.id)) ?? [],
+    }),
+  );
 }
 
 export async function getStoreBySellerUserId(sellerUserId: number) {
