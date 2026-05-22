@@ -4,19 +4,29 @@ import { authMiddleware } from '~/middleware/auth.middleware';
 
 const reviewRouter = Router();
 
-// 🔹 Create review (user must be logged in)
+// 🔹 Create review
 reviewRouter.post('/', authMiddleware, reviewController.createReview);
 
-// 🔹 Get all approved reviews of a product
+// 🔹 Product approved reviews
 reviewRouter.get('/product/:productId', reviewController.getProductReviews);
+
+// ✅ Logged-in user's reviews - MUST be before /:id
+reviewRouter.get('/Reviews/me', authMiddleware, reviewController.getMyReviews);
+
+// ✅ Seller route also keep before /:id/status
+reviewRouter.patch(
+  '/seller/reviews/:review_id/status',
+  authMiddleware,
+  reviewController.updateReviewStatusBySeller,
+);
 
 // 🔹 Get single review
 reviewRouter.get('/:id', authMiddleware, reviewController.getReviewById);
 
-// 🔹 Update review (only owner)
+// 🔹 Update review
 reviewRouter.patch('/:id', authMiddleware, reviewController.updateReview);
 
-// 🔹 Delete review (only owner)
+// 🔹 Delete review
 reviewRouter.delete('/:id', authMiddleware, reviewController.deleteReview);
 
 // 🔹 Admin: get all reviews
@@ -25,12 +35,4 @@ reviewRouter.get('/', authMiddleware, reviewController.getAllReviews);
 // 🔹 Admin: approve/reject review
 reviewRouter.patch('/:id/status', authMiddleware, reviewController.updateReviewStatus);
 
-reviewRouter.patch(
-  '/seller/reviews/:review_id/status',
-  authMiddleware,
-  reviewController.updateReviewStatusBySeller,
-);
-
 export { reviewRouter };
-
-// updateReviewStatusBySeller
