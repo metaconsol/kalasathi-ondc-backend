@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { UserRole } from '~/generated/prisma/enums';
 
 function hasControlChars(val: string): boolean {
   for (let i = 0; i < val.length; i++) {
@@ -51,9 +50,7 @@ export const LoginSchema = PhoneNumberSchema.extend({
   email: z.email({ message: 'Please enter a valid email.' }).optional(),
   isLoginWithPassword: z.boolean().default(false),
   isLoginWithOtp: z.boolean().default(false),
-  loginRole: z
-    .enum([UserRole.USER, UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.SELLER])
-    .default(UserRole.USER),
+  loginRole: z.enum(['USER', 'ADMIN', 'SUPER_ADMIN', 'SELLER'] as const).default('USER'),
   rememberMe: z.boolean().default(false),
   password: z
     .string()
