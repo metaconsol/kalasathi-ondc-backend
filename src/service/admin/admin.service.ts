@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { UserRole, AccountType, AccountProvider, AccountStatus } from '~/generated/prisma/enums';
+import { AccountType, AccountProvider, AccountStatus } from '~/generated/prisma/enums';
+import { UserRole } from '~/lib/userRole';
 import { env } from '~/config/env.config';
 import { ApiResponse } from '~/lib/response';
 import { sqlExec, sqlQuery, withSqlTransaction } from '~/lib/sql';

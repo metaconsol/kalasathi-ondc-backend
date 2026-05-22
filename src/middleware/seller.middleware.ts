@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
-import { UserRole } from '~/generated/prisma/enums';
+import { UserRole } from '~/lib/userRole';
 import { ApiResponse } from '~/lib/response';
 import { authService } from '~/service/auth/auth.service';
 

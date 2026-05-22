@@ -8,7 +8,7 @@ import {
   publicReviewsQuerySchema,
   addProductReviewBodySchema,
 } from './product.schema';
-import { UserRole } from '~/generated/prisma/enums';
+import { UserRole } from '~/lib/userRole';
 import { canModerateProduct } from '~/service/admin/admin.service';
 
 function parseOptionalBigintParam(raw: string | string[] | undefined): bigint | null {
