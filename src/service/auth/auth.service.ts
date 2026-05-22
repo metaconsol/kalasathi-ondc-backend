@@ -569,7 +569,10 @@ class AuthService {
       } else if (credentialsAccount.status === AccountStatus.BLOCKED) {
         return ApiResponse.unauthorized(res, 'Account is blocked');
       } else {
-        if (loginRole != UserRole.USER && user.role !== loginRole) {
+        const isAdminLoginAsSuperAdmin =
+          (loginRole === UserRole.ADMIN || loginRole === UserRole.SUPER_ADMIN) &&
+          user.role === UserRole.SUPER_ADMIN;
+        if (loginRole != UserRole.USER && user.role !== loginRole && !isAdminLoginAsSuperAdmin) {
           throw ApiError.UNAUTHORIZED(
             `You are not authorized to login with this ${loginRole} role`,
           );

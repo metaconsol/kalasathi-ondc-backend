@@ -40,7 +40,7 @@ import { authService } from '~/service/auth/auth.service';
  *     password:          string   (required if isLoginWithPassword = true)
  *     isLoginWithPassword: boolean
  *     isLoginWithOtp:    boolean
- *     loginRole:         "USER" | "ADMIN"  (default: "USER")
+ *     loginRole:         "USER" | "ADMIN" | "SUPER_ADMIN"  (default: "USER")
  *     rememberMe:        boolean           (default: false)
  *     email:             string            (optional)
  *   }
