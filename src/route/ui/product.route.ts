@@ -1,5 +1,7 @@
 import express from 'express';
 import { optionalAccessToken } from '~/middleware/optionalAccess.middleware';
+import { authMiddleware } from '~/middleware/auth.middleware';
+import { isAdmin } from '~/middleware/admin.middleware';
 import {
   listPublicProducts,
   listAdminProducts,
@@ -11,6 +13,7 @@ import {
   getRelatedProducts,
   listProductReviews,
   getProductReviewStats,
+  getAdminProductById,
   checkProductPincode,
   getVariantStock,
   addProductReview,
@@ -23,7 +26,8 @@ const router = express.Router();
  * GET /ui/products — catalog list (filters: page, limit, sort, categoryId, storeId, search, minPrice, maxPrice)
  */
 router.get('/', listPublicProducts);
-router.get('/admin/products', listAdminProducts);
+router.get('/admin/products', authMiddleware, isAdmin, listAdminProducts);
+router.get('/admin/products/:product_id', authMiddleware, isAdmin, getAdminProductById);
 
 /**
  * GET /ui/products/search — same behavior as list (category / price filters)

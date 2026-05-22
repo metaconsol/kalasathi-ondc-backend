@@ -8,6 +8,8 @@ import {
   publicReviewsQuerySchema,
   addProductReviewBodySchema,
 } from './product.schema';
+import { UserRole } from '~/generated/prisma/enums';
+import { canModerateProduct } from '~/service/admin/admin.service';
 
 function parseOptionalBigintParam(raw: string | string[] | undefined): bigint | null {
   const s = Array.isArray(raw) ? raw[0] : raw;
@@ -434,7 +436,7 @@ class PublicProductService {
 
       const hasCategoryId = q.categoryId !== undefined && q.categoryId !== '';
       let categoryFilterIds: bigint[] | undefined;
-      let queryForWhere = q;
+      let queryForWhere: Parameters<typeof this.buildListWhereSql>[0] = q;
       if (hasCategoryId) {
         const catId = parseOptionalBigintParam(q.categoryId);
         if (catId !== null) categoryFilterIds = [catId];
@@ -703,10 +705,15 @@ class PublicProductService {
 
   public listProductsForAdmin = async (req: Request, res: Response) => {
     try {
+      if (!req.user || ![UserRole.ADMIN, UserRole.SUPER_ADMIN].includes(req.user.role as any)) {
+        return ApiResponse.forbidden(res, 'Admin access required');
+      }
+
       // ✅ Get page & limit from query (default: page=1, limit=20)
       const page = Number(req.query.page) || 1;
       const limit = Number(req.query.limit) || 20;
       const offset = (page - 1) * limit;
+      const isSuperAdmin = req.user.role === UserRole.SUPER_ADMIN;
 
       const rows = await sqlQuery<any>(
         `
@@ -733,10 +740,12 @@ class PublicProductService {
       LEFT JOIN categories c 
         ON c.id = p.category_id
 
+      ${isSuperAdmin ? '' : 'JOIN admin_district_assignments ada ON ada.admin_id = ? AND LOWER(TRIM(ada.district_name)) = LOWER(TRIM(p.district))'}
+
       ORDER BY p.created_at DESC
       LIMIT ? OFFSET ?
       `,
-        [limit, offset], // ✅ safe binding
+        isSuperAdmin ? [limit, offset] : [req.user.id, limit, offset],
       );
 
       const products = await hydrateProducts(
@@ -940,7 +949,7 @@ class PublicProductService {
       }
       const user = (req as any).user;
       const isSellerOrAdmin =
-        user && (user.role?.toLowerCase() === 'seller' || user.role?.toLowerCase() === 'admin');
+        user && ['seller', 'admin', 'super_admin'].includes(String(user.role || '').toLowerCase());
 
       const base = await sqlQuery<any>(
         `SELECT p.*, 
@@ -991,6 +1000,28 @@ class PublicProductService {
     }
   };
 
+  public getByIdForAdmin = async (req: Request, res: Response) => {
+    const id = parseOptionalBigintParam(req.params.product_id);
+    if (id === null) {
+      return ApiResponse.badRequest(res, 'Invalid product id');
+    }
+
+    if (!req.user || ![UserRole.ADMIN, UserRole.SUPER_ADMIN].includes(req.user.role as any)) {
+      return ApiResponse.forbidden(res, 'Admin access required');
+    }
+
+    const access = await canModerateProduct(
+      { id: Number(req.user.id), role: String(req.user.role) },
+      id,
+    );
+    if (!access.ok) {
+      if (access.status === 404) return ApiResponse.notFound(res, access.message);
+      return ApiResponse.forbidden(res, access.message);
+    }
+
+    return this.getById(req, res);
+  };
+
   public getBySlug = async (req: Request, res: Response) => {
     try {
       const slug = slugParam(req.params.slug).trim();
@@ -1000,7 +1031,7 @@ class PublicProductService {
       }
       const user = (req as any).user;
       const isSellerOrAdmin =
-        user && (user.role?.toLowerCase() === 'seller' || user.role?.toLowerCase() === 'admin');
+        user && ['seller', 'admin', 'super_admin'].includes(String(user.role || '').toLowerCase());
 
       const base = await sqlQuery<any>(
         `SELECT p.*, 

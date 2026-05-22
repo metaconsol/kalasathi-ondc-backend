@@ -9,6 +9,9 @@ export const listAdminProducts = (req: Request, res: Response) => {
   return publicProductService.listProductsForAdmin(req, res);
 };
 
+export const getAdminProductById = (req: Request, res: Response) =>
+  publicProductService.getByIdForAdmin(req, res);
+
 export const searchPublicProducts = (req: Request, res: Response) =>
   publicProductService.listCatalog(req, res);
 

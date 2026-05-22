@@ -224,7 +224,7 @@ export const approveProduct = async (req: Request, res: Response) => {
       return ApiResponse.badRequest(res, 'Invalid productId');
     }
 
-    return productService.approveProduct(res, BigInt(productId));
+    return productService.approveProduct(req, res, BigInt(productId));
   } catch (error) {
     return ApiResponse.serverError(res, 'Error approving product', error);
   }
@@ -240,7 +240,7 @@ export const rejectProduct = async (req: Request, res: Response) => {
       return ApiResponse.badRequest(res, 'Invalid productId');
     }
 
-    return productService.rejectProduct(res, BigInt(productId), reason);
+    return productService.rejectProduct(req, res, BigInt(productId), reason);
   } catch (error) {
     return ApiResponse.serverError(res, 'Error rejecting product', error);
   }

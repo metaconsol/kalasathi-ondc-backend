@@ -3,7 +3,7 @@ import { UserRole } from '~/generated/prisma/enums';
 import { ApiResponse } from '~/lib/response';
 import { authService } from '~/service/auth/auth.service';
 
-const SELLER_OR_ADMIN = new Set<string>([UserRole.SELLER, UserRole.ADMIN]);
+const SELLER_OR_ADMIN = new Set<string>([UserRole.SELLER, UserRole.ADMIN, UserRole.SUPER_ADMIN]);
 
 /**
  * All `/seller/*` routes (except public onboarding handlers registered before this middleware)

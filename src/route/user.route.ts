@@ -26,5 +26,6 @@ router.patch('/addresses/:id/default', addressController.setDefaultAddress);
  */
 router.get('/profile', userController.getProfile);
 router.put('/profile', userController.updateProfile);
+router.patch('/password', userController.changePassword);
 
 export { router as userRouter };
