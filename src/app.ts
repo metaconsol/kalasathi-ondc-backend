@@ -1,4 +1,5 @@
 import express, { type Application, type Request, type Response } from 'express';
+import { createRequire } from 'node:module';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -10,6 +11,9 @@ import { logger } from '~/lib/logger';
 import { createSafeApp } from '~/lib/SafeExpress';
 import { globalErrorHandler, notFoundHandler } from '~/middleware/error.middleware';
 import { ApiResponse } from '~/lib/response';
+
+const require = createRequire(import.meta.url);
+const { version: appVersion } = require('../package.json');
 
 /**
  * Creates and configures the Express application.
@@ -80,6 +84,16 @@ export function createApp(): Application {
   // Health check / Root endpoint
   app.get('/', (_req: Request, res: Response) => {
     return ApiResponse.success(res, 'ODOP API is running');
+  });
+
+  // Diagnostic endpoint for production verification
+  app.get('/api/version', (_req: Request, res: Response) => {
+    return ApiResponse.success(res, 'ODOP API version info', {
+      version: appVersion,
+      nodeEnv: env.nodeEnv,
+      serverUrl: env.serverUrl,
+      time: new Date().toISOString(),
+    });
   });
 
   // Mount API Routes under /api/v1
