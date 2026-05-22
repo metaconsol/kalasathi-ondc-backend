@@ -12,6 +12,7 @@ import { expandS3RefsDeep } from '~/lib/storageUrls';
 import { deleteS3Object } from '~/lib/s3';
 import { mailServiceAsync } from '../mail/mail.service';
 import { SellerMailTemplate } from '../mail/seller.mail.template';
+import { canModerateProduct } from '~/service/admin/admin.service';
 
 function decString(v: any): string {
   if (v == null) return '0';
@@ -1075,8 +1076,16 @@ class ProductSqlService {
   };
 
   // aprovel of product by admin
-  public approveProduct = async (res: Response, productId: bigint) => {
+  public approveProduct = async (req: Request, res: Response, productId: bigint) => {
     try {
+      if (!req.user) {
+        return ApiResponse.unauthorized(res, 'Unauthorized');
+      }
+      const access = await canModerateProduct(req.user, productId);
+      if (!access.ok) {
+        return ApiResponse.custom(res, access.message, access.status);
+      }
+
       await withSqlTransaction(async (tx) => {
         // ✅ Update ONLY product_verification table
         const result = await sqlExec(
@@ -1102,8 +1111,16 @@ class ProductSqlService {
     }
   };
   // Rejection of product by admin witrh reason
-  public rejectProduct = async (res: Response, productId: bigint, reason: string) => {
+  public rejectProduct = async (req: Request, res: Response, productId: bigint, reason: string) => {
     try {
+      if (!req.user) {
+        return ApiResponse.unauthorized(res, 'Unauthorized');
+      }
+      const access = await canModerateProduct(req.user, productId);
+      if (!access.ok) {
+        return ApiResponse.custom(res, access.message, access.status);
+      }
+
       await withSqlTransaction(async (tx) => {
         // ✅ Update ONLY product_verification table
         const result = await sqlExec(
