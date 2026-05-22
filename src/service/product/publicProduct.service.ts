@@ -709,11 +709,21 @@ class PublicProductService {
         return ApiResponse.forbidden(res, 'Admin access required');
       }
 
-      // ✅ Get page & limit from query (default: page=1, limit=20)
+      // ✅ Get page & limit from query (default: page=1, limit=10)
       const page = Number(req.query.page) || 1;
-      const limit = Number(req.query.limit) || 20;
+      const limit = Number(req.query.limit) || 10;
       const offset = (page - 1) * limit;
       const isSuperAdmin = req.user.role === UserRole.SUPER_ADMIN;
+      const countRows = await sqlQuery<{ total: number }>(
+        `
+      SELECT COUNT(*) AS total
+      FROM products p
+      ${isSuperAdmin ? '' : 'JOIN admin_district_assignments ada ON ada.admin_id = ? AND LOWER(TRIM(ada.district_name)) = LOWER(TRIM(p.district))'}
+      `,
+        isSuperAdmin ? [] : [req.user.id],
+      );
+      const total = Number(countRows?.[0]?.total || 0);
+      const totalPages = Math.max(1, Math.ceil(total / limit));
 
       const rows = await sqlQuery<any>(
         `
@@ -771,6 +781,8 @@ class PublicProductService {
       return ApiResponse.success(res, 'Admin products fetched successfully', {
         page,
         limit,
+        total,
+        totalPages,
         count: products.length,
         data: products,
       });
