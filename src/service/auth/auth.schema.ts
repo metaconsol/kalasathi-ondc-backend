@@ -10,6 +10,16 @@ function hasControlChars(val: string): boolean {
   return false;
 }
 
+function normalizeLoginRole(value: unknown): string | unknown {
+  if (typeof value !== 'string') {
+    return value;
+  }
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/[-\s]+/g, '_');
+}
+
 // phone number must start with country code with +
 export const PhoneNumberSchema = z.object({
   phoneNumber: z
@@ -50,7 +60,12 @@ export const LoginSchema = PhoneNumberSchema.extend({
   email: z.email({ message: 'Please enter a valid email.' }).optional(),
   isLoginWithPassword: z.boolean().default(false),
   isLoginWithOtp: z.boolean().default(false),
-  loginRole: z.enum(['USER', 'ADMIN', 'SUPER_ADMIN', 'SELLER'] as const).default('USER'),
+  loginRole: z
+    .preprocess(
+      (value) => normalizeLoginRole(value),
+      z.enum(['USER', 'ADMIN', 'SUPER_ADMIN', 'SELLER'] as const),
+    )
+    .default('USER'),
   rememberMe: z.boolean().default(false),
   password: z
     .string()
