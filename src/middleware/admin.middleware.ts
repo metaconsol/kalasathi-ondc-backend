@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { authService } from '~/service/auth/auth.service';
-import { UserRole } from '~/generated/prisma/enums';
+import { UserRole } from '~/lib/userRole';
 
 /**
  * Requires the authenticated user to have an admin role.

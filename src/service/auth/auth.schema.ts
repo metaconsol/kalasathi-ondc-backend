@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { USER_ROLE_VALUES } from '~/lib/userRole';
 
 function hasControlChars(val: string): boolean {
   for (let i = 0; i < val.length; i++) {
@@ -61,10 +62,7 @@ export const LoginSchema = PhoneNumberSchema.extend({
   isLoginWithPassword: z.boolean().default(false),
   isLoginWithOtp: z.boolean().default(false),
   loginRole: z
-    .preprocess(
-      (value) => normalizeLoginRole(value),
-      z.enum(['USER', 'ADMIN', 'SUPER_ADMIN', 'SELLER'] as const),
-    )
+    .preprocess((value) => normalizeLoginRole(value), z.enum(USER_ROLE_VALUES))
     .default('USER'),
   rememberMe: z.boolean().default(false),
   password: z

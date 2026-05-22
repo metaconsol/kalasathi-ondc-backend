@@ -1,10 +1,10 @@
 import {
-  UserRole,
   AccountType,
   AccountStatus,
   AuthTokenType,
   AccountProvider,
 } from '~/generated/prisma/enums';
+import { UserRole } from '~/lib/userRole';
 import { sqlExec, sqlQuery, type SqlTx, withSqlTransaction } from '~/lib/sql';
 import { AuthUtil } from './auth.util';
 import { AuthTokenUtil } from './jwt.util';
