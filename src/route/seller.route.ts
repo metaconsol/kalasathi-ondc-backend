@@ -40,6 +40,7 @@ import {
   uploadSellerSizeChart,
 } from '~/controller/seller/product.controller';
 import { productImageUpload, sizeChartUpload } from '~/middleware/multer';
+import { authMiddleware } from '~/middleware/auth.middleware';
 
 const router = express.Router();
 
@@ -47,6 +48,25 @@ router.post(
   '/onboarding/step-1-register',
   validate({ body: RegisterSchema }),
   onboardingStep1Register,
+);
+
+router.put(
+  '/onboarding/step-2-profile',
+  authMiddleware, //  add
+  validate({ body: UpdateSellerProfileBodySchema }),
+  onboardingStep2Profile,
+);
+router.post(
+  '/onboarding/step-3-store',
+  authMiddleware, //
+  validate({ body: CreateStoreBodySchema }),
+  onboardingStep3Store,
+);
+router.post(
+  '/onboarding/step-4-pickup',
+  authMiddleware,
+  validate({ body: OnboardingStep4BodySchema }),
+  onboardingStep4Pickup,
 );
 
 router.get('/categories/tree', listCatalogCategoryTree);
@@ -98,22 +118,6 @@ router.post(
   '/stores/:storeId/locations/both',
   validate({ params: StoreIdParamsSchema, body: CreatePickupAndReturnBodySchema }),
   createBothLocationsHandler,
-);
-
-router.put(
-  '/onboarding/step-2-profile',
-  validate({ body: UpdateSellerProfileBodySchema }),
-  onboardingStep2Profile,
-);
-router.post(
-  '/onboarding/step-3-store',
-  validate({ body: CreateStoreBodySchema }),
-  onboardingStep3Store,
-);
-router.post(
-  '/onboarding/step-4-pickup',
-  validate({ body: OnboardingStep4BodySchema }),
-  onboardingStep4Pickup,
 );
 
 /** Product CRUD & inventory (same auth as other seller routes) */
