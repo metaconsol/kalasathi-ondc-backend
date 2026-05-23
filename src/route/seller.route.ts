@@ -41,6 +41,7 @@ import {
 } from '~/controller/seller/product.controller';
 import { productImageUpload, sizeChartUpload } from '~/middleware/multer';
 import { authMiddleware } from '~/middleware/auth.middleware';
+import { getSellerStatus } from '~/controller/auth.controller';
 
 const router = express.Router();
 
@@ -70,6 +71,7 @@ router.post(
 );
 
 router.get('/categories/tree', listCatalogCategoryTree);
+router.get('/dashboard', authMiddleware, getSellerStatus);
 
 /** Bearer access token or refresh cookie; role must be SELLER or ADMIN */
 router.use(sellerAuthMiddleware);
