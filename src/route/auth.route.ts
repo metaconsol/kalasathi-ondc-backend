@@ -156,4 +156,6 @@ router.post('/seller/register/store', authMiddleware, CreateStoreForSeller);
 
 // router.get('/seller/dashboard', authMiddleware, getSellerStatus);
 
+router.get('/seller/dashboard', authMiddleware, getSellerStatus);
+
 export { router as authRouter };
