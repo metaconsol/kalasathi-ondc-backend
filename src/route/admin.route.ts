@@ -1,11 +1,5 @@
 import express from 'express';
-import {
-  approveSeller,
-  getMessages,
-  getSellerRequests,
-  rejectSeller,
-  updateMessageStatus,
-} from '../controller/contact.controller';
+import { getMessages, updateMessageStatus } from '../controller/contact.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { isAdmin, isSuperAdmin } from '../middleware/admin.middleware';
 import {
@@ -24,19 +18,5 @@ router.get('/admin/admins', authMiddleware, isSuperAdmin, listAdmins);
 router.post('/admin/admins', authMiddleware, isSuperAdmin, createAdmin);
 router.patch('/admin/admins/:adminId/district', authMiddleware, isSuperAdmin, assignAdminDistrict);
 router.delete('/admin/admins/:adminId', authMiddleware, isSuperAdmin, deleteAdmin);
-/**
- * GET ALL SELLER REQUESTS
- */
-router.get('/admin/sellers', authMiddleware, isAdmin, getSellerRequests);
-
-/**
- * APPROVE SELLER
- */
-router.patch('/admin/sellers/:userId/approve', authMiddleware, isAdmin, approveSeller);
-
-/**
- * REJECT SELLER
- */
-router.patch('/admin/sellers/:userId/reject', authMiddleware, isAdmin, rejectSeller);
 
 export default router;
