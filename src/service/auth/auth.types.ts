@@ -1,4 +1,4 @@
-import type { UserRole } from '~/generated/prisma/client';
+import type { UserRole } from '~/lib/userRole';
 
 export type UserPayloadDTO = {
   name: string;

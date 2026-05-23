@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { UserRole } from '~/generated/prisma/enums';
+import { USER_ROLE_VALUES } from '~/lib/userRole';
 
 function hasControlChars(val: string): boolean {
   for (let i = 0; i < val.length; i++) {
@@ -9,6 +9,16 @@ function hasControlChars(val: string): boolean {
     }
   }
   return false;
+}
+
+function normalizeLoginRole(value: unknown): string | unknown {
+  if (typeof value !== 'string') {
+    return value;
+  }
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(/[-\s]+/g, '_');
 }
 
 // phone number must start with country code with +
@@ -52,8 +62,8 @@ export const LoginSchema = PhoneNumberSchema.extend({
   isLoginWithPassword: z.boolean().default(false),
   isLoginWithOtp: z.boolean().default(false),
   loginRole: z
-    .enum([UserRole.USER, UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.SELLER])
-    .default(UserRole.USER),
+    .preprocess((value) => normalizeLoginRole(value), z.enum(USER_ROLE_VALUES))
+    .default('USER'),
   rememberMe: z.boolean().default(false),
   password: z
     .string()
