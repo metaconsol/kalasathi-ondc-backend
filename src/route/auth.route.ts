@@ -35,10 +35,8 @@ import {
   CreateSellerProfile,
   CreateStoreForSeller,
   GetSellerProfile,
-  getSellerStatus,
 } from '~/controller/auth.controller';
 import { sellerAuthMiddleware } from '~/middleware/seller.middleware';
-import { requireApprovedSeller } from '~/middleware/requireApprovedSeller.middleware';
 
 const router = express.Router();
 
@@ -143,17 +141,9 @@ router.post('/forgot-password/reset', validate({ body: ResetPasswordSchema }), f
  *  Four Way verification Process
  */
 
-// router.post('/seller/register', validate({ body: RegisterSchema }), SellerRegister);
-// router.post('/seller/register/profile', authMiddleware, CreateSellerProfile);
-// router.get('/seller/profile', authMiddleware, GetSellerProfile);
-// router.post('/seller/register/store', sellerAuthMiddleware, CreateStoreForSeller);
 router.post('/seller/register', validate({ body: RegisterSchema }), SellerRegister);
 router.post('/seller/register/profile', authMiddleware, CreateSellerProfile);
 router.get('/seller/profile', authMiddleware, GetSellerProfile);
-
-// ✅ changed here
-router.post('/seller/register/store', authMiddleware, CreateStoreForSeller);
-
-router.get('/seller/dashboard', authMiddleware, getSellerStatus);
+router.post('/seller/register/store', sellerAuthMiddleware, CreateStoreForSeller);
 
 export { router as authRouter };

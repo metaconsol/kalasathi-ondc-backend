@@ -1,7 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import * as contactService from '~/service/contact.service';
 import { ApiResponse } from '~/lib/response';
-import { sqlExec, sqlQuery } from '~/lib/sql';
 import {
   ContactMessage_topic as Topic,
   ContactMessage_status as MessageStatus,
@@ -65,82 +64,5 @@ export const updateMessageStatus = async (req: Request, res: Response, next: Nex
     return ApiResponse.success(res, 'Message updated successfully', updated);
   } catch (error) {
     next(error);
-  }
-};
-
-/**
- * Admin: Get seller requests
- */
-export const getSellerRequests = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const sellers = await sqlQuery<any>(
-      `SELECT 
-        sp.*,
-        u.name,
-        u.email,
-        u.phoneNumber
-       FROM seller_profiles sp
-       JOIN user u ON u.id = sp.user_id
-       ORDER BY sp.created_at DESC`,
-    );
-
-    return ApiResponse.success(res, 'Seller requests', sellers);
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * APPROVE
- */
-export const approveSeller = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const userId = Number(req.params.userId);
-
-    if (!userId) {
-      return ApiResponse.badRequest(res, 'Invalid seller user id');
-    }
-
-    await sqlExec(
-      `UPDATE seller_profiles
-       SET approval_status = 'APPROVED'
-       WHERE user_id = ?`,
-      [userId],
-    );
-
-    return ApiResponse.success(res, 'Seller approved successfully');
-  } catch (e) {
-    next(e);
-  }
-};
-
-/**
- * REJECT
- */
-export const rejectSeller = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const userId = Number(req.params.userId);
-    const { reject_note } = req.body;
-
-    if (!userId) {
-      return ApiResponse.badRequest(res, 'Invalid seller user id');
-    }
-
-    if (!reject_note || !reject_note.trim()) {
-      return ApiResponse.badRequest(res, 'Reject note is required');
-    }
-
-    await sqlExec(
-      `UPDATE seller_profiles
-       SET approval_status = 'REJECTED',
-           reject_note = ?,
-           updated_at = CURRENT_TIMESTAMP(3)
-       WHERE user_id = ?`,
-      [reject_note.trim(), userId],
-    );
-
-    return ApiResponse.success(res, 'Seller rejected successfully');
-  } catch (e) {
-    next(e);
   }
 };

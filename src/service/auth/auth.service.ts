@@ -296,10 +296,9 @@ class AuthService {
       bank_account_no,
       bank_ifsc,
       upi_id,
-      kyc_status,
-       approval_status
+      kyc_status
     ) 
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? , ?)`,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         user_id,
         business_type ?? null,
@@ -311,7 +310,6 @@ class AuthService {
         bank_account_no ?? null,
         bank_ifsc ?? null,
         upi_id ?? null,
-        'pending',
         'pending',
       ],
     );
@@ -340,7 +338,6 @@ class AuthService {
       bank_ifsc,
       upi_id,
       kyc_status,
-      approval_status,
       created_at,
       updated_at
     FROM seller_profiles
@@ -1283,97 +1280,6 @@ class AuthService {
     return this.newAuthenticatedResponse(res, {
       userId: userId,
       message: 'Password reset successfully',
-    });
-  };
-
-  //   public getSellerStatus = async (req: Request, res: Response) => {
-  //   const user = req.user;
-
-  //   if (!user?.id) {
-  //     return ApiResponse.badRequest(res, 'User not authenticated');
-  //   }
-
-  //   const sellerProfile = await sqlQuery<{
-  //     approval_status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  //     kyc_status: string;
-  //     business_type: string;
-  //     gstin: string | null;
-  //     business_name: string | null;
-  //   }>(
-  //     `SELECT
-  //       approval_status,
-  //       kyc_status,
-  //       business_type,
-  //       gstin,
-  //       business_name
-  //      FROM seller_profiles
-  //      WHERE user_id = ?
-  //      LIMIT 1`,
-  //     [user.id],
-  //   );
-
-  //   const seller = sellerProfile[0];
-
-  //   if (!seller) {
-  //     return ApiResponse.notFound(res, 'Seller profile not found');
-  //   }
-
-  //   if (seller.approval_status !== 'APPROVED') {
-  //     return ApiResponse.success(res, 'Seller approval pending', {
-  //       seller,
-  //       canAccessDashboard: false,
-  //     });
-  //   }
-
-  //   return ApiResponse.success(res, 'Seller approved', {
-  //     seller,
-  //     canAccessDashboard: true,
-  //   });
-  // };
-  public getSellerStatus = async (req: Request, res: Response) => {
-    const user = req.user;
-
-    if (!user?.id) {
-      return ApiResponse.badRequest(res, 'User not authenticated');
-    }
-
-    const sellerProfile = await sqlQuery<{
-      approval_status: 'PENDING' | 'APPROVED' | 'REJECTED';
-      kyc_status: string;
-      business_type: string;
-      gstin: string | null;
-      business_name: string | null;
-      reject_note: string | null; // ✅ CHANGED
-    }>(
-      `SELECT 
-      approval_status,
-      kyc_status,
-      business_type,
-      gstin,
-      business_name,
-      reject_note
-     FROM seller_profiles
-     WHERE user_id = ?
-     LIMIT 1`,
-      [user.id],
-    );
-
-    const seller = sellerProfile[0];
-
-    if (!seller) {
-      return ApiResponse.notFound(res, 'Seller profile not found');
-    }
-
-    if (seller.approval_status !== 'APPROVED') {
-      return ApiResponse.success(res, 'Seller not approved', {
-        seller,
-        canAccessDashboard: false,
-      });
-    }
-
-    return ApiResponse.success(res, 'Seller approved', {
-      seller,
-      canAccessDashboard: true,
     });
   };
 }
