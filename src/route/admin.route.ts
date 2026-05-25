@@ -1,9 +1,13 @@
 import express from 'express';
 import {
+  approveDistrictSeller,
   approveSeller,
+  getDistrictSellerRequests,
   getMessages,
   getSellerRequests,
+  rejectDistrictSeller,
   rejectSeller,
+  underReviewDistrictSeller,
   updateMessageStatus,
 } from '../controller/contact.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
@@ -38,5 +42,28 @@ router.patch('/admin/sellers/:userId/approve', authMiddleware, isAdmin, approveS
  * REJECT SELLER
  */
 router.patch('/admin/sellers/:userId/reject', authMiddleware, isAdmin, rejectSeller);
+
+router.get('/admin/district/sellers', authMiddleware, isAdmin, getDistrictSellerRequests);
+
+router.patch(
+  '/admin/district/sellers/:userId/approve',
+  authMiddleware,
+  isAdmin,
+  approveDistrictSeller,
+);
+
+router.patch(
+  '/admin/district/sellers/:userId/reject',
+  authMiddleware,
+  isAdmin,
+  rejectDistrictSeller,
+);
+
+router.patch(
+  '/admin/district/sellers/:userId/under-review',
+  authMiddleware,
+  isAdmin,
+  underReviewDistrictSeller,
+);
 
 export default router;

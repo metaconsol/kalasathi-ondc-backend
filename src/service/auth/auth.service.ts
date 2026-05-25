@@ -18,6 +18,29 @@ import type { UserPayloadDAO, UserPayloadDTO } from './auth.types';
 import { mailServiceAsync } from '../mail/mail.service';
 import { BuyerMailTemplate } from '../mail/buyer.mail.template';
 import { SellerMailTemplate } from '../mail/seller.mail.template';
+import {
+  buildObjectKey,
+  putS3Object,
+  resolveS3KeyToUrl,
+  resolveStoredToSignedUrl,
+  isS3Enabled,
+} from '~/lib/s3';
+
+const uploadSellerFile = async (file: Express.Multer.File | undefined, folder: string) => {
+  if (!file) return null;
+
+  if (isS3Enabled()) {
+    const key = buildObjectKey(`uploads/sellerProfiles/${folder}`, file.originalname);
+
+    await putS3Object(key, file.buffer, file.mimetype);
+
+    // Store as `s3:KEY` so other helpers can consistently resolve to public or
+    // signed URLs later (and to avoid storing region-specific public URLs).
+    return `s3:${key}`;
+  }
+
+  return file.path || null;
+};
 
 class AuthService {
   private constructor() {}
@@ -242,6 +265,82 @@ class AuthService {
     });
   };
 
+  // public createSellerProfile = async (req: Request, res: Response) => {
+  //   const {
+  //     business_type,
+  //     gstin,
+  //     business_name,
+  //     enrollment_number,
+  //     aadhar_number,
+  //     pan,
+  //     bank_account_no,
+  //     bank_ifsc,
+  //     upi_id,
+  //   } = req.body;
+
+  //   // ✅ AUTO USER ID
+  //   const user_id = req.user?.id;
+
+  //   if (!user_id) {
+  //     return ApiResponse.badRequest(res, 'User not authenticated');
+  //   }
+
+  //   // ✅ Check existing
+  //   const existing = await sqlQuery<{ user_id: number }>(
+  //     'SELECT `user_id` FROM `seller_profiles` WHERE `user_id` = ? LIMIT 1',
+  //     [user_id],
+  //   );
+
+  //   if (existing[0]?.user_id) {
+  //     return ApiResponse.badRequest(res, 'Seller profile already exists');
+  //   }
+
+  //   // ✅ GST / NON GST LOGIC
+  //   const finalGstin = business_type === 'GST' ? gstin?.trim()?.toUpperCase() || null : null;
+
+  //   const finalBusinessName = business_type === 'Non-GST' ? business_name?.trim() || null : null;
+
+  //   const finalEnrollmentNumber =
+  //     business_type === 'Non-GST' ? enrollment_number?.trim() || null : null;
+
+  //   const finalAadharNumber = business_type === 'Non-GST' ? aadhar_number?.trim() || null : null;
+
+  //   // ✅ INSERT
+  //   await sqlExec(
+  //     `INSERT INTO seller_profiles
+  //   (
+  //     user_id,
+  //     business_type,
+  //     gstin,
+  //     business_name,
+  //     enrollment_number,
+  //     aadhar_number,
+  //     pan,
+  //     bank_account_no,
+  //     bank_ifsc,
+  //     upi_id,
+  //     kyc_status,
+  //      approval_status
+  //   )
+  //   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? , ?)`,
+  //     [
+  //       user_id,
+  //       business_type ?? null,
+  //       finalGstin,
+  //       finalBusinessName,
+  //       finalEnrollmentNumber,
+  //       finalAadharNumber,
+  //       pan ?? null,
+  //       bank_account_no ?? null,
+  //       bank_ifsc ?? null,
+  //       upi_id ?? null,
+  //       'pending',
+  //       'pending',
+  //     ],
+  //   );
+
+  //   return ApiResponse.created(res, 'Seller profile created successfully');
+  // };
   public createSellerProfile = async (req: Request, res: Response) => {
     const {
       business_type,
@@ -253,16 +352,28 @@ class AuthService {
       bank_account_no,
       bank_ifsc,
       upi_id,
+      district,
     } = req.body;
 
-    // ✅ AUTO USER ID
     const user_id = req.user?.id;
 
+    const files = req.files as any;
+
+    // const gst_image = files?.gst_image?.[0]?.path || null;
+    // const aadhar_image = files?.aadhar_image?.[0]?.path || null;
+    // const pan_image = files?.pan_image?.[0]?.path || null;
+    // const bank_image = files?.bank_image?.[0]?.path || null;
+    const gst_image = await uploadSellerFile(files?.gst_image?.[0], 'gst');
+
+    const aadhar_image = await uploadSellerFile(files?.aadhar_image?.[0], 'aadhar');
+
+    const pan_image = await uploadSellerFile(files?.pan_image?.[0], 'pan');
+
+    const bank_image = await uploadSellerFile(files?.bank_image?.[0], 'bank');
     if (!user_id) {
       return ApiResponse.badRequest(res, 'User not authenticated');
     }
 
-    // ✅ Check existing
     const existing = await sqlQuery<{ user_id: number }>(
       'SELECT `user_id` FROM `seller_profiles` WHERE `user_id` = ? LIMIT 1',
       [user_id],
@@ -272,8 +383,9 @@ class AuthService {
       return ApiResponse.badRequest(res, 'Seller profile already exists');
     }
 
-    // ✅ GST / NON GST LOGIC
     const finalGstin = business_type === 'GST' ? gstin?.trim()?.toUpperCase() || null : null;
+
+    const finalGstImage = business_type === 'GST' ? gst_image : null;
 
     const finalBusinessName = business_type === 'Non-GST' ? business_name?.trim() || null : null;
 
@@ -282,37 +394,48 @@ class AuthService {
 
     const finalAadharNumber = business_type === 'Non-GST' ? aadhar_number?.trim() || null : null;
 
-    // ✅ INSERT
+    const finalAadharImage = business_type === 'Non-GST' ? aadhar_image : null;
+
     await sqlExec(
       `INSERT INTO seller_profiles 
     (
       user_id,
       business_type,
       gstin,
+      gst_image,
       business_name,
       enrollment_number,
       aadhar_number,
+      aadhar_image,
       pan,
+      pan_image,
       bank_account_no,
+      bank_image,
       bank_ifsc,
       upi_id,
+      district,
       kyc_status,
-       approval_status
+      approval_status
     ) 
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? , ?)`,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         user_id,
         business_type ?? null,
         finalGstin,
+        finalGstImage,
         finalBusinessName,
         finalEnrollmentNumber,
         finalAadharNumber,
+        finalAadharImage,
         pan ?? null,
+        pan_image,
         bank_account_no ?? null,
+        bank_image,
         bank_ifsc ?? null,
         upi_id ?? null,
-        'pending',
-        'pending',
+        district ?? null,
+        'PENDING',
+        'PENDING',
       ],
     );
 
@@ -332,11 +455,15 @@ class AuthService {
       user_id,
       business_type,
       gstin,
+      gst_image,
       business_name,
       enrollment_number,
       aadhar_number,
+      aadhar_image,
       pan,
+      pan_image,
       bank_account_no,
+      bank_image,
       bank_ifsc,
       upi_id,
       kyc_status,
@@ -354,7 +481,15 @@ class AuthService {
       return ApiResponse.notFound(res, 'Seller profile not found');
     }
 
-    return ApiResponse.success(res, 'Seller profile fetched successfully', profile[0]);
+    const p = profile[0];
+
+    // Convert stored media refs to signed URLs when possible
+    p.gst_image = await resolveStoredToSignedUrl(p.gst_image);
+    p.aadhar_image = await resolveStoredToSignedUrl(p.aadhar_image);
+    p.pan_image = await resolveStoredToSignedUrl(p.pan_image);
+    p.bank_image = await resolveStoredToSignedUrl(p.bank_image);
+
+    return ApiResponse.success(res, 'Seller profile fetched successfully', p);
   };
   public createStoreLocation = async (req: Request, res: Response) => {
     const user_id = (req as any).user?.id;

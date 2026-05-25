@@ -7,6 +7,8 @@ import {
   ContactMessage_status as MessageStatus,
 } from '~/generated/prisma/enums';
 
+import { resolveStoredToSignedUrl } from '~/lib/s3';
+
 /**
  * Handle public contact form submission
  */
@@ -142,5 +144,263 @@ export const rejectSeller = async (req: Request, res: Response, next: NextFuncti
     return ApiResponse.success(res, 'Seller rejected successfully');
   } catch (e) {
     next(e);
+  }
+};
+
+// export const getDistrictSellerRequests = async (
+//   req: Request,
+//   res: Response,
+//   next: NextFunction
+// ) => {
+//   try {
+//     const adminId = req.user?.id;
+//     const role = req.user?.role;
+
+//     let query = `
+//       SELECT
+//         sp.*,
+//         u.name,
+//         u.email,
+//         u.phoneNumber
+//       FROM seller_profiles sp
+//       JOIN user u ON u.id = sp.user_id
+//     `;
+
+//     const params: any[] = [];
+
+//     if (role !== 'SUPER_ADMIN') {
+//       query += `
+//         JOIN admin_district_assignments ada
+//           ON LOWER(TRIM(ada.district_name)) = LOWER(TRIM(sp.district))
+//          AND ada.admin_id = ?
+//       `;
+
+//       params.push(adminId);
+//     }
+
+//     query += `
+//       ORDER BY sp.created_at DESC
+//     `;
+
+//     const sellers = await sqlQuery<any>(query, params);
+
+//     return ApiResponse.success(
+//       res,
+//       'District seller requests',
+//       sellers
+//     );
+//   } catch (error) {
+//     next(error);
+//   }
+// };
+export const getDistrictSellerRequests = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const adminId = req.user?.id;
+    const role = req.user?.role;
+
+    let query = `
+      SELECT 
+        sp.*,
+        u.name,
+        u.email,
+        u.phoneNumber
+      FROM seller_profiles sp
+      JOIN user u ON u.id = sp.user_id
+    `;
+
+    const params: any[] = [];
+
+    if (role !== 'SUPER_ADMIN') {
+      query += `
+        JOIN admin_district_assignments ada
+          ON LOWER(TRIM(ada.district_name)) = LOWER(TRIM(sp.district))
+         AND ada.admin_id = ?
+      `;
+
+      params.push(adminId);
+    }
+
+    query += `
+      ORDER BY sp.created_at DESC
+    `;
+
+    const sellers = await sqlQuery<any>(query, params);
+
+    const sellersWithImages = await Promise.all(
+      sellers.map(async (seller: any) => ({
+        ...seller,
+        gst_image: await resolveStoredToSignedUrl(seller.gst_image),
+        aadhar_image: await resolveStoredToSignedUrl(seller.aadhar_image),
+        pan_image: await resolveStoredToSignedUrl(seller.pan_image),
+        bank_image: await resolveStoredToSignedUrl(seller.bank_image),
+      })),
+    );
+
+    return ApiResponse.success(res, 'District seller requests', sellersWithImages);
+  } catch (error) {
+    next(error);
+  }
+};
+export const approveDistrictSeller = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const adminId = req.user?.id;
+    const role = req.user?.role;
+    const { userId } = req.params;
+
+    let query = `
+      SELECT sp.user_id
+      FROM seller_profiles sp
+    `;
+
+    const params: any[] = [];
+
+    if (role !== 'SUPER_ADMIN') {
+      query += `
+        JOIN admin_district_assignments ada
+          ON LOWER(TRIM(ada.district_name)) = LOWER(TRIM(sp.district))
+         AND ada.admin_id = ?
+      `;
+      params.push(adminId);
+    }
+
+    query += `
+      WHERE sp.user_id = ?
+      LIMIT 1
+    `;
+
+    params.push(userId);
+
+    const allowed = await sqlQuery<any>(query, params);
+
+    if (!allowed.length) {
+      return ApiResponse.forbidden(res, 'You can approve only sellers from your assigned district');
+    }
+
+    await sqlExec(
+      `
+      UPDATE seller_profiles
+      SET approval_status = 'APPROVED',
+          reject_note = NULL
+      WHERE user_id = ?
+      `,
+      [userId],
+    );
+
+    return ApiResponse.success(res, 'Seller approved successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const rejectDistrictSeller = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const adminId = req.user?.id;
+    const role = req.user?.role;
+    const { userId } = req.params;
+    const { reject_note } = req.body;
+
+    let query = `
+      SELECT sp.user_id
+      FROM seller_profiles sp
+    `;
+
+    const params: any[] = [];
+
+    if (role !== 'SUPER_ADMIN') {
+      query += `
+        JOIN admin_district_assignments ada
+          ON LOWER(TRIM(ada.district_name)) = LOWER(TRIM(sp.district))
+         AND ada.admin_id = ?
+      `;
+      params.push(adminId);
+    }
+
+    query += `
+      WHERE sp.user_id = ?
+      LIMIT 1
+    `;
+
+    params.push(userId);
+
+    const allowed = await sqlQuery<any>(query, params);
+
+    if (!allowed.length) {
+      return ApiResponse.forbidden(res, 'You can reject only sellers from your assigned district');
+    }
+
+    await sqlExec(
+      `
+      UPDATE seller_profiles
+      SET approval_status = 'REJECTED',
+          reject_note = ?
+      WHERE user_id = ?
+      `,
+      [reject_note || null, userId],
+    );
+
+    return ApiResponse.success(res, 'Seller rejected successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const underReviewDistrictSeller = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const adminId = req.user?.id;
+    const role = req.user?.role;
+    const { userId } = req.params;
+    const { reject_note } = req.body;
+
+    let query = `
+      SELECT sp.user_id
+      FROM seller_profiles sp
+    `;
+
+    const params: any[] = [];
+
+    if (role !== 'SUPER_ADMIN') {
+      query += `
+        JOIN admin_district_assignments ada
+          ON LOWER(TRIM(ada.district_name)) = LOWER(TRIM(sp.district))
+         AND ada.admin_id = ?
+      `;
+
+      params.push(adminId);
+    }
+
+    query += `
+      WHERE sp.user_id = ?
+      LIMIT 1
+    `;
+
+    params.push(userId);
+
+    const allowed = await sqlQuery<any>(query, params);
+
+    if (!allowed.length) {
+      return ApiResponse.forbidden(res, 'You can update only sellers from your assigned district');
+    }
+
+    await sqlExec(
+      `
+      UPDATE seller_profiles
+      SET approval_status = 'UNDER_REVIEW',
+          reject_note = ?
+      WHERE user_id = ?
+      `,
+      [reject_note || null, userId],
+    );
+
+    return ApiResponse.success(res, 'Seller moved to under review successfully');
+  } catch (error) {
+    next(error);
   }
 };

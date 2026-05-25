@@ -13,6 +13,7 @@ import {
 // ─── Middleware ───────────────────────────────────────────────────────────────
 import { validate } from '~/middleware/validate';
 import { authMiddleware } from '~/middleware/auth.middleware';
+import { memoryUpload } from '~/middleware/multer';
 
 // ─── Controller ───────────────────────────────────────────────────────────────
 // All handlers are now imported from auth.controller instead of authService
@@ -39,6 +40,12 @@ import {
 } from '~/controller/auth.controller';
 import { sellerAuthMiddleware } from '~/middleware/seller.middleware';
 import { requireApprovedSeller } from '~/middleware/requireApprovedSeller.middleware';
+
+import multer from 'multer';
+
+const upload = multer({
+  dest: 'uploads/',
+});
 
 const router = express.Router();
 
@@ -148,7 +155,31 @@ router.post('/forgot-password/reset', validate({ body: ResetPasswordSchema }), f
 // router.get('/seller/profile', authMiddleware, GetSellerProfile);
 // router.post('/seller/register/store', sellerAuthMiddleware, CreateStoreForSeller);
 router.post('/seller/register', validate({ body: RegisterSchema }), SellerRegister);
-router.post('/seller/register/profile', authMiddleware, CreateSellerProfile);
+// router.post('/seller/register/profile', authMiddleware, CreateSellerProfile);
+// router.post(
+//   '/seller/register/profile',
+//   authMiddleware,
+
+//   upload.fields([
+//     { name: 'gst_image', maxCount: 1 },
+//     { name: 'aadhar_image', maxCount: 1 },
+//     { name: 'pan_image', maxCount: 1 },
+//     { name: 'bank_image', maxCount: 1 },
+//   ]),
+
+//   CreateSellerProfile,
+// );
+router.post(
+  '/seller/register/profile',
+  authMiddleware,
+  memoryUpload.fields([
+    { name: 'gst_image', maxCount: 1 },
+    { name: 'aadhar_image', maxCount: 1 },
+    { name: 'pan_image', maxCount: 1 },
+    { name: 'bank_image', maxCount: 1 },
+  ]),
+  CreateSellerProfile,
+);
 router.get('/seller/profile', authMiddleware, GetSellerProfile);
 
 // ✅ changed here
