@@ -290,3 +290,28 @@ export const updateReviewStatus = async (data: {
     status: data.status,
   };
 };
+
+/**
+ * Get Logged-in User Reviews
+ */
+export const getMyReviews = async (userId: number) => {
+  return sqlQuery(
+    `SELECT 
+      pr.*,
+      p.product_name,
+      p.default_price,
+      p.mrp,
+      (
+        SELECT pi.image_url
+        FROM product_images pi
+        WHERE pi.product_id = p.id
+        ORDER BY pi.sort_order ASC
+        LIMIT 1
+      ) AS product_image
+    FROM product_reviews pr
+    JOIN products p ON p.id = pr.product_id
+    WHERE pr.user_id = ?
+    ORDER BY pr.created_at DESC`,
+    [userId],
+  );
+};

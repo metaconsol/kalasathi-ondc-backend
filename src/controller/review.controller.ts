@@ -184,3 +184,19 @@ export const updateReviewStatusBySeller = async (req: any, res: any, next: any) 
     next(err);
   }
 };
+
+export const getMyReviews = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = (req as any).user?.id;
+
+    if (!userId) {
+      return ApiResponse.unauthorized(res, 'Unauthorized');
+    }
+
+    const data = await reviewService.getMyReviews(Number(userId));
+
+    return ApiResponse.success(res, 'My reviews fetched successfully', data);
+  } catch (error) {
+    next(error);
+  }
+};
