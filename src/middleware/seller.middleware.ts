@@ -40,8 +40,8 @@ export const sellerAuthMiddleware = (req: Request, res: Response, next: NextFunc
         return ApiResponse.forbidden(res, 'Seller or admin access required');
       }
 
-      // ✅ CHANGED: Admin can access seller routes
-      if (req.user.role === UserRole.ADMIN) {
+      // Admin roles can access seller routes without a seller profile row.
+      if (req.user.role === UserRole.ADMIN || req.user.role === UserRole.SUPER_ADMIN) {
         return next();
       }
 
