@@ -82,7 +82,7 @@ export const getSellerRequests = async (req: Request, res: Response, next: NextF
         u.email,
         u.phoneNumber
        FROM seller_profiles sp
-       JOIN User u ON u.id = sp.user_id
+       JOIN user u ON u.id = sp.user_id
        ORDER BY sp.created_at DESC`,
     );
 
@@ -147,52 +147,6 @@ export const rejectSeller = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-// export const getDistrictSellerRequests = async (
-//   req: Request,
-//   res: Response,
-//   next: NextFunction
-// ) => {
-//   try {
-//     const adminId = req.user?.id;
-//     const role = req.user?.role;
-
-//     let query = `
-//       SELECT
-//         sp.*,
-//         u.name,
-//         u.email,
-//         u.phoneNumber
-//       FROM seller_profiles sp
-//       JOIN user u ON u.id = sp.user_id
-//     `;
-
-//     const params: any[] = [];
-
-//     if (role !== 'SUPER_ADMIN') {
-//       query += `
-//         JOIN admin_district_assignments ada
-//           ON LOWER(TRIM(ada.district_name)) = LOWER(TRIM(sp.district))
-//          AND ada.admin_id = ?
-//       `;
-
-//       params.push(adminId);
-//     }
-
-//     query += `
-//       ORDER BY sp.created_at DESC
-//     `;
-
-//     const sellers = await sqlQuery<any>(query, params);
-
-//     return ApiResponse.success(
-//       res,
-//       'District seller requests',
-//       sellers
-//     );
-//   } catch (error) {
-//     next(error);
-//   }
-// };
 export const getDistrictSellerRequests = async (
   req: Request,
   res: Response,
@@ -202,20 +156,21 @@ export const getDistrictSellerRequests = async (
     const adminId = req.user?.id;
     const role = req.user?.role;
 
-    let query = `
-      SELECT 
-        sp.*,
-        u.name,
-        u.email,
-        u.phoneNumber
+    // ✅ PAGINATION
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+
+    let baseQuery = `
       FROM seller_profiles sp
       JOIN User u ON u.id = sp.user_id
     `;
 
     const params: any[] = [];
 
+    // ✅ DISTRICT FILTER FOR NORMAL ADMIN
     if (role !== 'SUPER_ADMIN') {
-      query += `
+      baseQuery += `
         JOIN admin_district_assignments ada
           ON LOWER(TRIM(ada.district_name)) = LOWER(TRIM(sp.district))
          AND ada.admin_id = ?
@@ -224,12 +179,30 @@ export const getDistrictSellerRequests = async (
       params.push(adminId);
     }
 
-    query += `
-      ORDER BY sp.created_at DESC
+    // ✅ TOTAL COUNT QUERY
+    const totalQuery = `
+      SELECT COUNT(*) as total
+      ${baseQuery}
     `;
 
-    const sellers = await sqlQuery<any>(query, params);
+    const totalResult = await sqlQuery<any>(totalQuery, params);
+    const total = totalResult[0]?.total || 0;
 
+    // ✅ MAIN DATA QUERY WITH LIMIT
+    const dataQuery = `
+      SELECT 
+        sp.*,
+        u.name,
+        u.email,
+        u.phoneNumber
+      ${baseQuery}
+      ORDER BY sp.created_at DESC
+      LIMIT ? OFFSET ?
+    `;
+
+    const sellers = await sqlQuery<any>(dataQuery, [...params, limit, offset]);
+
+    // ✅ IMAGE URL RESOLVE
     const sellersWithImages = await Promise.all(
       sellers.map(async (seller: any) => ({
         ...seller,
@@ -240,7 +213,14 @@ export const getDistrictSellerRequests = async (
       })),
     );
 
-    return ApiResponse.success(res, 'District seller requests', sellersWithImages);
+    // ✅ RESPONSE WITH PAGINATION
+    return ApiResponse.success(res, 'District seller requests', {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      data: sellersWithImages,
+    });
   } catch (error) {
     next(error);
   }
