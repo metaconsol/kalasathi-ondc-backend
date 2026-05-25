@@ -46,6 +46,47 @@ function orderByForSort(sort: string): string {
   }
 }
 
+const CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
+
+type CatalogCacheEntry = {
+  expiresAt: number;
+  data: {
+    filters: any[];
+    products: any[];
+  };
+  meta: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+};
+
+const catalogCache = new Map<string, CatalogCacheEntry>();
+
+function getCatalogCacheKey(req: Request, parsedQuery: unknown): string {
+  return JSON.stringify({
+    path: req.baseUrl + req.path,
+    query: parsedQuery,
+    explicitSort: req.query.sort !== undefined,
+  });
+}
+
+function setCatalogCacheHeaders(res: Response, cacheStatus: 'HIT' | 'MISS') {
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.setHeader('X-Catalog-Cache', cacheStatus);
+}
+
+function getCatalogRandomSeed(): string {
+  return String(Math.floor(Date.now() / CATALOG_CACHE_TTL_MS));
+}
+
+function pruneExpiredCatalogCache(now: number) {
+  for (const [key, entry] of catalogCache) {
+    if (entry.expiresAt <= now) catalogCache.delete(key);
+  }
+}
+
 function normalizeFilterToken(value: string): string {
   return value
     .trim()
@@ -433,6 +474,14 @@ class PublicProductService {
         return ApiResponse.badRequest(res, 'Invalid query parameters', parsed.error);
       }
       const q = parsed.data;
+      const cacheKey = getCatalogCacheKey(req, q);
+      const now = Date.now();
+      const cached = catalogCache.get(cacheKey);
+      if (cached && cached.expiresAt > now) {
+        setCatalogCacheHeaders(res, 'HIT');
+        return ApiResponse.success(res, 'Products fetched successfully', cached.data, cached.meta);
+      }
+      if (cached) catalogCache.delete(cacheKey);
 
       const hasCategoryId = q.categoryId !== undefined && q.categoryId !== '';
       let categoryFilterIds: bigint[] | undefined;
@@ -458,7 +507,11 @@ class PublicProductService {
       const limit = q.limit;
       const skip = (page - 1) * limit;
 
-      const orderBy = orderByForSort(q.sort);
+      const hasExplicitSort = req.query.sort !== undefined;
+      const orderBy = hasExplicitSort
+        ? orderByForSort(q.sort)
+        : 'MD5(CONCAT(CAST(p.id AS CHAR), ?))';
+      const orderArgs = hasExplicitSort ? [] : [getCatalogRandomSeed()];
       const [baseRows, totalRows] = await Promise.all([
         sqlQuery<any>(
           `SELECT p.*, 
@@ -472,7 +525,7 @@ class PublicProductService {
             AND v.approval_status = 'approved'    -- ✅ ADDED
            ORDER BY ${orderBy}
            LIMIT ? OFFSET ?`,
-          [...where.args, limit, skip],
+          [...where.args, ...orderArgs, limit, skip],
         ),
         sqlQuery<{ total: number }>(
           `SELECT COUNT(*) as total
@@ -511,21 +564,26 @@ class PublicProductService {
       const totalPages = Math.ceil(total / limit);
       const categoryScopeIds = categoryFilterIds ?? (await this.getCategoryScopeIds(where));
       const filters = await this.listFiltersForCategories(categoryScopeIds, where);
+      const data = {
+        filters,
+        products: rows.map(toPublicProductCard),
+      };
+      const meta = {
+        page,
+        limit,
+        total,
+        totalPages,
+      };
 
-      return ApiResponse.success(
-        res,
-        'Products fetched successfully',
-        {
-          filters,
-          products: rows.map(toPublicProductCard),
-        },
-        {
-          page,
-          limit,
-          total,
-          totalPages,
-        },
-      );
+      pruneExpiredCatalogCache(now);
+      catalogCache.set(cacheKey, {
+        expiresAt: now + CATALOG_CACHE_TTL_MS,
+        data,
+        meta,
+      });
+      setCatalogCacheHeaders(res, 'MISS');
+
+      return ApiResponse.success(res, 'Products fetched successfully', data, meta);
     } catch (error) {
       return ApiResponse.serverError(res, 'Error fetching products', error);
     }
