@@ -872,3 +872,223 @@ export const requestReturn = async (userId: number, id: string, data: any) => {
   }
   return result;
 };
+export const listSellerOrders = async (sellerId: number, filters: any) => {
+  const { status, payment_status, search, page = 1, limit = 20 } = filters;
+
+  const skip = (page - 1) * limit;
+
+  const args: any[] = [sellerId];
+
+  let whereSql = `su.seller_id = ?`;
+
+  if (status) {
+    whereSql += ` AND o.order_status = ?`;
+    args.push(status);
+  }
+
+  if (payment_status) {
+    whereSql += ` AND o.payment_status = ?`;
+    args.push(payment_status);
+  }
+
+  if (search) {
+    whereSql += ` AND (o.order_no LIKE ? OR oa.full_name LIKE ? OR oa.phone LIKE ?)`;
+    args.push(`%${search}%`, `%${search}%`, `%${search}%`);
+  }
+
+  const data = await sqlQuery<any>(
+    `
+    SELECT
+      o.id,
+      o.order_no,
+      o.order_status,
+      o.payment_status,
+      o.grand_total,
+      o.total_items,
+      o.currency,
+      o.created_at,
+
+      su.id AS seller_unit_id,
+      su.status AS seller_order_status,
+
+      oa.full_name AS customer_name,
+      oa.phone AS customer_phone,
+      oa.city,
+      oa.state,
+      oa.pincode,
+
+      COUNT(oi.id) AS seller_items_count,
+      SUM(oi.total_snapshot) AS seller_total
+
+    FROM seller_units su
+    JOIN orders o ON o.id = su.order_id
+    LEFT JOIN order_items oi ON oi.order_seller_unit_id = su.id
+    LEFT JOIN order_addresses oa 
+      ON oa.order_id = o.id AND oa.type = 'shipping'
+
+    WHERE ${whereSql}
+
+    GROUP BY
+      o.id,
+      o.order_no,
+      o.order_status,
+      o.payment_status,
+      o.grand_total,
+      o.total_items,
+      o.currency,
+      o.created_at,
+      su.id,
+      su.status,
+      oa.full_name,
+      oa.phone,
+      oa.city,
+      oa.state,
+      oa.pincode
+
+    ORDER BY o.created_at DESC
+    LIMIT ? OFFSET ?
+    `,
+    [...args, limit, skip],
+  );
+
+  const totalRows = await sqlQuery<{ total: number }>(
+    `
+    SELECT COUNT(DISTINCT o.id) AS total
+    FROM seller_units su
+    JOIN orders o ON o.id = su.order_id
+    LEFT JOIN order_addresses oa 
+      ON oa.order_id = o.id AND oa.type = 'shipping'
+    WHERE ${whereSql}
+    `,
+    args,
+  );
+
+  const total = Number(totalRows?.[0]?.total ?? 0);
+
+  return {
+    data,
+    pagination: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    },
+  };
+};
+export const getSellerOrderDetails = async (sellerId: number, sellerUnitId: string) => {
+  const rows = await sqlQuery<any>(
+    `
+    SELECT
+      su.id AS seller_unit_id,
+      su.status AS seller_order_status,
+      su.tracking_no,
+      su.logistics_provider,
+
+      o.id AS order_id,
+      o.order_no,
+      o.order_status,
+      o.payment_status,
+      o.total_items,
+      o.subtotal,
+      o.tax_total,
+      o.shipping_total,
+      o.discount_total,
+      o.grand_total,
+      o.currency,
+      o.created_at,
+
+      oa.full_name AS customer_name,
+      oa.phone AS customer_phone,
+      oa.address_line1,
+      oa.address_line2,
+      oa.city,
+      oa.state,
+      oa.country,
+      oa.pincode
+
+    FROM seller_units su
+    JOIN orders o ON o.id = su.order_id
+    LEFT JOIN order_addresses oa
+      ON oa.order_id = o.id AND oa.type = 'shipping'
+    WHERE su.id = ? AND su.seller_id = ?
+    LIMIT 1
+    `,
+    [BigInt(sellerUnitId), sellerId],
+  );
+
+  const order = rows[0] ?? null;
+
+  if (!order) return null;
+
+  const items = await sqlQuery<any>(
+    `
+    SELECT
+      oi.id AS order_item_id,
+      oi.product_id,
+      oi.variant_id,
+      oi.qty,
+      oi.price_snapshot,
+      oi.tax_snapshot,
+      oi.discount_snapshot,
+      oi.total_snapshot,
+      oi.item_status,
+
+      p.product_name,
+      p.alias_slug,
+      p.brand
+
+    FROM order_items oi
+    LEFT JOIN products p ON p.id = oi.product_id
+    WHERE oi.order_seller_unit_id = ?
+    ORDER BY oi.id ASC
+    `,
+    [BigInt(sellerUnitId)],
+  );
+
+  return {
+    ...order,
+    items,
+  };
+};
+export const updateSellerOrderStatus = async (
+  sellerId: number,
+  sellerUnitId: string,
+  status: string,
+) => {
+  const allowedStatuses = ['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'];
+
+  if (!allowedStatuses.includes(status)) {
+    throw new Error('Invalid seller order status');
+  }
+
+  const rows = await sqlQuery<any>(
+    `
+    SELECT id, order_id
+    FROM seller_units
+    WHERE id = ? AND seller_id = ?
+    LIMIT 1
+    `,
+    [BigInt(sellerUnitId), sellerId],
+  );
+
+  const sellerUnit = rows[0] ?? null;
+
+  if (!sellerUnit) {
+    throw new Error('Seller order not found');
+  }
+
+  await sqlExec(
+    `
+    UPDATE seller_units
+    SET status = ?, updated_at = NOW()
+    WHERE id = ? AND seller_id = ?
+    `,
+    [status, BigInt(sellerUnitId), sellerId],
+  );
+
+  return {
+    seller_unit_id: sellerUnit.id,
+    order_id: sellerUnit.order_id,
+    status,
+  };
+};

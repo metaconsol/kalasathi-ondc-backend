@@ -140,5 +140,9 @@ export async function resolveStoredToSignedUrl(
 
 /** Permanent readable URL for browsers (`<img src>`). Bucket/objects must allow public read. */
 export async function resolveS3KeyToUrl(key: string): Promise<string> {
-  return buildS3VirtualHostPublicUrl(key);
+  // return buildS3VirtualHostPublicUrl(key);
+  if (env.awsS3UsePublicUrl) {
+    return buildS3VirtualHostPublicUrl(key);
+  }
+  return getSignedGetUrl(key);
 }

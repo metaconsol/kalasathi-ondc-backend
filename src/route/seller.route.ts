@@ -2,6 +2,8 @@ import express from 'express';
 import { validate } from '~/middleware/validate';
 import { sellerAuthMiddleware } from '~/middleware/seller.middleware';
 import { RegisterSchema } from '~/service/auth/auth.schema';
+import * as orderController from '~/controller/order.controller';
+import * as invoiceController from '~/controller/invoice.controller';
 import {
   CreatePickupAndReturnBodySchema,
   CreateStoreBodySchema,
@@ -125,5 +127,9 @@ router.post(
 /** Product CRUD & inventory (same auth as other seller routes) */
 router.use('/stores/:store_id/products', sellerProductRouter);
 router.use('/products', sellerProductRouter);
+router.get('/orders', orderController.listSellerOrders);
+router.get('/orders/:sellerUnitId', orderController.getSellerOrderDetails);
+router.patch('/orders/:sellerUnitId/status', orderController.updateSellerOrderStatus);
+router.get('/orders/:sellerUnitId/invoice', invoiceController.downloadSellerInvoice);
 
 export { router as sellerRouter };

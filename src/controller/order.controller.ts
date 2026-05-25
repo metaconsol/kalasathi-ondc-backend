@@ -257,3 +257,100 @@ function serializeBigInt(obj: any): any {
   }
   return obj;
 }
+
+export const listSellerOrders = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const sellerId = (req as any).user?.id;
+
+    if (!sellerId) {
+      return ApiResponse.unauthorized(res, 'Seller not authenticated');
+    }
+
+    const { status, payment_status, search, page = '1', limit = '20' } = req.query;
+
+    const result = await orderService.listSellerOrders(sellerId, {
+      status: status as string,
+      payment_status: payment_status as string,
+      search: search as string,
+      page: Number(page),
+      limit: Number(limit),
+    });
+
+    return ApiResponse.success(
+      res,
+      'Seller orders fetched successfully',
+      serializeBigInt(result.data),
+      serializeBigInt(result.pagination),
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+export const getSellerOrderDetails = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const sellerId = (req as any).user?.id;
+
+    if (!sellerId) {
+      return ApiResponse.unauthorized(res, 'Seller not authenticated');
+    }
+
+    const sellerUnitId = req.params.sellerUnitId;
+
+    if (!sellerUnitId || Array.isArray(sellerUnitId)) {
+      return ApiResponse.badRequest(res, 'sellerUnitId is required');
+    }
+
+    const result = await orderService.getSellerOrderDetails(sellerId, sellerUnitId);
+
+    if (!result) {
+      return ApiResponse.notFound(res, 'Seller order not found');
+    }
+
+    return ApiResponse.success(
+      res,
+      'Seller order details fetched successfully',
+      serializeBigInt(result),
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+export const updateSellerOrderStatus = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const sellerId = (req as any).user?.id;
+
+    if (!sellerId) {
+      return ApiResponse.unauthorized(res, 'Seller not authenticated');
+    }
+
+    // const { sellerUnitId } = req.params;
+    const sellerUnitId = req.params.sellerUnitId;
+    const { status } = req.body;
+
+    if (!sellerUnitId || Array.isArray(sellerUnitId)) {
+      return ApiResponse.badRequest(res, 'sellerUnitId is required');
+    }
+
+    if (!status) {
+      return ApiResponse.badRequest(res, 'status is required');
+    }
+
+    const result = await orderService.updateSellerOrderStatus(sellerId, sellerUnitId, status);
+
+    return ApiResponse.success(
+      res,
+      'Seller order status updated successfully',
+      serializeBigInt(result),
+    );
+  } catch (error: any) {
+    if (error.message === 'Seller order not found') {
+      return ApiResponse.notFound(res, error.message);
+    }
+
+    if (error.message === 'Invalid seller order status') {
+      return ApiResponse.badRequest(res, error.message);
+    }
+
+    next(error);
+  }
+};
