@@ -14,6 +14,7 @@ import {
 import { ApiResponse } from '~/lib/response';
 import { parseRequiredBigintParam, resolveSellerStoreContext } from './resolveSellerStore';
 import { buildObjectKey, isS3Enabled, putS3Object, resolveS3KeyToUrl } from '~/lib/s3';
+import { UserRole } from '~/lib/userRole';
 
 function sellerProductBodyFromRequest(req: Request): Record<string, unknown> {
   return normalizeProductNestedInBody(
@@ -217,6 +218,10 @@ export const createProduct = async (req: Request, res: Response) => {
 
 export const approveProduct = async (req: Request, res: Response) => {
   try {
+    if (req.user?.role !== UserRole.SUPER_ADMIN) {
+      return ApiResponse.forbidden(res, 'Super admin access required');
+    }
+
     const { productId } = req.params;
 
     // ✅ FIX: validate productId
@@ -232,6 +237,10 @@ export const approveProduct = async (req: Request, res: Response) => {
 
 export const rejectProduct = async (req: Request, res: Response) => {
   try {
+    if (req.user?.role !== UserRole.SUPER_ADMIN) {
+      return ApiResponse.forbidden(res, 'Super admin access required');
+    }
+
     const { productId } = req.params;
     const { reason } = req.body;
 
