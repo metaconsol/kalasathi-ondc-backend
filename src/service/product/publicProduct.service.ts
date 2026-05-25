@@ -244,6 +244,8 @@ async function hydrateProducts(
     return {
       ...p,
       avgRating: toDecString(p.avg_rating ?? p.avgRating),
+      artisanName: p.artisan_name ?? p.artisanName,
+      artisanLocation: p.artisan_location ?? p.artisanLocation,
       defaultPrice: toDecString(p.default_price ?? p.defaultPrice),
       mrp: toDecString(p.mrp),
       images: imgByPid.get(pid) ?? [],
