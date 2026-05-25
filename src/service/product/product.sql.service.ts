@@ -424,6 +424,8 @@ async function loadProductHydrated(storeId: bigint, productId: bigint) {
     storeId: p.store_id,
     categoryId: p.category_id,
     productName: p.product_name,
+    artisanName: p.artisan_name,
+    artisanLocation: p.artisan_location,
     defaultPrice: decString(p.default_price),
     mrp: decString(p.mrp),
     avgRating: decString(p.avg_rating),
@@ -917,12 +919,14 @@ class ProductSqlService {
     try {
       const productId = await withSqlTransaction(async (tx) => {
         const ins = await sqlExec(
-          `INSERT INTO products (store_id, category_id, product_name, district, description, hsn_sac_code, gst_percent, gtin_ean, stock, force_out_of_stock, unit_count, unit_type, brand, manufacturing_month, expiry_date, country_of_origin, sort_order, return_days_window, seller_pickup_return, is_cod_available, publish_status, is_manufacturer, manufacturer_name, manufacturer_address, currency, default_price, mrp, visibility, alias_slug, seo_title, seo_description, seo_keywords, disable_for_bots, availability_mode, cancellable, returnable, time_to_ship_value, time_to_ship_unit, instructions, storage_conditions, included_items, size_chart_url, gi_tag, silk_mark, have_ondc_attributes, product_weight_gm, product_length_cm, product_width_cm, product_height_cm, package_weight_gm, package_length_cm, package_width_cm, package_height_cm, min_purchase_limit, max_purchase_limit, standard_package_qty, low_stock_qty, order_mode, ondc_subcategory)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO products (store_id, category_id, product_name, artisan_name, artisan_location, district, description, hsn_sac_code, gst_percent, gtin_ean, stock, force_out_of_stock, unit_count, unit_type, brand, manufacturing_month, expiry_date, country_of_origin, sort_order, return_days_window, seller_pickup_return, is_cod_available, publish_status, is_manufacturer, manufacturer_name, manufacturer_address, currency, default_price, mrp, visibility, alias_slug, seo_title, seo_description, seo_keywords, disable_for_bots, availability_mode, cancellable, returnable, time_to_ship_value, time_to_ship_unit, instructions, storage_conditions, included_items, size_chart_url, gi_tag, silk_mark, have_ondc_attributes, product_weight_gm, product_length_cm, product_width_cm, product_height_cm, package_weight_gm, package_length_cm, package_width_cm, package_height_cm, min_purchase_limit, max_purchase_limit, standard_package_qty, low_stock_qty, order_mode, ondc_subcategory)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             storeId,
             body.categoryId,
             body.productName,
+            (body as any).artisanName ?? null,
+            (body as any).artisanLocation ?? null,
             (body as any).district ?? '',
             body.description ?? null,
             (body as any).hsnSacCode ?? null,
@@ -1176,6 +1180,10 @@ class ProductSqlService {
         };
 
         if ((body as any).productName !== undefined) set('product_name', (body as any).productName);
+        if ((body as any).artisanName !== undefined)
+          set('artisan_name', (body as any).artisanName ?? null);
+        if ((body as any).artisanLocation !== undefined)
+          set('artisan_location', (body as any).artisanLocation ?? null);
         if ((body as any).categoryId !== undefined) set('category_id', (body as any).categoryId);
         if ((body as any).description !== undefined)
           set('description', (body as any).description ?? null);

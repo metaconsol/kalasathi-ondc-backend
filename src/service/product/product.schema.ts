@@ -15,6 +15,9 @@ export function normalizeSellerProductBody(raw: unknown): Record<string, unknown
   const r = raw as Record<string, unknown>;
   const n: Record<string, unknown> = { ...r };
   if (n.productName == null && r.product_name != null) n.productName = r.product_name;
+  if (n.artisanName == null && r.artisan_name != null) n.artisanName = r.artisan_name;
+  if (n.artisanLocation == null && r.artisan_location != null)
+    n.artisanLocation = r.artisan_location;
   if (n.categoryId == null && r.category_id != null) n.categoryId = r.category_id;
   if (n.defaultPrice == null && r.default_price != null) n.defaultPrice = r.default_price;
   if (n.aliasSlug === undefined && r.alias_slug !== undefined) n.aliasSlug = r.alias_slug;
@@ -467,6 +470,8 @@ const productAttributesPayloadSchema = z
 // Core product row (no nested images/variants in DB sense)
 const productCoreSchema = z.object({
   productName: z.string().min(1, 'Product name is required').max(255),
+  artisanName: z.string().max(255).nullable().optional(),
+  artisanLocation: z.string().max(255).nullable().optional(),
   district: z.string().max(255).optional().default('Unspecified'),
   categoryId: z.coerce.bigint().positive('Category ID must be a positive number'),
   defaultPrice: z.coerce.number().positive('Default price must be positive'),
