@@ -80,6 +80,64 @@ export async function getSignedGetUrl(key: string, expiresIn?: number): Promise<
   });
 }
 
+/** Resolve a stored DB value (either `s3:object/key` or a configured S3 HTTPS URL) to a signed GET URL. */
+export async function resolveStoredToSignedUrl(
+  raw: string | null | undefined,
+  expiresIn?: number,
+): Promise<string | null> {
+  if (raw == null || raw === '') return null;
+  const m = raw.match(/^s3:(.+)$/);
+  if (!isS3Enabled()) return raw;
+  try {
+    if (m) return await getSignedGetUrl(m[1]!, expiresIn);
+
+    // Try to parse known S3 URL formats and extract the object key. Support:
+    // - https://{bucket}.s3.{region}.amazonaws.com/{key}
+    // - https://{bucket}.s3.amazonaws.com/{key}
+    // - https://s3.{region}.amazonaws.com/{bucket}/{key}
+    // - https://s3.amazonaws.com/{bucket}/{key}
+    // Fallback: attempt to remove leading /{bucket}/ from pathname.
+    const url = new URL(raw);
+    if (url.protocol !== 'https:') return raw;
+
+    const host = url.hostname;
+    const path = decodeURIComponent(url.pathname || '');
+
+    // 1) virtual-hosted style: {bucket}.s3.{region}.amazonaws.com or {bucket}.s3.amazonaws.com
+    const virtualHostMatch = host.match(
+      /^(?<bucket>[^.]+)\.s3(?:\.(?<region>[^.]+))?\.amazonaws\.com$/,
+    );
+    if (virtualHostMatch && virtualHostMatch.groups) {
+      const key = path.replace(/^\/+/, '');
+      if (key) return await getSignedGetUrl(key, expiresIn);
+    }
+
+    // 2) path-style: s3.{region}.amazonaws.com/{bucket}/{key} or s3.amazonaws.com/{bucket}/{key}
+    const pathStyleMatch = host.match(/^s3(?:\.(?<region>[^.]+))?\.amazonaws\.com$/);
+    if (pathStyleMatch) {
+      const parts = path.replace(/^\/+/, '').split('/');
+      if (parts.length >= 2) {
+        const bucket = parts.shift();
+        if (bucket === env.awsBucketName) {
+          const key = parts.join('/');
+          if (key) return await getSignedGetUrl(key, expiresIn);
+        }
+      }
+    }
+
+    // 3) Sometimes stored URLs include the bucket as the first segment even on other hosts
+    const fallbackParts = path.replace(/^\/+/, '').split('/');
+    if (fallbackParts.length >= 2 && fallbackParts[0] === env.awsBucketName) {
+      const key = fallbackParts.slice(1).join('/');
+      if (key) return await getSignedGetUrl(key, expiresIn);
+    }
+
+    return raw;
+  } catch {
+    return raw;
+  }
+}
+
 /** Permanent readable URL for browsers (`<img src>`). Bucket/objects must allow public read. */
 export async function resolveS3KeyToUrl(key: string): Promise<string> {
   return buildS3VirtualHostPublicUrl(key);
