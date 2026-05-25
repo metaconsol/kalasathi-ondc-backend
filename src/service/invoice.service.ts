@@ -1,5 +1,5 @@
 import { sqlExec, sqlQuery } from '~/lib/sql';
-import { buildObjectKey, putS3Object, resolveS3KeyToUrl } from '~/lib/s3';
+import { buildObjectKey, getSignedGetUrl, putS3Object } from '~/lib/s3';
 
 export const generateSellerInvoice = async (sellerId: number, sellerUnitId: string) => {
   const PDFDocument = (await import('pdfkit')).default;
@@ -255,22 +255,41 @@ LEFT JOIN order_addresses sa
 
   // TABLE HEADER
   const tableTop = 465;
+  const drawTableHeader = (startY: number) => {
+    doc.rect(leftX, startY, 515, 38).fill('#f2f2f2');
+    doc.fillColor('black').fontSize(8).font('Helvetica-Bold');
 
-  doc.rect(leftX, tableTop, 515, 38).fill('#f2f2f2');
-  doc.fillColor('black').fontSize(8).font('Helvetica-Bold');
+    doc.text('Description', 48, startY + 12, { width: 165 });
+    doc.text('HSN', 220, startY + 12, { width: 45 });
+    doc.text('Qty', 270, startY + 12, { width: 30 });
+    doc.text('Gross', 310, startY + 12, { width: 55 });
+    doc.text('GST %', 370, startY + 12, { width: 45 });
+    doc.text('GST Amt', 420, startY + 12, { width: 60 });
+    doc.text('Total', 490, startY + 12, { width: 60, align: 'right' });
 
-  doc.text('Description', 48, tableTop + 12, { width: 165 });
-  doc.text('HSN', 220, tableTop + 12, { width: 45 });
-  doc.text('Qty', 270, tableTop + 12, { width: 30 });
-  doc.text('Gross', 310, tableTop + 12, { width: 55 });
-  doc.text('GST %', 370, tableTop + 12, { width: 45 });
-  doc.text('GST Amt', 420, tableTop + 12, { width: 60 });
-  doc.text('Total', 490, tableTop + 12, { width: 60, align: 'right' });
+    doc
+      .moveTo(leftX, startY + 38)
+      .lineTo(pageRight, startY + 38)
+      .stroke();
+  };
 
-  doc
-    .moveTo(leftX, tableTop + 38)
-    .lineTo(pageRight, tableTop + 38)
-    .stroke();
+  // doc.rect(leftX, tableTop, 515, 38).fill('#f2f2f2');
+  // doc.fillColor('black').fontSize(8).font('Helvetica-Bold');
+
+  // doc.text('Description', 48, tableTop + 12, { width: 165 });
+  // doc.text('HSN', 220, tableTop + 12, { width: 45 });
+  // doc.text('Qty', 270, tableTop + 12, { width: 30 });
+  // doc.text('Gross', 310, tableTop + 12, { width: 55 });
+  // doc.text('GST %', 370, tableTop + 12, { width: 45 });
+  // doc.text('GST Amt', 420, tableTop + 12, { width: 60 });
+  // doc.text('Total', 490, tableTop + 12, { width: 60, align: 'right' });
+
+  // doc
+  //   .moveTo(leftX, tableTop + 38)
+  //   .lineTo(pageRight, tableTop + 38)
+  //   .stroke();
+
+  drawTableHeader(tableTop);
 
   let y = tableTop + 52;
 
@@ -295,9 +314,15 @@ LEFT JOIN order_addresses sa
     gstTotal += gstAmt;
     grandTotal += total;
 
-    if (y > 720) {
+    // if (y > 720) {
+    //   doc.addPage();
+    //   y = 60;
+    // }
+    if (y > 700) {
       doc.addPage();
-      y = 60;
+
+      drawTableHeader(60);
+      y = 112;
     }
 
     doc.fontSize(8).font('Helvetica');
@@ -315,6 +340,13 @@ LEFT JOIN order_addresses sa
 
     y += 45;
   });
+  const summaryHeight = 150;
+
+  if (y + summaryHeight > 740) {
+    doc.addPage();
+    drawTableHeader(60);
+    y = 112;
+  }
 
   doc
     .moveTo(leftX, y + 10)
@@ -365,7 +397,7 @@ LEFT JOIN order_addresses sa
   const objectKey = buildObjectKey('uploads/invoices', fileName);
   await putS3Object(objectKey, pdfBuffer, 'application/pdf');
 
-  const invoiceUrl = await resolveS3KeyToUrl(objectKey);
+  const invoiceUrl = await getSignedGetUrl(objectKey);
 
   await sqlExec(
     `
