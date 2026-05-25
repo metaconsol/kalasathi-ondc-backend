@@ -82,7 +82,7 @@ export const getSellerRequests = async (req: Request, res: Response, next: NextF
         u.email,
         u.phoneNumber
        FROM seller_profiles sp
-       JOIN user u ON u.id = sp.user_id
+       JOIN User u ON u.id = sp.user_id
        ORDER BY sp.created_at DESC`,
     );
 
@@ -209,7 +209,7 @@ export const getDistrictSellerRequests = async (
         u.email,
         u.phoneNumber
       FROM seller_profiles sp
-      JOIN user u ON u.id = sp.user_id
+      JOIN User u ON u.id = sp.user_id
     `;
 
     const params: any[] = [];
