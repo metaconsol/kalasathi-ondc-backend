@@ -1217,7 +1217,11 @@ class PublicProductService {
         { variantLimit: 12, withServiceability: false },
       );
 
-      return ApiResponse.success(res, 'Related products fetched successfully', related);
+      return ApiResponse.success(
+        res,
+        'Related products fetched successfully',
+        related.map(toPublicProductCard),
+      );
     } catch (error) {
       return ApiResponse.serverError(res, 'Error fetching related products', error);
     }
