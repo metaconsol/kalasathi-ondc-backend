@@ -495,6 +495,7 @@ export const createOrder = async (userId: number, data: any) => {
       (
         order_id,
         type,
+        address_type,
         full_name,
         phone,
         address_line1,
@@ -504,10 +505,11 @@ export const createOrder = async (userId: number, data: any) => {
         country,
         pincode
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           orderId,
           addr.type,
+          addr.address_label ?? addr.address_type ?? null,
           addr.full_name,
           addr.phone,
           addr.address_line1,
