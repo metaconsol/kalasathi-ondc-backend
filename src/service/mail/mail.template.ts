@@ -19,7 +19,7 @@ export class MailTemplate {
           <div style="background:#584133;color:#fff;padding:32px 24px;text-align:center;border-radius:18px 18px 0 0;">
 
             <img
-              src="${process.env.SERVER_URL}/uploads/odop-logo.jpeg"
+              src="${process.env.SERVER_URL}/uploads/odop-logo.png"
               alt="ODOP Mart"
               style="
                 max-width:180px;
