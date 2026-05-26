@@ -123,7 +123,7 @@ LEFT JOIN order_addresses sa
   // doc.font('Helvetica-Bold').fontSize(20).text('TAX INVOICE', 0, 45, {
   //   align: 'center',
   // });
-  const logoPath = path.join(process.cwd(), 'public', 'uploads', 'odop-logo.jpeg');
+  const logoPath = path.join(process.cwd(), 'public', 'uploads', 'odop-logo.png');
 
   if (fs.existsSync(logoPath)) {
     doc.image(logoPath, leftX, 45, {
