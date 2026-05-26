@@ -19,6 +19,7 @@ import { wishlistRouter } from './wishlist.route';
 import { reviewRouter } from './review.route';
 import { ticketRouter } from './ticket.route';
 import bulkOrderRouter from './bulkOrder.route';
+import ondcRouter from '~/ondc/routes/index';
 
 const router = express.Router();
 
@@ -65,6 +66,9 @@ router.use('/tickets', ticketRouter);
 // Bulk Order
 router.use('/bulk-order', bulkOrderRouter);
 
-//Search
+/**
+ * ONDC Integration — all Beckn protocol & admin endpoints
+ */
+router.use('/ondc', ondcRouter);
 
 export default router;

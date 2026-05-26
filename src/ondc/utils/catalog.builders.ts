@@ -1,0 +1,749 @@
+/**
+ * Domain-aware ONDC payload builders for /on_search, /on_select, /on_init, /on_confirm.
+ * Builds payloads matching the ONDC retail API contract v1.2.0 exactly.
+ */
+
+import { ondcEnv } from '~/config/ondc.config';
+import { SELLER_PROFILE } from '~/ondc/config/constants';
+import {
+  getDomainConfig,
+  FULFILLMENT_CATEGORIES,
+  type OndcRetailDomain,
+} from '~/ondc/config/domain.config';
+/** Minimal provider info needed to build a bpp/providers entry — replaces ProviderBuildInfo */
+export interface ProviderBuildInfo {
+  provider_id: string;
+  name: string;
+  short_desc?: string | null;
+  long_desc?: string | null;
+  logo_url?: string | null;
+  fssai_license?: string | null;
+  updated_at?: Date | string | null;
+}
+
+// ─── Provider tags ─────────────────────────────────────────────────────────
+
+/**
+ * Build provider-level tags for on_search.
+ * Includes: serviceability, timing, bpp_terms, bap_terms.
+ */
+export function buildProviderTags(
+  providerRow: ProviderBuildInfo,
+  domain: OndcRetailDomain,
+  locationId: string,
+  categoryId: string,
+  serviceabilityRadiusKm: number = 10,
+): object[] {
+  const tags: object[] = [];
+
+  // 1. Serviceability — what areas this provider serves
+  tags.push({
+    code: 'serviceability',
+    list: [
+      { code: 'location', value: locationId },
+      { code: 'category', value: categoryId },
+      { code: 'type', value: '10' }, // 10=hyperlocal, 11=intercity, 12=pan-India
+      { code: 'val', value: String(serviceabilityRadiusKm) },
+      { code: 'unit', value: 'km' },
+    ],
+  });
+
+  // 2. Timing — when this provider accepts orders / does delivery
+  tags.push({
+    code: 'timing',
+    list: [
+      { code: 'type', value: 'Order' },
+      { code: 'location', value: locationId },
+      { code: 'day_from', value: '1' },
+      { code: 'day_to', value: '7' },
+      { code: 'time_from', value: '0900' },
+      { code: 'time_to', value: '2100' },
+    ],
+  });
+
+  tags.push({
+    code: 'timing',
+    list: [
+      { code: 'type', value: 'Delivery' },
+      { code: 'location', value: locationId },
+      { code: 'day_from', value: '1' },
+      { code: 'day_to', value: '7' },
+      { code: 'time_from', value: '0900' },
+      { code: 'time_to', value: '2100' },
+    ],
+  });
+
+  // 3. BPP terms — non-negotiable terms for buyer app
+  tags.push({
+    code: 'bpp_terms',
+    list: [
+      { code: 'np_type', value: 'MSN' }, // Multi-Seller Network
+      { code: 'accept_bap_terms', value: 'Y' },
+      { code: 'collect_payment', value: 'N' }, // BAP collects (prepaid)
+    ],
+  });
+
+  // FSSAI license for grocery (RET10)
+  const cfg = getDomainConfig(domain);
+  if (cfg.requiresFssai && providerRow.fssai_license) {
+    tags.push({
+      code: '@ondc/org/fssai_license_no',
+      list: [{ code: 'fssai_license_no', value: providerRow.fssai_license }],
+    });
+  }
+
+  return tags;
+}
+
+// ─── Item tags ─────────────────────────────────────────────────────────────
+
+export interface ItemTagInputs {
+  domain: OndcRetailDomain;
+  brand?: string | undefined;
+  colour?: string | undefined;
+  size?: string | undefined;
+  gender?: string | undefined;
+  material?: string | undefined;
+  /** For RET10 grocery only */
+  isVeg?: boolean | undefined;
+  /** Image type variants (front_view, back_view, side_view, etc.) */
+  imageType?: string | undefined;
+  /** Origin country code (defaults to IND) */
+  originCountry?: string | undefined;
+  /** Statutory: packaged commodities (g2) */
+  packagedCommodity?:
+    | {
+        manufacturerOrPackerName?: string | undefined;
+        manufacturerOrPackerAddress?: string | undefined;
+        commonOrGenericNameOfCommodity?: string | undefined;
+        monthYearOfManufacture?: string | undefined;
+        importedProductCountryOfOrigin?: string | undefined;
+      }
+    | undefined;
+  /** Statutory: prepackaged food (g3) — RET10 only */
+  prepackagedFood?:
+    | {
+        nutritionalInfo?: string | undefined;
+        additivesInfo?: string | undefined;
+        brandOwnerName?: string | undefined;
+        brandOwnerFssaiLicense?: string | undefined;
+        importerName?: string | undefined;
+        importerFssaiLicense?: string | undefined;
+        netQuantity?: string | undefined;
+      }
+    | undefined;
+}
+
+/** Build item-level tags per ONDC contract */
+export function buildItemTags(inp: ItemTagInputs): object[] {
+  const tags: object[] = [];
+  const cfg = getDomainConfig(inp.domain);
+
+  // origin
+  tags.push({
+    code: 'origin',
+    list: [{ code: 'country', value: inp.originCountry ?? 'IND' }],
+  });
+
+  // image (variant)
+  if (inp.imageType) {
+    tags.push({
+      code: 'image',
+      list: [{ code: 'type', value: inp.imageType }],
+    });
+  }
+
+  // veg_nonveg — mandatory for RET10 grocery
+  if (cfg.requiresVegNonveg) {
+    tags.push({
+      code: 'veg_nonveg',
+      list: [{ code: inp.isVeg ? 'veg' : 'non_veg', value: 'yes' }],
+    });
+  }
+
+  // attribute — domain-specific
+  const attrs: Array<{ code: string; value: string }> = [];
+  if (inp.brand) attrs.push({ code: 'brand', value: inp.brand });
+  if (inp.colour) attrs.push({ code: 'colour', value: inp.colour });
+  if (inp.size) attrs.push({ code: 'size', value: inp.size });
+  if (inp.gender) attrs.push({ code: 'gender', value: inp.gender });
+  if (inp.material) attrs.push({ code: 'material', value: inp.material });
+  if (attrs.length) {
+    tags.push({ code: 'attribute', list: attrs });
+  }
+
+  // g2 — statutory_reqs_packaged_commodities (optional but commonly required)
+  if (inp.packagedCommodity) {
+    const pc = inp.packagedCommodity;
+    const g2: Array<{ code: string; value: string }> = [];
+    if (pc.manufacturerOrPackerName)
+      g2.push({ code: 'manufacturer_or_packer_name', value: pc.manufacturerOrPackerName });
+    if (pc.manufacturerOrPackerAddress)
+      g2.push({ code: 'manufacturer_or_packer_address', value: pc.manufacturerOrPackerAddress });
+    if (pc.commonOrGenericNameOfCommodity)
+      g2.push({
+        code: 'common_or_generic_name_of_commodity',
+        value: pc.commonOrGenericNameOfCommodity,
+      });
+    if (pc.monthYearOfManufacture)
+      g2.push({
+        code: 'month_year_of_manufacture_packing_import',
+        value: pc.monthYearOfManufacture,
+      });
+    if (pc.importedProductCountryOfOrigin)
+      g2.push({
+        code: 'imported_product_country_of_origin',
+        value: pc.importedProductCountryOfOrigin,
+      });
+    if (g2.length) tags.push({ code: 'g2', list: g2 });
+  }
+
+  // g3 — statutory_reqs_prepackaged_food (RET10 mandatory if applicable)
+  if (cfg.requiresFoodStatutory && inp.prepackagedFood) {
+    const pf = inp.prepackagedFood;
+    const g3: Array<{ code: string; value: string }> = [];
+    if (pf.nutritionalInfo) g3.push({ code: 'nutritional_info', value: pf.nutritionalInfo });
+    if (pf.additivesInfo) g3.push({ code: 'additives_info', value: pf.additivesInfo });
+    if (pf.brandOwnerName) g3.push({ code: 'brand_owner_name', value: pf.brandOwnerName });
+    if (pf.brandOwnerFssaiLicense)
+      g3.push({ code: 'brand_owner_FSSAI_license', value: pf.brandOwnerFssaiLicense });
+    if (pf.importerName) g3.push({ code: 'importer_name', value: pf.importerName });
+    if (pf.importerFssaiLicense)
+      g3.push({ code: 'importer_FSSAI_license', value: pf.importerFssaiLicense });
+    if (pf.netQuantity) g3.push({ code: 'net_quantity', value: pf.netQuantity });
+    if (g3.length) tags.push({ code: 'g3', list: g3 });
+  }
+
+  return tags;
+}
+
+// ─── Provider location ─────────────────────────────────────────────────────
+
+export interface ProviderLocation {
+  id: string;
+  gps: string; // "lat,lng"
+  address: {
+    locality: string;
+    street: string;
+    city: string;
+    area_code: string;
+    state: string;
+  };
+  circle?: {
+    gps: string;
+    radius: { type: string; value: string; unit: string };
+  };
+  time: {
+    label: string;
+    timestamp: string;
+    days: string;
+    schedule: { holidays: string[] };
+    range: { start: string; end: string };
+  };
+}
+
+export function buildProviderLocation(
+  locationId: string,
+  gps: string,
+  address: ProviderLocation['address'],
+  serviceRadiusKm: number = 10,
+  timeFrom: string = '0900',
+  timeTo: string = '2100',
+  days: string = '1,2,3,4,5,6,7',
+): ProviderLocation {
+  return {
+    id: locationId,
+    gps,
+    address,
+    circle: {
+      gps,
+      radius: { type: 'constant', value: String(serviceRadiusKm), unit: 'km' },
+    },
+    time: {
+      label: 'enable',
+      timestamp: new Date().toISOString(),
+      days,
+      schedule: { holidays: [] },
+      range: { start: timeFrom, end: timeTo },
+    },
+  };
+}
+
+// ─── BPP catalog descriptor ────────────────────────────────────────────────
+
+export function buildBppDescriptor() {
+  return {
+    name: SELLER_PROFILE.BRAND_NAME || 'ODOP Mart',
+    symbol: `${ondcEnv.baseUri}/logo.png`,
+    short_desc: 'ODOP Products Marketplace',
+    long_desc: 'One District One Product e-commerce platform powered by ONDC',
+    images: [`${ondcEnv.baseUri}/logo.png`],
+    tags: [
+      {
+        code: 'bpp_terms',
+        list: [
+          { code: 'np_type', value: 'MSN' },
+          { code: 'accept_bap_terms', value: 'Y' },
+          { code: 'collect_payment', value: 'N' },
+        ],
+      },
+    ],
+  };
+}
+
+// ─── BPP fulfillments + payments ───────────────────────────────────────────
+
+export function buildBppFulfillments() {
+  return [
+    {
+      id: 'F1',
+      type: 'Delivery',
+      '@ondc/org/category': FULFILLMENT_CATEGORIES.Delivery.Standard,
+      '@ondc/org/TAT': 'P1D',
+      contact: { phone: SELLER_PROFILE.SUPPORT_PHONE, email: SELLER_PROFILE.SUPPORT_EMAIL },
+    },
+    {
+      id: 'F2',
+      type: 'Self-Pickup',
+      contact: { phone: SELLER_PROFILE.SUPPORT_PHONE, email: SELLER_PROFILE.SUPPORT_EMAIL },
+    },
+  ];
+}
+
+export function buildBppPayments() {
+  return [
+    {
+      '@ondc/org/buyer_app_finder_fee_type': 'percent',
+      '@ondc/org/buyer_app_finder_fee_amount': ondcEnv.buyerFinderFeeDefault,
+    },
+  ];
+}
+
+// ─── ONDC item builder (used by adapter) ───────────────────────────────────
+
+export interface BuildOndcItemInput {
+  productId: number;
+  ondcItemId: string;
+  name: string;
+  shortDesc: string;
+  longDesc: string;
+  images: string[];
+  price: number;
+  mrp: number;
+  stock: number;
+  categoryCode: string;
+  domain: OndcRetailDomain;
+  fulfillmentId: string;
+  locationId: string;
+  /** ONDC compliance flags */
+  returnable: boolean;
+  cancellable: boolean;
+  returnWindow: string;
+  timeToShip: string;
+  sellerPickupReturn: boolean;
+  availableOnCod: boolean;
+  consumerCareContact: string;
+  /** Domain-specific attributes (passed to buildItemTags) */
+  attributes?: Omit<ItemTagInputs, 'domain'> | undefined;
+  /** Optional unit-of-measure */
+  unit?: { unit: string; value: string } | undefined;
+}
+
+export function buildOndcItem(inp: BuildOndcItemInput): object {
+  return {
+    id: inp.ondcItemId,
+    descriptor: {
+      name: inp.name,
+      symbol: inp.images[0],
+      short_desc: inp.shortDesc.slice(0, 200),
+      long_desc: inp.longDesc,
+      images: inp.images,
+    },
+    quantity: {
+      ...(inp.unit ? { unitized: { measure: inp.unit } } : {}),
+      available: { count: String(Math.min(99, inp.stock)) },
+      maximum: { count: String(Math.min(10, inp.stock)) },
+    },
+    price: {
+      currency: 'INR',
+      value: inp.price.toFixed(2),
+      maximum_value: inp.mrp.toFixed(2),
+    },
+    category_id: inp.categoryCode,
+    fulfillment_id: inp.fulfillmentId,
+    location_id: inp.locationId,
+
+    '@ondc/org/returnable': inp.returnable,
+    '@ondc/org/cancellable': inp.cancellable,
+    '@ondc/org/return_window': inp.returnWindow,
+    '@ondc/org/seller_pickup_return': inp.sellerPickupReturn,
+    '@ondc/org/time_to_ship': inp.timeToShip,
+    '@ondc/org/available_on_cod': inp.availableOnCod,
+    '@ondc/org/contact_details_consumer_care': inp.consumerCareContact,
+
+    tags: buildItemTags({ domain: inp.domain, ...(inp.attributes ?? {}) }),
+  };
+}
+
+// ─── Cancellation terms (per ONDC contract — all 7 phases required) ────────
+
+export const COMPLETE_CANCELLATION_TERMS = [
+  {
+    fulfillment_state: {
+      descriptor: { code: 'Pending', short_desc: '001,002,005,009,010,011,012,013,014,015' },
+    },
+    reason_required: false,
+    cancellation_fee: { percentage: '0.0', amount: { currency: 'INR', value: '0.0' } },
+  },
+  {
+    fulfillment_state: { descriptor: { code: 'Packed', short_desc: '001,003,004,010,014,016' } },
+    reason_required: true,
+    cancellation_fee: { percentage: '0.0', amount: { currency: 'INR', value: '0.0' } },
+  },
+  {
+    fulfillment_state: {
+      descriptor: { code: 'Agent-assigned', short_desc: '001,003,004,010,014,016' },
+    },
+    reason_required: true,
+    cancellation_fee: { percentage: '0.0', amount: { currency: 'INR', value: '0.0' } },
+  },
+  {
+    fulfillment_state: {
+      descriptor: { code: 'Order-picked-up', short_desc: '001,003,004,010,014,016,018' },
+    },
+    reason_required: true,
+    cancellation_fee: { percentage: '10.0', amount: { currency: 'INR', value: '10.0' } },
+  },
+  {
+    fulfillment_state: {
+      descriptor: { code: 'Out-for-delivery', short_desc: '003,004,010,014,016,018' },
+    },
+    reason_required: true,
+    cancellation_fee: { percentage: '10.0', amount: { currency: 'INR', value: '10.0' } },
+  },
+];
+
+// ─── Quote breakup builder (per-item, with delivery, packing, tax) ─────────
+
+export interface QuoteLineInput {
+  itemId: string;
+  itemName: string;
+  unitPrice: number;
+  quantity: number;
+  stockAvailable: number;
+  stockMaximum: number;
+  taxPercent?: number;
+}
+
+export interface QuoteBuildOutput {
+  price: { currency: string; value: string };
+  breakup: object[];
+  ttl: string;
+}
+
+export function buildQuote(
+  lines: QuoteLineInput[],
+  fulfillmentId: string = 'F1',
+  deliveryCharge: number = 0,
+  packingCharge: number = 0,
+  convenienceFee: number = 0,
+): QuoteBuildOutput {
+  const breakup: object[] = [];
+  let total = 0;
+  let totalTax = 0;
+
+  for (const l of lines) {
+    const lineTotal = l.unitPrice * l.quantity;
+    total += lineTotal;
+
+    breakup.push({
+      '@ondc/org/item_id': l.itemId,
+      '@ondc/org/item_quantity': { count: l.quantity },
+      title: l.itemName,
+      '@ondc/org/title_type': 'item',
+      price: { currency: 'INR', value: lineTotal.toFixed(2) },
+      item: {
+        quantity: {
+          available: { count: String(Math.min(99, l.stockAvailable)) },
+          maximum: { count: String(Math.min(10, l.stockMaximum)) },
+        },
+        price: { currency: 'INR', value: l.unitPrice.toFixed(2) },
+      },
+    });
+
+    if (l.taxPercent && l.taxPercent > 0) {
+      const tax = (lineTotal * l.taxPercent) / 100;
+      totalTax += tax;
+      breakup.push({
+        '@ondc/org/item_id': l.itemId,
+        '@ondc/org/item_quantity': { count: l.quantity },
+        title: 'Tax',
+        '@ondc/org/title_type': 'tax',
+        price: { currency: 'INR', value: tax.toFixed(2) },
+      });
+    }
+  }
+
+  total += totalTax;
+
+  if (deliveryCharge > 0) {
+    breakup.push({
+      '@ondc/org/item_id': fulfillmentId,
+      title: 'Delivery charges',
+      '@ondc/org/title_type': 'delivery',
+      price: { currency: 'INR', value: deliveryCharge.toFixed(2) },
+    });
+    total += deliveryCharge;
+  }
+
+  if (packingCharge > 0) {
+    breakup.push({
+      '@ondc/org/item_id': fulfillmentId,
+      title: 'Packing charges',
+      '@ondc/org/title_type': 'packing',
+      price: { currency: 'INR', value: packingCharge.toFixed(2) },
+    });
+    total += packingCharge;
+  }
+
+  if (convenienceFee > 0) {
+    breakup.push({
+      '@ondc/org/item_id': fulfillmentId,
+      title: 'Convenience Fee',
+      '@ondc/org/title_type': 'misc',
+      price: { currency: 'INR', value: convenienceFee.toFixed(2) },
+    });
+    total += convenienceFee;
+  }
+
+  return {
+    price: { currency: 'INR', value: total.toFixed(2) },
+    breakup,
+    ttl: 'PT30M',
+  };
+}
+
+// ─── On_init payment with settlement_details ───────────────────────────────
+
+export interface SettlementDetails {
+  upiAddress?: string;
+  bankAccountNo?: string;
+  ifscCode?: string;
+  beneficiaryName?: string;
+  bankName?: string;
+  branchName?: string;
+}
+
+export function buildOnInitPayment(total: number, settlement?: SettlementDetails): object {
+  return {
+    type: 'ON-ORDER',
+    collected_by: 'BAP',
+    status: 'NOT-PAID',
+    params: {
+      amount: total.toFixed(2),
+      currency: 'INR',
+    },
+    '@ondc/org/buyer_app_finder_fee_type': 'percent',
+    '@ondc/org/buyer_app_finder_fee_amount': ondcEnv.buyerFinderFeeDefault,
+    '@ondc/org/settlement_basis': 'delivery',
+    '@ondc/org/settlement_window': 'P1D',
+    '@ondc/org/withholding_amount': '0.00',
+    '@ondc/org/settlement_details': [
+      {
+        settlement_counterparty: 'seller-app',
+        settlement_phase: 'sale-amount',
+        settlement_type: 'upi',
+        upi_address: settlement?.upiAddress ?? 'mrignayanee@ybl',
+        settlement_bank_account_no: settlement?.bankAccountNo ?? 'XXXXXXXXXXX',
+        settlement_ifsc_code: settlement?.ifscCode ?? 'XXXXXXX',
+        beneficiary_name: settlement?.beneficiaryName ?? SELLER_PROFILE.COMPANY_NAME,
+        bank_name: settlement?.bankName ?? 'HDFC Bank',
+        branch_name: settlement?.branchName ?? 'Main Branch',
+      },
+    ],
+  };
+}
+
+// ─── Build full bpp/providers entry from a row + items ─────────────────────
+
+export function buildProviderEntry(
+  providerRow: ProviderBuildInfo,
+  items: object[],
+  domain: OndcRetailDomain,
+  locations: ProviderLocation[] = [],
+  variantCategories: VariantCategory[] = [],
+): object {
+  const cfg = getDomainConfig(domain);
+
+  // Use first location id for tags; fallback 'L1' if no locations
+  const firstLocId = locations[0]?.id ?? 'L1';
+
+  // Build a default fallback location if none provided
+  const resolvedLocations: ProviderLocation[] =
+    locations.length > 0
+      ? locations
+      : [
+          buildProviderLocation('L1', '23.259933,77.412613', {
+            locality: '',
+            street: '',
+            city: SELLER_PROFILE.CITY,
+            area_code: SELLER_PROFILE.AREA_CODE,
+            state: SELLER_PROFILE.STATE,
+          }),
+        ];
+
+  const categories: object[] = [
+    {
+      id: cfg.defaultCategoryCode,
+      descriptor: { name: cfg.defaultCategoryCode, code: cfg.defaultCategoryCode },
+    },
+    ...variantCategories,
+  ];
+
+  return {
+    id: providerRow.provider_id,
+    time: {
+      label: 'enable',
+      timestamp:
+        providerRow.updated_at instanceof Date
+          ? providerRow.updated_at.toISOString()
+          : providerRow.updated_at
+            ? new Date(providerRow.updated_at).toISOString()
+            : new Date().toISOString(),
+    },
+    fulfillments: buildBppFulfillments(),
+    descriptor: {
+      name: providerRow.name,
+      symbol: providerRow.logo_url ?? '',
+      short_desc: providerRow.short_desc ?? '',
+      long_desc: providerRow.long_desc ?? '',
+      images: providerRow.logo_url ? [providerRow.logo_url] : [],
+    },
+    '@ondc/org/fssai_license_no': cfg.requiresFssai ? (providerRow.fssai_license ?? '') : undefined,
+    ttl: 'PT24H',
+    locations: resolvedLocations,
+    categories,
+    items,
+    tags: buildProviderTags(providerRow, domain, firstLocId, cfg.defaultCategoryCode),
+  };
+}
+
+// ─── Variant grouping ──────────────────────────────────────────────────────
+
+/**
+ * Sets parent_item_id on variant siblings and emits the variant_group categories.
+ * Mirrors PHP _ensure_variant_support + _add_variant_catalog_data:
+ *   - groups with <2 members have no parent_item_id (they're standalone items)
+ *   - each group contributes a category {id, descriptor, tags: [type=variant_group, attr...]}
+ *   - attr tags reference item.tags.attribute.<code> based on which attributes vary
+ *
+ * Input items must carry _variantGroupId (consumed and stripped).
+ */
+export interface ItemWithVariantMeta {
+  // Mutable OndcItem fields
+  id: string;
+  parent_item_id?: string;
+  tags?: Array<{ code: string; list: Array<{ code: string; value: string }> }>;
+  [k: string]: unknown;
+  // Internal grouping key, stripped before output
+  _variantGroupId?: string;
+}
+
+export interface VariantCategory {
+  id: string;
+  descriptor: { name: string };
+  tags: Array<{ code: string; list: Array<{ code: string; value: string }> }>;
+}
+
+const VARIANT_ATTR_PRIORITY: Record<string, number> = {
+  colour: 1,
+  size: 2,
+  measure: 3,
+  material: 4,
+  fabric: 5,
+  weight: 6,
+  length: 7,
+  breadth: 8,
+  height: 9,
+};
+
+export function applyVariantGrouping(items: ItemWithVariantMeta[]): {
+  items: ItemWithVariantMeta[];
+  categories: VariantCategory[];
+} {
+  const groups = new Map<string, number[]>();
+  items.forEach((it, idx) => {
+    const gid = it._variantGroupId ?? '';
+    if (!gid) return;
+    const arr = groups.get(gid) ?? [];
+    arr.push(idx);
+    groups.set(gid, arr);
+  });
+
+  const categories: VariantCategory[] = [];
+
+  for (const [groupId, idxs] of groups.entries()) {
+    if (idxs.length < 2) continue;
+
+    // Collect which attribute codes vary across siblings
+    const valuesByCode = new Map<string, Set<string>>();
+    const orderedCodes: string[] = [];
+
+    for (const idx of idxs) {
+      const it = items[idx]!;
+      for (const tag of it.tags ?? []) {
+        if (tag.code.toLowerCase() !== 'attribute') continue;
+        for (const entry of tag.list ?? []) {
+          const codeRaw = (entry.code ?? '').toLowerCase().trim();
+          const code = codeRaw === 'color' ? 'colour' : codeRaw;
+          if (!code || code === 'colour_name' || code === 'color_name') continue;
+          const value = (entry.value ?? '').trim();
+          if (!value) continue;
+          if (!valuesByCode.has(code)) {
+            valuesByCode.set(code, new Set());
+            orderedCodes.push(code);
+          }
+          valuesByCode.get(code)!.add(value);
+        }
+      }
+    }
+
+    const varyingCodes = orderedCodes.filter((c) => (valuesByCode.get(c)?.size ?? 0) > 1);
+    if (varyingCodes.length === 0) continue;
+
+    varyingCodes.sort((a, b) => {
+      const pa = VARIANT_ATTR_PRIORITY[a] ?? 999;
+      const pb = VARIANT_ATTR_PRIORITY[b] ?? 999;
+      return pa === pb ? a.localeCompare(b) : pa - pb;
+    });
+
+    // Apply parent_item_id to siblings
+    for (const idx of idxs) {
+      items[idx]!.parent_item_id = groupId;
+    }
+
+    const catTags: VariantCategory['tags'] = [
+      { code: 'type', list: [{ code: 'type', value: 'variant_group' }] },
+    ];
+    varyingCodes.forEach((code, i) => {
+      catTags.push({
+        code: 'attr',
+        list: [
+          { code: 'name', value: `item.tags.attribute.${code}` },
+          { code: 'seq', value: String(i + 1) },
+        ],
+      });
+    });
+
+    categories.push({
+      id: groupId,
+      descriptor: { name: `Variant Group ${groupId}` },
+      tags: catTags,
+    });
+  }
+
+  // Strip internal field from all items
+  const cleaned = items.map(({ _variantGroupId, ...rest }) => rest as ItemWithVariantMeta);
+
+  return { items: cleaned, categories };
+}

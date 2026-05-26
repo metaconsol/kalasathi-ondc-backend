@@ -774,20 +774,31 @@ class PublicProductService {
       const limit = Number(req.query.limit) || 10;
       const offset = (page - 1) * limit;
       const isSuperAdmin = req.user.role === UserRole.SUPER_ADMIN;
+
+      // Check if admin has any district assignments; if not, show all products
+      let useDistrictFilter = false;
+      if (!isSuperAdmin) {
+        const assignmentCheck = await sqlQuery<{ cnt: number }>(
+          'SELECT COUNT(*) AS cnt FROM admin_district_assignments WHERE admin_id = ?',
+          [req.user.id],
+        );
+        useDistrictFilter = Number(assignmentCheck?.[0]?.cnt || 0) > 0;
+      }
+
+      const districtJoin = useDistrictFilter
+        ? 'JOIN admin_district_assignments ada ON ada.admin_id = ? AND LOWER(TRIM(ada.district_name)) = LOWER(TRIM(p.district))'
+        : '';
+
       const countRows = await sqlQuery<{ total: number }>(
-        `
-      SELECT COUNT(*) AS total
-      FROM products p
-      ${isSuperAdmin ? '' : 'JOIN admin_district_assignments ada ON ada.admin_id = ? AND LOWER(TRIM(ada.district_name)) = LOWER(TRIM(p.district))'}
-      `,
-        isSuperAdmin ? [] : [req.user.id],
+        `SELECT COUNT(*) AS total FROM products p ${districtJoin}`,
+        useDistrictFilter ? [req.user.id] : [],
       );
       const total = Number(countRows?.[0]?.total || 0);
       const totalPages = Math.max(1, Math.ceil(total / limit));
 
       const rows = await sqlQuery<any>(
         `
-      SELECT 
+      SELECT
         p.*,
 
         v.approval_status AS approval_status,
@@ -801,21 +812,21 @@ class PublicProductService {
 
       FROM products p
 
-      LEFT JOIN product_verification v 
+      LEFT JOIN product_verification v
         ON v.product_id = p.id
 
-      LEFT JOIN stores s 
+      LEFT JOIN stores s
         ON s.id = p.store_id
 
-      LEFT JOIN categories c 
+      LEFT JOIN categories c
         ON c.id = p.category_id
 
-      ${isSuperAdmin ? '' : 'JOIN admin_district_assignments ada ON ada.admin_id = ? AND LOWER(TRIM(ada.district_name)) = LOWER(TRIM(p.district))'}
+      ${districtJoin}
 
       ORDER BY p.created_at DESC
       LIMIT ? OFFSET ?
       `,
-        isSuperAdmin ? [limit, offset] : [req.user.id, limit, offset],
+        useDistrictFilter ? [req.user.id, limit, offset] : [limit, offset],
       );
 
       const products = await hydrateProducts(

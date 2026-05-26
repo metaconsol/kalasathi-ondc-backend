@@ -1,0 +1,45 @@
+{
+  "_comment": "Maps internal product category IDs to ONDC domain + category_id combos. Adapt to your actual category table.",
+  "mappings": [
+    {
+      "internal_category_id": 1,
+      "internal_category_name": "Handicrafts",
+      "ondc_domain": "ONDC:RET12",
+      "ondc_category_id": "Handicrafts",
+      "ondc_category_name": "Handicrafts"
+    },
+    {
+      "internal_category_id": 2,
+      "internal_category_name": "Handloom",
+      "ondc_domain": "ONDC:RET12",
+      "ondc_category_id": "Handloom",
+      "ondc_category_name": "Handloom"
+    },
+    {
+      "internal_category_id": 3,
+      "internal_category_name": "Apparel",
+      "ondc_domain": "ONDC:RET12",
+      "ondc_category_id": "Clothing",
+      "ondc_category_name": "Clothing"
+    },
+    {
+      "internal_category_id": 4,
+      "internal_category_name": "Home Decor",
+      "ondc_domain": "ONDC:RET16",
+      "ondc_category_id": "Home Decor",
+      "ondc_category_name": "Home Decor"
+    },
+    {
+      "internal_category_id": 5,
+      "internal_category_name": "Jewellery",
+      "ondc_domain": "ONDC:RET12",
+      "ondc_category_id": "Jewellery",
+      "ondc_category_name": "Jewellery"
+    }
+  ],
+  "default": {
+    "ondc_domain": "ONDC:RET12",
+    "ondc_category_id": "Handicrafts",
+    "ondc_category_name": "Handicrafts"
+  }
+}

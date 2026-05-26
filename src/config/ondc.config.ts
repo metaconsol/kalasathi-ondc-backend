@@ -1,0 +1,54 @@
+/**
+ * ONDC environment configuration.
+ * Reads from process.env (populated from .env.ondc via dotenv).
+ */
+
+function requireEnv(key: string): string {
+  const val = process.env[key];
+  if (!val) throw new Error(`Missing required ONDC env var: ${key}`);
+  return val;
+}
+
+function optionalEnv(key: string, fallback = ''): string {
+  return process.env[key] ?? fallback;
+}
+
+export const ondcEnv = {
+  // Network identity
+  subscriberId: requireEnv('BPP_SUBSCRIBER_ID'),
+  uniqueKeyId: requireEnv('BPP_UNIQUE_KEY_ID'),
+  baseUri: requireEnv('BPP_BASE_URI').replace(/\/$/, ''),
+
+  // Crypto signing keys (raw base64 Ed25519)
+  signPrivKey: requireEnv('BPP_SIGN_PRIV_KEY'),
+  signPubKey: requireEnv('BPP_SIGN_PUB_KEY'),
+
+  // ONDC registry
+  registryLookupUrl: requireEnv('ONDC_REGISTRY_LOOKUP_URL'),
+
+  // ONDC Observability
+  observabilityUrl: optionalEnv(
+    'ONDC_OBSERVABILITY_URL',
+    'https://analytics-api-pre-prod.aws.ondc.org/v1/api/push-txn-logs',
+  ),
+  observabilityToken: optionalEnv('ONDC_OBSERVABILITY_TOKEN'),
+
+  // Environment flag
+  environment: optionalEnv('ONDC_ENVIRONMENT', 'preprod') as 'preprod' | 'prod',
+
+  // Auth
+  adminEmail: optionalEnv('ONDC_ADMIN_EMAIL'),
+  adminPasswordHash: optionalEnv('ONDC_ADMIN_PASSWORD_HASH'),
+
+  // Signature skew tolerance in seconds
+  headerMaxSkewSec: parseInt(optionalEnv('ONDC_HEADER_MAX_SKEW_SEC', '300'), 10),
+
+  // Buyer app finder fee default (%)
+  buyerFinderFeeDefault: optionalEnv('ONDC_BUYER_FINDER_FEE_DEFAULT', '3'),
+
+  // Whether to enrich catalog on /confirm (mirrors PHP ENRICH_ON_CONFIRM)
+  enrichOnConfirm: optionalEnv('ONDC_ENRICH_ON_CONFIRM', '0') === '1',
+
+  // Feature flag — set ONDC_ENABLED=false to disable all ONDC routes
+  enabled: optionalEnv('ONDC_ENABLED', 'true') !== 'false',
+};
