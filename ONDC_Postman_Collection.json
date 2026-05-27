@@ -1,0 +1,404 @@
+﻿{
+  "info": {
+    "name": "ODOP ONDC BPP API",
+    "description": "Complete ONDC Beckn BPP endpoints for ODOP Mart.\n\nFor local testing without signature verification:\n  Append ?insecure=1 to any Beckn endpoint URL.\n\nBase URL: http://localhost:5001/api/v1/ondc\nAdmin Base: http://localhost:5001/api/v1/ondc/admin\n\nDomains supported: ONDC:RET10 (Grocery), ONDC:RET12 (Fashion), ONDC:RET16 (Home & Kitchen)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "BASE_URL", "value": "http://localhost:5001", "type": "string" },
+    { "key": "ONDC_BASE", "value": "http://localhost:5001/api/v1/ondc", "type": "string" },
+    { "key": "ADMIN_BASE", "value": "http://localhost:5001/api/v1/ondc/admin", "type": "string" },
+    { "key": "TXN_ID", "value": "test-txn-001", "type": "string" },
+    { "key": "ORDER_ID", "value": "ONDC-ORD-001", "type": "string" },
+    { "key": "PROVIDER_ID", "value": "PROV-001", "type": "string" },
+    { "key": "ADMIN_TOKEN", "value": "Bearer <admin_jwt_here>", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Beckn Protocol (BAP â†’ BPP)",
+      "description": "Core Beckn protocol endpoints. Append ?insecure=1 for local testing to skip signature verification.",
+      "item": [
+        {
+          "name": "POST /search",
+          "request": {
+            "method": "POST",
+            "url": "{{ONDC_BASE}}/search?insecure=1",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"ONDC:RET12\",\n    \"action\": \"search\",\n    \"country\": \"IND\",\n    \"city\": \"std:080\",\n    \"core_version\": \"1.2.0\",\n    \"bap_id\": \"pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bap_uri\": \"https://pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"transaction_id\": \"test-txn-001\",\n    \"message_id\": \"test-msg-001\",\n    \"timestamp\": \"2025-01-01T10:00:00.000Z\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"intent\": {\n      \"item\": {\n        \"descriptor\": {\n          \"name\": \"kurta\"\n        }\n      },\n      \"fulfillment\": {\n        \"type\": \"Delivery\",\n        \"end\": {\n          \"location\": {\n            \"gps\": \"12.9715987,77.5945627\",\n            \"address\": { \"area_code\": \"560001\" }\n          }\n        }\n      },\n      \"payment\": { \"@ondc/org/buyer_app_finder_fee_type\": \"percent\", \"@ondc/org/buyer_app_finder_fee_amount\": \"3\" },\n      \"tags\": [\n        {\n          \"code\": \"bap_terms\",\n          \"list\": [\n            { \"code\": \"static_terms\",      \"value\": \"https://buyerapp.com/legal\" },\n            { \"code\": \"static_terms_new\",  \"value\": \"https://buyerapp.com/legal-2024\" },\n            { \"code\": \"effective_date\",    \"value\": \"2024-01-01T00:00:00.000Z\" }\n          ]\n        }\n      ]\n    }\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /select",
+          "request": {
+            "method": "POST",
+            "url": "{{ONDC_BASE}}/select?insecure=1",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"ONDC:RET12\",\n    \"action\": \"select\",\n    \"country\": \"IND\",\n    \"city\": \"std:080\",\n    \"core_version\": \"1.2.0\",\n    \"bap_id\": \"pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bap_uri\": \"https://pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bpp_id\": \"{{BPP_SUBSCRIBER_ID}}\",\n    \"bpp_uri\": \"{{ONDC_BASE}}\",\n    \"transaction_id\": \"test-txn-001\",\n    \"message_id\": \"test-msg-002\",\n    \"timestamp\": \"2025-01-01T10:01:00.000Z\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"order\": {\n      \"provider\": { \"id\": \"{{PROVIDER_ID}}\" },\n      \"items\": [\n        { \"id\": \"I1\", \"quantity\": { \"count\": 2 } }\n      ],\n      \"fulfillments\": [\n        {\n          \"id\": \"F1\",\n          \"type\": \"Delivery\",\n          \"end\": {\n            \"location\": {\n              \"gps\": \"12.9715987,77.5945627\",\n              \"address\": { \"area_code\": \"560001\" }\n            }\n          }\n        }\n      ]\n    }\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /init",
+          "request": {
+            "method": "POST",
+            "url": "{{ONDC_BASE}}/init?insecure=1",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"ONDC:RET12\",\n    \"action\": \"init\",\n    \"country\": \"IND\",\n    \"city\": \"std:080\",\n    \"core_version\": \"1.2.0\",\n    \"bap_id\": \"pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bap_uri\": \"https://pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bpp_id\": \"{{BPP_SUBSCRIBER_ID}}\",\n    \"bpp_uri\": \"{{ONDC_BASE}}\",\n    \"transaction_id\": \"test-txn-001\",\n    \"message_id\": \"test-msg-003\",\n    \"timestamp\": \"2025-01-01T10:02:00.000Z\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"order\": {\n      \"provider\": { \"id\": \"{{PROVIDER_ID}}\" },\n      \"items\": [\n        { \"id\": \"I1\", \"quantity\": { \"count\": 2 }, \"fulfillment_id\": \"F1\" }\n      ],\n      \"billing\": {\n        \"name\": \"Test Customer\",\n        \"address\": {\n          \"door\": \"12\", \"building\": \"Test Apartments\", \"street\": \"MG Road\",\n          \"city\": \"Bangalore\", \"state\": \"Karnataka\", \"country\": \"IND\", \"area_code\": \"560001\"\n        },\n        \"email\": \"test@example.com\",\n        \"phone\": \"9876543210\",\n        \"created_at\": \"2025-01-01T10:02:00.000Z\",\n        \"updated_at\": \"2025-01-01T10:02:00.000Z\"\n      },\n      \"fulfillments\": [\n        {\n          \"id\": \"F1\",\n          \"type\": \"Delivery\",\n          \"end\": {\n            \"location\": {\n              \"gps\": \"12.9715987,77.5945627\",\n              \"address\": { \"door\": \"12\", \"building\": \"Test Apt\", \"street\": \"MG Road\", \"city\": \"Bangalore\", \"state\": \"Karnataka\", \"country\": \"IND\", \"area_code\": \"560001\" }\n            },\n            \"contact\": { \"phone\": \"9876543210\", \"email\": \"test@example.com\" }\n          }\n        }\n      ],\n      \"quote\": {\n        \"price\": { \"currency\": \"INR\", \"value\": \"1200.00\" },\n        \"breakup\": [\n          { \"@ondc/org/item_id\": \"I1\", \"@ondc/org/item_quantity\": { \"count\": 2 }, \"title\": \"Test Kurta\", \"@ondc/org/title_type\": \"item\", \"price\": { \"currency\": \"INR\", \"value\": \"1200.00\" }, \"item\": { \"price\": { \"currency\": \"INR\", \"value\": \"600.00\" } } }\n        ],\n        \"ttl\": \"P1D\"\n      },\n      \"payment\": {\n        \"type\": \"ON-ORDER\",\n        \"collected_by\": \"BAP\",\n        \"@ondc/org/buyer_app_finder_fee_type\": \"percent\",\n        \"@ondc/org/buyer_app_finder_fee_amount\": \"3\"\n      }\n    }\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /confirm",
+          "request": {
+            "method": "POST",
+            "url": "{{ONDC_BASE}}/confirm?insecure=1",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"ONDC:RET12\",\n    \"action\": \"confirm\",\n    \"country\": \"IND\",\n    \"city\": \"std:080\",\n    \"core_version\": \"1.2.0\",\n    \"bap_id\": \"pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bap_uri\": \"https://pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bpp_id\": \"{{BPP_SUBSCRIBER_ID}}\",\n    \"bpp_uri\": \"{{ONDC_BASE}}\",\n    \"transaction_id\": \"test-txn-001\",\n    \"message_id\": \"test-msg-004\",\n    \"timestamp\": \"2025-01-01T10:03:00.000Z\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"order\": {\n      \"id\": \"{{ORDER_ID}}\",\n      \"state\": \"Created\",\n      \"provider\": { \"id\": \"{{PROVIDER_ID}}\" },\n      \"items\": [\n        { \"id\": \"I1\", \"quantity\": { \"count\": 2 }, \"fulfillment_id\": \"F1\" }\n      ],\n      \"billing\": {\n        \"name\": \"Test Customer\",\n        \"address\": { \"door\": \"12\", \"building\": \"Test Apt\", \"street\": \"MG Road\", \"city\": \"Bangalore\", \"state\": \"Karnataka\", \"country\": \"IND\", \"area_code\": \"560001\" },\n        \"email\": \"test@example.com\",\n        \"phone\": \"9876543210\",\n        \"created_at\": \"2025-01-01T10:03:00.000Z\",\n        \"updated_at\": \"2025-01-01T10:03:00.000Z\"\n      },\n      \"fulfillments\": [\n        {\n          \"id\": \"F1\",\n          \"type\": \"Delivery\",\n          \"state\": { \"descriptor\": { \"code\": \"Pending\" } },\n          \"end\": {\n            \"location\": {\n              \"gps\": \"12.9715987,77.5945627\",\n              \"address\": { \"door\": \"12\", \"building\": \"Test Apt\", \"street\": \"MG Road\", \"city\": \"Bangalore\", \"state\": \"Karnataka\", \"country\": \"IND\", \"area_code\": \"560001\" }\n            },\n            \"contact\": { \"phone\": \"9876543210\", \"email\": \"test@example.com\" }\n          }\n        }\n      ],\n      \"quote\": {\n        \"price\": { \"currency\": \"INR\", \"value\": \"1200.00\" },\n        \"breakup\": [\n          { \"@ondc/org/item_id\": \"I1\", \"@ondc/org/item_quantity\": { \"count\": 2 }, \"title\": \"Test Kurta\", \"@ondc/org/title_type\": \"item\", \"price\": { \"currency\": \"INR\", \"value\": \"1200.00\" }, \"item\": { \"price\": { \"currency\": \"INR\", \"value\": \"600.00\" } } }\n        ],\n        \"ttl\": \"P1D\"\n      },\n      \"payment\": {\n        \"type\": \"ON-ORDER\",\n        \"collected_by\": \"BAP\",\n        \"params\": { \"amount\": \"1200.00\", \"currency\": \"INR\", \"transaction_id\": \"PAY-001\" },\n        \"status\": \"PAID\",\n        \"@ondc/org/buyer_app_finder_fee_type\": \"percent\",\n        \"@ondc/org/buyer_app_finder_fee_amount\": \"3\",\n        \"@ondc/org/settlement_window\": \"P1D\",\n        \"@ondc/org/settlement_basis\": \"delivery\",\n        \"@ondc/org/withholding_amount\": \"0.00\",\n        \"@ondc/org/settlement_details\": [\n          {\n            \"settlement_counterparty\": \"buyer-app\",\n            \"settlement_phase\": \"sale-amount\",\n            \"settlement_type\": \"neft\",\n            \"beneficiary_name\": \"Test Seller\",\n            \"upi_address\": \"seller@upi\",\n            \"settlement_bank_account_no\": \"1234567890\",\n            \"settlement_ifsc_code\": \"SBIN0001234\",\n            \"bank_name\": \"State Bank of India\"\n          }\n        ]\n      },\n      \"created_at\": \"2025-01-01T10:03:00.000Z\",\n      \"updated_at\": \"2025-01-01T10:03:00.000Z\"\n    }\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /status",
+          "request": {
+            "method": "POST",
+            "url": "{{ONDC_BASE}}/status?insecure=1",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"ONDC:RET12\",\n    \"action\": \"status\",\n    \"country\": \"IND\",\n    \"city\": \"std:080\",\n    \"core_version\": \"1.2.0\",\n    \"bap_id\": \"pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bap_uri\": \"https://pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bpp_id\": \"{{BPP_SUBSCRIBER_ID}}\",\n    \"bpp_uri\": \"{{ONDC_BASE}}\",\n    \"transaction_id\": \"test-txn-001\",\n    \"message_id\": \"test-msg-005\",\n    \"timestamp\": \"2025-01-01T11:00:00.000Z\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"order_id\": \"{{ORDER_ID}}\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /track",
+          "request": {
+            "method": "POST",
+            "url": "{{ONDC_BASE}}/track?insecure=1",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"ONDC:RET12\",\n    \"action\": \"track\",\n    \"country\": \"IND\",\n    \"city\": \"std:080\",\n    \"core_version\": \"1.2.0\",\n    \"bap_id\": \"pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bap_uri\": \"https://pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bpp_id\": \"{{BPP_SUBSCRIBER_ID}}\",\n    \"bpp_uri\": \"{{ONDC_BASE}}\",\n    \"transaction_id\": \"test-txn-001\",\n    \"message_id\": \"test-msg-006\",\n    \"timestamp\": \"2025-01-01T11:30:00.000Z\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"order_id\": \"{{ORDER_ID}}\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /cancel",
+          "request": {
+            "method": "POST",
+            "url": "{{ONDC_BASE}}/cancel?insecure=1",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"ONDC:RET12\",\n    \"action\": \"cancel\",\n    \"country\": \"IND\",\n    \"city\": \"std:080\",\n    \"core_version\": \"1.2.0\",\n    \"bap_id\": \"pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bap_uri\": \"https://pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bpp_id\": \"{{BPP_SUBSCRIBER_ID}}\",\n    \"bpp_uri\": \"{{ONDC_BASE}}\",\n    \"transaction_id\": \"test-txn-001\",\n    \"message_id\": \"test-msg-007\",\n    \"timestamp\": \"2025-01-01T12:00:00.000Z\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"order_id\": \"{{ORDER_ID}}\",\n    \"cancellation_reason_id\": \"004\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /update (partial cancel)",
+          "request": {
+            "method": "POST",
+            "url": "{{ONDC_BASE}}/update?insecure=1",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"ONDC:RET12\",\n    \"action\": \"update\",\n    \"country\": \"IND\",\n    \"city\": \"std:080\",\n    \"core_version\": \"1.2.0\",\n    \"bap_id\": \"pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bap_uri\": \"https://pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bpp_id\": \"{{BPP_SUBSCRIBER_ID}}\",\n    \"bpp_uri\": \"{{ONDC_BASE}}\",\n    \"transaction_id\": \"test-txn-001\",\n    \"message_id\": \"test-msg-008\",\n    \"timestamp\": \"2025-01-01T12:30:00.000Z\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"update_target\": \"item\",\n    \"order\": {\n      \"id\": \"{{ORDER_ID}}\",\n      \"state\": \"Created\",\n      \"provider\": { \"id\": \"{{PROVIDER_ID}}\" },\n      \"items\": [\n        { \"id\": \"I1\", \"quantity\": { \"count\": 1 } }\n      ]\n    }\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /issue",
+          "request": {
+            "method": "POST",
+            "url": "{{ONDC_BASE}}/issue?insecure=1",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"ONDC:RET12\",\n    \"action\": \"issue\",\n    \"country\": \"IND\",\n    \"city\": \"std:080\",\n    \"core_version\": \"1.2.0\",\n    \"bap_id\": \"pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bap_uri\": \"https://pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bpp_id\": \"{{BPP_SUBSCRIBER_ID}}\",\n    \"bpp_uri\": \"{{ONDC_BASE}}\",\n    \"transaction_id\": \"test-txn-001\",\n    \"message_id\": \"test-msg-issue-001\",\n    \"timestamp\": \"2025-01-01T13:00:00.000Z\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"issue\": {\n      \"id\": \"ISSUE-001\",\n      \"category\": \"ITEM\",\n      \"sub_category\": \"ITM02\",\n      \"complainant_info\": {\n        \"person\": { \"name\": \"Test Customer\" },\n        \"contact\": { \"phone\": \"9876543210\", \"email\": \"test@example.com\" }\n      },\n      \"order_details\": {\n        \"id\": \"{{ORDER_ID}}\",\n        \"state\": \"Delivered\",\n        \"items\": [{ \"id\": \"I1\", \"quantity\": 2 }],\n        \"fulfillments\": [{ \"id\": \"F1\", \"state\": \"Order-delivered\" }],\n        \"provider_id\": \"{{PROVIDER_ID}}\"\n      },\n      \"description\": {\n        \"short_desc\": \"Item damaged\",\n        \"long_desc\": \"The item received was damaged. Requesting refund or replacement.\",\n        \"images\": []\n      },\n      \"source\": { \"network_participant_id\": \"pramaan.ondc.org/beta/preprod/mock/buyer\", \"type\": \"CONSUMER\" },\n      \"expected_response_time\": { \"duration\": \"PT2H\" },\n      \"expected_resolution_time\": { \"duration\": \"P1D\" },\n      \"status\": \"OPEN\",\n      \"issue_type\": \"ISSUE\",\n      \"issue_actions\": {\n        \"complainant_actions\": [{\n          \"complainant_action\": \"OPEN\",\n          \"short_desc\": \"Opened issue\",\n          \"updated_at\": \"2025-01-01T13:00:00.000Z\",\n          \"updated_by\": {\n            \"org\": { \"name\": \"Test Buyer App\" },\n            \"contact\": { \"phone\": \"9876543210\", \"email\": \"test@example.com\" },\n            \"person\": { \"name\": \"Test Customer\" }\n          }\n        }]\n      },\n      \"rating\": \"THUMBS-DOWN\",\n      \"created_at\": \"2025-01-01T13:00:00.000Z\",\n      \"updated_at\": \"2025-01-01T13:00:00.000Z\"\n    }\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /issue_status",
+          "request": {
+            "method": "POST",
+            "url": "{{ONDC_BASE}}/issue_status?insecure=1",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"ONDC:RET12\",\n    \"action\": \"issue_status\",\n    \"country\": \"IND\",\n    \"city\": \"std:080\",\n    \"core_version\": \"1.2.0\",\n    \"bap_id\": \"pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bap_uri\": \"https://pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bpp_id\": \"{{BPP_SUBSCRIBER_ID}}\",\n    \"bpp_uri\": \"{{ONDC_BASE}}\",\n    \"transaction_id\": \"test-txn-001\",\n    \"message_id\": \"test-msg-issue-002\",\n    \"timestamp\": \"2025-01-01T14:00:00.000Z\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"issue_id\": \"ISSUE-001\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /on_receiver_recon (PPF â€” BAP â†’ BPP callback)",
+          "request": {
+            "method": "POST",
+            "url": "{{ONDC_BASE}}/on_receiver_recon?insecure=1",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"ONDC:NTS10\",\n    \"location\": { \"country\": { \"code\": \"IND\" }, \"city\": { \"code\": \"*\" } },\n    \"version\": \"2.0.0\",\n    \"action\": \"on_recon\",\n    \"bap_id\": \"pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bap_uri\": \"https://pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bpp_id\": \"{{BPP_SUBSCRIBER_ID}}\",\n    \"bpp_uri\": \"{{ONDC_BASE}}\",\n    \"transaction_id\": \"test-txn-001\",\n    \"message_id\": \"test-msg-recon-ack-001\",\n    \"timestamp\": \"2025-01-02T10:00:00.000Z\",\n    \"ttl\": \"P1D\"\n  },\n  \"message\": {\n    \"orders\": [\n      {\n        \"id\": \"{{ORDER_ID}}\",\n        \"amount\": { \"currency\": \"INR\", \"value\": \"1200.00\" },\n        \"recon_accord\": true,\n        \"settlements\": [\n          {\n            \"id\": \"settlement-{{ORDER_ID}}-1\",\n            \"payment_id\": \"payment-{{ORDER_ID}}-1\",\n            \"status\": \"SETTLED\",\n            \"settlement_ref_no\": \"UTR123456789\",\n            \"amount\": { \"currency\": \"INR\", \"value\": \"1164.00\" },\n            \"commission\": { \"currency\": \"INR\", \"value\": \"36.00\" },\n            \"withholding_amount\": { \"currency\": \"INR\", \"value\": \"0.00\" },\n            \"tcs\": { \"currency\": \"INR\", \"value\": \"0.00\" },\n            \"tds\": { \"currency\": \"INR\", \"value\": \"0.00\" },\n            \"updated_at\": \"2025-01-02T09:00:00.000Z\"\n          }\n        ]\n      }\n    ]\n  }\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin â€” Catalog",
+      "item": [
+        {
+          "name": "POST /admin/catalog/sync",
+          "request": {
+            "method": "POST",
+            "url": "{{ADMIN_BASE}}/catalog/sync",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "{{ADMIN_TOKEN}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"seller_id\": 1,\n  \"provider_id\": \"{{PROVIDER_ID}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "GET /admin/catalog/items/:providerId",
+          "request": {
+            "method": "GET",
+            "url": "{{ADMIN_BASE}}/catalog/items/{{PROVIDER_ID}}?page=1&limit=20",
+            "header": [{ "key": "Authorization", "value": "{{ADMIN_TOKEN}}" }]
+          }
+        },
+        {
+          "name": "GET /admin/catalog/rejections",
+          "request": {
+            "method": "GET",
+            "url": "{{ADMIN_BASE}}/catalog/rejections",
+            "header": [{ "key": "Authorization", "value": "{{ADMIN_TOKEN}}" }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin â€” Orders",
+      "item": [
+        {
+          "name": "GET /admin/orders",
+          "request": {
+            "method": "GET",
+            "url": "{{ADMIN_BASE}}/orders?page=1&limit=20",
+            "header": [{ "key": "Authorization", "value": "{{ADMIN_TOKEN}}" }]
+          }
+        },
+        {
+          "name": "GET /admin/orders/:orderId",
+          "request": {
+            "method": "GET",
+            "url": "{{ADMIN_BASE}}/orders/{{ORDER_ID}}",
+            "header": [{ "key": "Authorization", "value": "{{ADMIN_TOKEN}}" }]
+          }
+        },
+        {
+          "name": "POST /admin/orders/:orderId/fulfillment (update status)",
+          "request": {
+            "method": "POST",
+            "url": "{{ADMIN_BASE}}/orders/{{ORDER_ID}}/fulfillment",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "{{ADMIN_TOKEN}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"PACKED\",\n  \"fulfillment_id\": \"F1\",\n  \"awb\": \"AWB123456789\",\n  \"courier\": \"Delhivery\",\n  \"tracking_url\": \"https://courier.com/track/AWB123456789\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin â€” Providers",
+      "item": [
+        {
+          "name": "GET /admin/providers",
+          "request": {
+            "method": "GET",
+            "url": "{{ADMIN_BASE}}/providers",
+            "header": [{ "key": "Authorization", "value": "{{ADMIN_TOKEN}}" }]
+          }
+        },
+        {
+          "name": "POST /admin/providers (create/update)",
+          "request": {
+            "method": "POST",
+            "url": "{{ADMIN_BASE}}/providers",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "{{ADMIN_TOKEN}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"seller_id\": 1,\n  \"provider_id\": \"{{PROVIDER_ID}}\",\n  \"name\": \"ODOP Craft Store\",\n  \"short_desc\": \"Authentic handcrafted products from artisans\",\n  \"domain\": \"ONDC:RET12\",\n  \"support_email\": \"support@odop.example.com\",\n  \"support_phone\": \"9876543210\",\n  \"fssai_license\": null\n}"
+            }
+          }
+        },
+        {
+          "name": "PATCH /admin/providers/:providerId/toggle",
+          "request": {
+            "method": "PATCH",
+            "url": "{{ADMIN_BASE}}/providers/{{PROVIDER_ID}}/toggle",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "{{ADMIN_TOKEN}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"active\": true }"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin â€” PPF (Payment Protection Framework)",
+      "description": "PPF replaces RSF. Domain ONDC:NTS10, v2.0.0. BPP initiates recon â†’ BAP responds with on_receiver_recon.",
+      "item": [
+        {
+          "name": "GET /admin/ppf (list all recon records)",
+          "request": {
+            "method": "GET",
+            "url": "{{ADMIN_BASE}}/ppf?limit=20&offset=0",
+            "header": [{ "key": "Authorization", "value": "{{ADMIN_TOKEN}}" }]
+          }
+        },
+        {
+          "name": "GET /admin/ppf/order/:orderId",
+          "request": {
+            "method": "GET",
+            "url": "{{ADMIN_BASE}}/ppf/order/{{ORDER_ID}}",
+            "header": [{ "key": "Authorization", "value": "{{ADMIN_TOKEN}}" }]
+          }
+        },
+        {
+          "name": "POST /admin/ppf/trigger (send recon to BAP)",
+          "request": {
+            "method": "POST",
+            "url": "{{ADMIN_BASE}}/ppf/trigger",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "{{ADMIN_TOKEN}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ondc_order_id\": \"{{ORDER_ID}}\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin â€” Logs & Transactions",
+      "item": [
+        {
+          "name": "GET /admin/logs",
+          "request": {
+            "method": "GET",
+            "url": "{{ADMIN_BASE}}/logs?limit=50&offset=0",
+            "header": [{ "key": "Authorization", "value": "{{ADMIN_TOKEN}}" }]
+          }
+        },
+        {
+          "name": "GET /admin/logs/:transactionId",
+          "request": {
+            "method": "GET",
+            "url": "{{ADMIN_BASE}}/logs/test-txn-001",
+            "header": [{ "key": "Authorization", "value": "{{ADMIN_TOKEN}}" }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin â€” IGM Issues",
+      "item": [
+        {
+          "name": "GET /admin/issues",
+          "request": {
+            "method": "GET",
+            "url": "{{ADMIN_BASE}}/issues?limit=20&offset=0",
+            "header": [{ "key": "Authorization", "value": "{{ADMIN_TOKEN}}" }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Test / Health",
+      "item": [
+        {
+          "name": "GET /ondc (module health)",
+          "request": {
+            "method": "GET",
+            "url": "{{ONDC_BASE}}"
+          }
+        },
+        {
+          "name": "GET /ondc/test/ping",
+          "request": {
+            "method": "GET",
+            "url": "{{ONDC_BASE}}/test/ping"
+          }
+        },
+        {
+          "name": "GET /ondc/test/catalog",
+          "request": {
+            "method": "GET",
+            "url": "{{ONDC_BASE}}/test/catalog"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Domain Examples â€” RET10 (Grocery)",
+      "description": "RET10 requires FSSAI license, veg/non-veg tag, g3 statutory.",
+      "item": [
+        {
+          "name": "POST /search (RET10 Grocery)",
+          "request": {
+            "method": "POST",
+            "url": "{{ONDC_BASE}}/search?insecure=1",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"ONDC:RET10\",\n    \"action\": \"search\",\n    \"country\": \"IND\",\n    \"city\": \"std:080\",\n    \"core_version\": \"1.2.0\",\n    \"bap_id\": \"pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bap_uri\": \"https://pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"transaction_id\": \"grocery-txn-001\",\n    \"message_id\": \"grocery-msg-001\",\n    \"timestamp\": \"2025-01-01T10:00:00.000Z\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"intent\": {\n      \"item\": { \"descriptor\": { \"name\": \"rice\" } },\n      \"fulfillment\": {\n        \"type\": \"Delivery\",\n        \"end\": { \"location\": { \"gps\": \"12.9715987,77.5945627\", \"address\": { \"area_code\": \"560001\" } } }\n      },\n      \"payment\": { \"@ondc/org/buyer_app_finder_fee_type\": \"percent\", \"@ondc/org/buyer_app_finder_fee_amount\": \"3\" }\n    }\n  }\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Domain Examples â€” RET16 (Home & Kitchen)",
+      "description": "RET16 requires material and brand attributes.",
+      "item": [
+        {
+          "name": "POST /search (RET16 Home & Kitchen)",
+          "request": {
+            "method": "POST",
+            "url": "{{ONDC_BASE}}/search?insecure=1",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"ONDC:RET16\",\n    \"action\": \"search\",\n    \"country\": \"IND\",\n    \"city\": \"std:080\",\n    \"core_version\": \"1.2.0\",\n    \"bap_id\": \"pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"bap_uri\": \"https://pramaan.ondc.org/beta/preprod/mock/buyer\",\n    \"transaction_id\": \"home-txn-001\",\n    \"message_id\": \"home-msg-001\",\n    \"timestamp\": \"2025-01-01T10:00:00.000Z\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"intent\": {\n      \"item\": { \"descriptor\": { \"name\": \"wooden bowl\" } },\n      \"fulfillment\": {\n        \"type\": \"Delivery\",\n        \"end\": { \"location\": { \"gps\": \"12.9715987,77.5945627\", \"address\": { \"area_code\": \"560001\" } } }\n      },\n      \"payment\": { \"@ondc/org/buyer_app_finder_fee_type\": \"percent\", \"@ondc/org/buyer_app_finder_fee_amount\": \"3\" }\n    }\n  }\n}"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
