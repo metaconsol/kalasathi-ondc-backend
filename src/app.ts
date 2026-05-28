@@ -96,6 +96,38 @@ export function createApp(): Application {
     });
   });
 
+  // Beckn short-path aliases: POST /search → /api/v1/ondc/search, etc.
+  // Lets the BPP_SUBSCRIBER_URL be the bare domain without /api/v1/ondc prefix.
+  const BECKN_ACTIONS = new Set([
+    'search',
+    'select',
+    'init',
+    'confirm',
+    'cancel',
+    'update',
+    'status',
+    'track',
+    'rating',
+    'issue',
+    'on_search',
+    'on_select',
+    'on_init',
+    'on_confirm',
+    'on_cancel',
+    'on_update',
+    'on_status',
+    'on_track',
+    'on_rating',
+    'on_issue',
+  ]);
+  app.use((req, _res, next) => {
+    const action = req.path.replace(/^\//, '').split('/')[0] ?? '';
+    if (BECKN_ACTIONS.has(action)) {
+      req.url = `/api/v1/ondc${req.url}`;
+    }
+    next();
+  });
+
   // Mount API Routes under /api/v1
   app.use('/api/v1', routes);
 
