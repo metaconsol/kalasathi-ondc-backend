@@ -2,19 +2,32 @@
  * ONDC-specific Winston logger.
  *
  * Files written:
- *   logs/ondc/beckn_incoming.log  — every inbound Beckn request (headers + body + sync ACK/NACK)
- *   logs/ondc/beckn_outgoing.log  — every outbound callback (payload + HTTP response / error)
- *   logs/ondc/app_error.log       — error-level events
- *   logs/ondc/network_debug.log   — general debug (kept for backward compat)
- *   logs/ondc/status_outgoing.log — status flow outgoing
- *   logs/ondc/recon_error.log     — reconciliation errors
+ *   logs/ondc/<action>_incoming.log  — per-action inbound (e.g. search_incoming.log, select_incoming.log)
+ *   logs/ondc/<action>_outgoing.log  — per-action outbound (on_X stripped → X_outgoing.log)
+ *   logs/ondc/catalog.log            — unique on_search catalogs (deduped by SHA-256)
+ *   logs/ondc/app_error.log          — error-level events
+ *   logs/ondc/network_debug.log      — general debug (kept for backward compat)
+ *   logs/ondc/status_outgoing.log    — status flow outgoing
+ *   logs/ondc/recon_error.log        — reconciliation errors
+ *
+ * Outgoing logs include the headers WE sent (Authorization, Digest, Content-Type).
+ * Both incoming and outgoing logs include errors when present.
+ * search_outgoing.log shows `catalog: {}` plus a `catalog_hash` reference; the
+ * full catalog body lives once per unique hash in catalog.log.
  */
 
 import winston from 'winston';
 import path from 'path';
+import crypto from 'crypto';
 
 const ONDC_LOG_DIR = path.join(process.cwd(), 'logs', 'ondc');
 const SEP = '='.repeat(80);
+const HDR_REQ = '─── REQUEST HEADERS ' + '─'.repeat(60);
+const HDR_RES = '─── RESPONSE HEADERS ' + '─'.repeat(59);
+const HDR_BODY = '─── REQUEST BODY ' + '─'.repeat(63);
+const HDR_ERR = '─── ERROR ' + '─'.repeat(70);
+const HDR_SYNC_BASE = '─'.repeat(63);
+const HDR_RESPONSE_BASE = '─'.repeat(65);
 
 // ─── Winston transport helpers ───────────────────────────────────────────────
 
@@ -36,6 +49,12 @@ const rawFileTransport = (filename: string) =>
     maxFiles: 10,
     tailable: true,
     format: winston.format.printf(({ message }) => message as string),
+  });
+
+const makeRawLogger = (filename: string) =>
+  winston.createLogger({
+    level: 'info',
+    transports: [rawFileTransport(filename)],
   });
 
 // ─── Existing loggers (kept for backward compat) ─────────────────────────────
@@ -81,17 +100,72 @@ export const reconLogger = winston.createLogger({
   transports: [fileTransport('recon_error.log', 'error')],
 });
 
-// ─── New human-readable Beckn loggers ────────────────────────────────────────
+// ─── Per-action logger factory ───────────────────────────────────────────────
 
-const becknIncomingLogger = winston.createLogger({
-  level: 'info',
-  transports: [rawFileTransport('beckn_incoming.log')],
-});
+const actionLoggers = new Map<string, winston.Logger>();
 
-const becknOutgoingLogger = winston.createLogger({
-  level: 'info',
-  transports: [rawFileTransport('beckn_outgoing.log')],
-});
+function loggerForFile(filename: string): winston.Logger {
+  let lg = actionLoggers.get(filename);
+  if (!lg) {
+    lg = makeRawLogger(filename);
+    actionLoggers.set(filename, lg);
+  }
+  return lg;
+}
+
+/** Map an outbound action to its log family.
+ *  `on_search` → `search_outgoing.log` so request + response live together. */
+function outgoingFileFor(action: string): string {
+  const a = action.toLowerCase();
+  const stem = a.startsWith('on_') ? a.slice(3) : a;
+  return `${stem || 'unknown'}_outgoing.log`;
+}
+
+function incomingFileFor(action: string): string {
+  const a = action.toLowerCase();
+  // For inbound on_X callbacks (e.g. on_receiver_recon) keep the full name
+  return `${a || 'unknown'}_incoming.log`;
+}
+
+// ─── Catalog dedup ───────────────────────────────────────────────────────────
+
+const catalogLogger = makeRawLogger('catalog.log');
+const seenCatalogHashes = new Set<string>();
+
+interface CatalogLogContext {
+  txnId: string;
+  bapId: string | null;
+  domain: string | null;
+}
+
+/** Hash the catalog from its pretty-printed JSON (single pass, reused for the
+ *  catalog.log entry). Returns { hash, prettyJson }. */
+function hashCatalog(catalog: unknown): { hash: string; prettyJson: string } {
+  const prettyJson = safejson(catalog);
+  const hash = crypto.createHash('sha256').update(prettyJson).digest('hex').slice(0, 16);
+  return { hash, prettyJson };
+}
+
+/** Write the catalog to catalog.log if its hash hasn't been seen this process. */
+function logCatalogIfNew(prettyJson: string, hash: string, context: CatalogLogContext): void {
+  if (seenCatalogHashes.has(hash)) return;
+  seenCatalogHashes.add(hash);
+
+  catalogLogger.info(
+    [
+      '',
+      SEP,
+      `${ts()}  [CATALOG]  hash=${hash}`,
+      SEP,
+      `  first_seen_txn : ${context.txnId}`,
+      `  first_seen_bap : ${context.bapId ?? '-'}`,
+      `  first_seen_dom : ${context.domain ?? '-'}`,
+      '',
+      prettyJson,
+      '',
+    ].join('\n'),
+  );
+}
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -105,6 +179,19 @@ function safejson(data: unknown): string {
   } catch {
     return String(data);
   }
+}
+
+/** Returns a clone of `payload` where `message.catalog` is replaced with `{}`.
+ *  Does NOT mutate the input — payload builder output is untouched. */
+function stripCatalogForLog(payload: unknown): { stripped: unknown; catalog: unknown | undefined } {
+  if (!payload || typeof payload !== 'object') return { stripped: payload, catalog: undefined };
+  const p = payload as Record<string, any>;
+  const msg = p['message'];
+  if (!msg || typeof msg !== 'object' || msg['catalog'] === undefined) {
+    return { stripped: payload, catalog: undefined };
+  }
+  const clone = { ...p, message: { ...msg, catalog: {} } };
+  return { stripped: clone, catalog: msg['catalog'] };
 }
 
 // ─── Public interfaces ────────────────────────────────────────────────────────
@@ -121,6 +208,7 @@ export interface BecknIncomingLogInfo {
   syncResponse?: unknown;
   syncStatusCode?: number;
   elapsedMs?: number;
+  error?: string;
 }
 
 export interface BecknOutgoingLogInfo {
@@ -129,20 +217,44 @@ export interface BecknOutgoingLogInfo {
   messageId: string;
   url: string;
   body: unknown;
-  authHeader?: string;
+  /** Headers WE sent on the outbound request. */
+  requestHeaders?: Record<string, string | null | undefined>;
   httpStatus?: number;
   responseBody?: unknown;
+  /** Headers the BAP returned. */
+  responseHeaders?: Record<string, string | null | undefined>;
   error?: string;
   elapsedMs?: number;
 }
 
 // ─── Public log functions ─────────────────────────────────────────────────────
 
+/** Render headers full-length (no truncation) under a section header. */
+function pushHeaders(
+  lines: string[],
+  sectionTitle: string,
+  headers: Record<string, string | null | undefined> | undefined,
+): void {
+  if (!headers) return;
+  const entries = Object.entries(headers).filter(([, v]) => v != null);
+  if (!entries.length) return;
+  lines.push('', sectionTitle);
+  for (const [k, v] of entries) {
+    lines.push(`  ${k}: ${v}`);
+  }
+}
+
+function extractCtx(payload: unknown): { bapId: string | null; domain: string | null } {
+  const ctx = (payload as any)?.context;
+  return { bapId: ctx?.bap_id ?? null, domain: ctx?.domain ?? null };
+}
+
 export function logBecknIncoming(info: BecknIncomingLogInfo): void {
+  const isError = !!info.error;
   const lines: string[] = [
     '',
     SEP,
-    `${ts()}  [INBOUND]  ${info.action.toUpperCase()}`,
+    `${ts()}  [INBOUND]  ${info.action.toUpperCase()}${isError ? '  *** ERROR ***' : ''}`,
     SEP,
     `  txn_id  : ${info.transactionId}`,
     `  msg_id  : ${info.messageId}`,
@@ -155,33 +267,42 @@ export function logBecknIncoming(info: BecknIncomingLogInfo): void {
     lines.push(`  elapsed : ${info.elapsedMs}ms`);
   }
 
-  const relevantHeaders = Object.entries(info.headers).filter(([, v]) => v != null);
-  if (relevantHeaders.length) {
-    lines.push('', '─── REQUEST HEADERS ' + '─'.repeat(60));
-    for (const [k, v] of relevantHeaders) {
-      // Truncate long Authorization signatures for readability
-      const val = typeof v === 'string' && v.length > 200 ? v.slice(0, 200) + '…' : v;
-      lines.push(`  ${k}: ${val}`);
-    }
-  }
+  pushHeaders(lines, HDR_REQ, info.headers);
 
-  lines.push('', '─── REQUEST BODY ' + '─'.repeat(63), safejson(info.body));
+  lines.push('', HDR_BODY, safejson(info.body));
 
   if (info.syncResponse !== undefined) {
     const statusLabel = info.syncStatusCode !== undefined ? ` (HTTP ${info.syncStatusCode})` : '';
-    lines.push(
-      '',
-      `─── SYNC RESPONSE${statusLabel} ` + '─'.repeat(63),
-      safejson(info.syncResponse),
-    );
+    lines.push('', `─── SYNC RESPONSE${statusLabel} ${HDR_SYNC_BASE}`, safejson(info.syncResponse));
+  }
+
+  if (isError) {
+    lines.push('', HDR_ERR, `  ${info.error}`);
   }
 
   lines.push('');
-  becknIncomingLogger.info(lines.join('\n'));
+  loggerForFile(incomingFileFor(info.action)).info(lines.join('\n'));
 }
 
 export function logBecknOutgoing(info: BecknOutgoingLogInfo): void {
   const isError = !!info.error;
+
+  // For on_search: hash + log catalog separately (deduped), substitute `{}` in
+  // the per-action outgoing log body. Single JSON.stringify pass — the pretty
+  // JSON used to hash is reused as catalog.log content.
+  let bodyForLog: unknown = info.body;
+  let catalogHashLine: string | null = null;
+  if (info.action.toLowerCase() === 'on_search') {
+    const { stripped, catalog } = stripCatalogForLog(info.body);
+    if (catalog !== undefined) {
+      const { hash, prettyJson } = hashCatalog(catalog);
+      const { bapId, domain } = extractCtx(info.body);
+      logCatalogIfNew(prettyJson, hash, { txnId: info.transactionId, bapId, domain });
+      catalogHashLine = `  catalog_hash : ${hash}  (full body in catalog.log)`;
+      bodyForLog = stripped;
+    }
+  }
+
   const lines: string[] = [
     '',
     SEP,
@@ -195,11 +316,16 @@ export function logBecknOutgoing(info: BecknOutgoingLogInfo): void {
   if (info.elapsedMs !== undefined) {
     lines.push(`  elapsed : ${info.elapsedMs}ms`);
   }
+  if (catalogHashLine) {
+    lines.push(catalogHashLine);
+  }
 
-  lines.push('', '─── REQUEST BODY ' + '─'.repeat(63), safejson(info.body));
+  pushHeaders(lines, HDR_REQ, info.requestHeaders);
+  lines.push('', HDR_BODY, safejson(bodyForLog));
+  pushHeaders(lines, HDR_RES, info.responseHeaders);
 
   if (isError) {
-    lines.push('', '─── ERROR ' + '─'.repeat(70), `  ${info.error}`);
+    lines.push('', HDR_ERR, `  ${info.error}`);
     if (info.httpStatus !== undefined) {
       lines.push(`  HTTP status: ${info.httpStatus}`);
     }
@@ -208,11 +334,15 @@ export function logBecknOutgoing(info: BecknOutgoingLogInfo): void {
     }
   } else {
     const statusLabel = info.httpStatus !== undefined ? `HTTP ${info.httpStatus}` : '?';
-    lines.push('', `─── RESPONSE (${statusLabel}) ` + '─'.repeat(65), safejson(info.responseBody));
+    lines.push(
+      '',
+      `─── RESPONSE (${statusLabel}) ${HDR_RESPONSE_BASE}`,
+      safejson(info.responseBody),
+    );
   }
 
   lines.push('');
-  becknOutgoingLogger.info(lines.join('\n'));
+  loggerForFile(outgoingFileFor(info.action)).info(lines.join('\n'));
 }
 
 /** Kept for backward compat — still writes to network_debug.log */

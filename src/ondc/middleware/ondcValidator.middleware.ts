@@ -9,7 +9,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { buildNack } from '~/ondc/utils/payload.builder';
 import type { BecknContext } from '~/ondc/types/beckn.types';
-import { BECKN_CORE_VERSION } from '~/ondc/config/constants';
+import { SUPPORTED_CORE_VERSIONS } from '~/ondc/config/constants';
 
 const REQUIRED_CONTEXT_FIELDS: (keyof BecknContext)[] = [
   'domain',
@@ -49,12 +49,14 @@ export function ondcContextValidator(req: Request, res: Response, next: NextFunc
     }
   }
 
-  if (ctx.core_version !== BECKN_CORE_VERSION) {
+  if (
+    !SUPPORTED_CORE_VERSIONS.includes(ctx.core_version as (typeof SUPPORTED_CORE_VERSIONS)[number])
+  ) {
     res.status(400).json(
       buildNack(ctx as BecknContext, {
         type: 'CONTEXT-ERROR',
         code: '20000',
-        message: `Unsupported core_version: ${ctx.core_version}. Expected: ${BECKN_CORE_VERSION}`,
+        message: `Unsupported core_version: ${ctx.core_version}. Expected one of: ${SUPPORTED_CORE_VERSIONS.join(', ')}`,
       }),
     );
     return;

@@ -4,7 +4,7 @@
  */
 
 import axios from 'axios';
-import { signRequest } from '~/ondc/utils/signature.util';
+import { signRequest, bodyDigest } from '~/ondc/utils/signature.util';
 import { ondcLogger, logBecknOutgoing } from '~/ondc/utils/logger.util';
 import { ondcNetwork } from '~/ondc/config/network.config';
 import type { OndcApiResponse } from '~/ondc/types/api.types';
@@ -20,22 +20,31 @@ export const becknService = {
     transactionId: string,
   ): Promise<{ statusCode: number | undefined; error: string | undefined }> {
     const bodyJson = JSON.stringify(payload);
+    const digest = bodyDigest(bodyJson);
     const authHeader = signRequest(bodyJson);
     const messageId = (payload as any)?.context?.message_id ?? 'unknown';
     const startTime = Date.now();
 
+    const requestHeaders = {
+      'Content-Type': 'application/json',
+      Digest: digest,
+      Authorization: authHeader,
+    };
+
     try {
       let lastStatus = 0;
       let lastResponseBody: unknown;
+      let lastResponseHeaders: Record<string, string> = {};
 
       await withRetry(
         async () => {
           const response = await axios.post(callbackUrl, payload, {
-            headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+            headers: requestHeaders,
             timeout: ondcNetwork.timeouts.callback,
           });
           lastStatus = response.status;
           lastResponseBody = response.data;
+          lastResponseHeaders = response.headers as Record<string, string>;
         },
         3,
         500,
@@ -47,8 +56,10 @@ export const becknService = {
         messageId,
         url: callbackUrl,
         body: payload,
+        requestHeaders,
         httpStatus: lastStatus,
         responseBody: lastResponseBody,
+        responseHeaders: lastResponseHeaders,
         elapsedMs: Date.now() - startTime,
       });
 
@@ -57,6 +68,7 @@ export const becknService = {
       const errMsg = err instanceof Error ? err.message : String(err);
       const statusCode = (err as any)?.response?.status as number | undefined;
       const responseBody = (err as any)?.response?.data;
+      const responseHeaders = (err as any)?.response?.headers as Record<string, string> | undefined;
 
       logBecknOutgoing({
         action,
@@ -64,8 +76,10 @@ export const becknService = {
         messageId,
         url: callbackUrl,
         body: payload,
+        requestHeaders,
         ...(statusCode !== undefined && { httpStatus: statusCode }),
         responseBody,
+        ...(responseHeaders && { responseHeaders }),
         error: errMsg,
         elapsedMs: Date.now() - startTime,
       });
