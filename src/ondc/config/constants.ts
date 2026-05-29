@@ -1,5 +1,8 @@
-/** Beckn core version used across all ONDC requests */
+/** Beckn core version used in our outgoing responses */
 export const BECKN_CORE_VERSION = '1.2.5';
+
+/** Beckn core versions we accept on inbound requests */
+export const SUPPORTED_CORE_VERSIONS = ['1.2.0', '1.2.5'] as const;
 
 /** Default country & currency */
 export const DEFAULT_COUNTRY = 'IND';
