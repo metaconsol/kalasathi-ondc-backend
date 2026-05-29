@@ -7,20 +7,31 @@
 import { randomUUID } from 'crypto';
 import type { BecknContext, BecknError } from '~/ondc/types/beckn.types';
 import type { OndcAckResponse } from '~/ondc/types/api.types';
-import { BECKN_CORE_VERSION } from '~/ondc/config/constants';
 import { ondcEnv } from '~/config/ondc.config';
 
 // ─── Context builders ──────────────────────────────────────────────────────
 
+/**
+ * Build the response context for both sync (ACK/NACK) and async (on_X) responses.
+ *
+ * Beckn rule: the response context MIRRORS the incoming context exactly, with
+ * only these well-defined deltas:
+ *   - action       : swapped to the response action (e.g. search → on_search)
+ *   - bpp_id/uri   : added (we identify ourselves to the BAP)
+ *   - timestamp    : refreshed to our send time
+ *
+ * core_version MUST echo the incoming version — never override it. Some BAPs
+ * (and Pramaan) reject responses that don't match the version they sent.
+ * Same for country, city, ttl, domain, transaction_id, message_id — all
+ * inherited verbatim from the spread.
+ */
 export function buildResponseContext(incomingCtx: BecknContext, action: string): BecknContext {
   return {
     ...incomingCtx,
     action: action as BecknContext['action'],
     bpp_id: ondcEnv.subscriberId,
     bpp_uri: ondcEnv.baseUri,
-    // message_id stays identical to the incoming request (Beckn spec: on_X shares message_id with X)
     timestamp: new Date().toISOString(),
-    core_version: BECKN_CORE_VERSION,
   };
 }
 
