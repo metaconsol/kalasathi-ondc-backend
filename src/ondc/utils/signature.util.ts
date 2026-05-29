@@ -63,8 +63,9 @@ function buildSigningString(created: number, expires: number, digest: string): s
   return `(created): ${created}\n(expires): ${expires}\ndigest: ${digest}`;
 }
 
-/** Build the Authorization header value for an outgoing ONDC callback */
-export function signRequest(body: string, ttlSeconds = 300): string {
+/** Build the Authorization header value for an outgoing ONDC callback.
+ *  TTL matches PHP create_auth_header_for_raw: created + 40*60 (2400s). */
+export function signRequest(body: string, ttlSeconds = 2400): string {
   const created = Math.floor(Date.now() / 1000);
   const expires = created + ttlSeconds;
   const digest = bodyDigest(body);
@@ -74,12 +75,13 @@ export function signRequest(body: string, ttlSeconds = 300): string {
   const sigBuf = crypto.sign(null, Buffer.from(sigStr, 'utf8'), privKey);
   const signature = sigBuf.toString('base64');
 
+  // Spaces after commas match PHP: 'algorithm="ed25519", created="..."'
   return (
-    `Signature keyId="${ondcEnv.subscriberId}|${ondcEnv.uniqueKeyId}|ed25519",` +
-    `algorithm="ed25519",` +
-    `created="${created}",` +
-    `expires="${expires}",` +
-    `headers="(created) (expires) digest",` +
+    `Signature keyId="${ondcEnv.subscriberId}|${ondcEnv.uniqueKeyId}|ed25519", ` +
+    `algorithm="ed25519", ` +
+    `created="${created}", ` +
+    `expires="${expires}", ` +
+    `headers="(created) (expires) digest", ` +
     `signature="${signature}"`
   );
 }

@@ -205,7 +205,8 @@ export interface OndcCancellationTerm {
 
 export interface OndcRegistryLookupResponse {
   subscriber_id: string;
-  unique_key_id: string;
+  ukId?: string; // registry response field (PHP: $r['ukId'])
+  unique_key_id?: string; // alias some registry versions return
   signing_public_key: string;
   encr_public_key?: string;
   valid_from?: string;

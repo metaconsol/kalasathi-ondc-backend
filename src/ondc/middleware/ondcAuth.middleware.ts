@@ -41,15 +41,13 @@ export async function ondcAuthMiddleware(
     ondcLogger.warn('Missing Authorization header', { path: req.path });
     const ctx = (req.body as { context?: BecknContext }).context;
     if (ctx) {
-      res
-        .status(401)
-        .json(
-          buildNack(ctx, {
-            type: 'CORE-ERROR',
-            code: '20001',
-            message: 'Missing Authorization header',
-          }),
-        );
+      res.status(401).json(
+        buildNack(ctx, {
+          type: 'CORE-ERROR',
+          code: '20001',
+          message: 'Missing Authorization header',
+        }),
+      );
       return;
     }
     res.status(401).json({ error: 'Missing Authorization header' });
@@ -61,15 +59,13 @@ export async function ondcAuthMiddleware(
     ondcLogger.warn('Malformed Authorization header', { path: req.path });
     const ctx = (req.body as { context?: BecknContext }).context;
     if (ctx) {
-      res
-        .status(401)
-        .json(
-          buildNack(ctx, {
-            type: 'CORE-ERROR',
-            code: '20001',
-            message: 'Malformed Authorization header',
-          }),
-        );
+      res.status(401).json(
+        buildNack(ctx, {
+          type: 'CORE-ERROR',
+          code: '20001',
+          message: 'Malformed Authorization header',
+        }),
+      );
       return;
     }
     res.status(401).json({ error: 'Malformed Authorization header' });
@@ -84,9 +80,15 @@ export async function ondcAuthMiddleware(
     return;
   }
 
+  const reqCtx = (req.body as { context?: BecknContext }).context;
+
   try {
-    // TODO: add in-process cache to avoid hitting registry on every request
-    const pubKey = await registryService.lookupPublicKey(subscriberId, uniqueKeyId);
+    const pubKey = await registryService.lookupPublicKey(
+      subscriberId,
+      uniqueKeyId,
+      reqCtx?.domain ?? '*',
+      reqCtx?.city ?? '*',
+    );
 
     if (!pubKey) {
       ondcLogger.warn('Subscriber not found in registry', { subscriberId, uniqueKeyId });
@@ -110,15 +112,13 @@ export async function ondcAuthMiddleware(
       ondcLogger.warn('Signature verification failed', { subscriberId, path: req.path });
       const ctx = (req.body as { context?: BecknContext }).context;
       if (ctx) {
-        res
-          .status(401)
-          .json(
-            buildNack(ctx, {
-              type: 'CORE-ERROR',
-              code: '20001',
-              message: 'Signature verification failed',
-            }),
-          );
+        res.status(401).json(
+          buildNack(ctx, {
+            type: 'CORE-ERROR',
+            code: '20001',
+            message: 'Signature verification failed',
+          }),
+        );
         return;
       }
       res.status(401).json({ error: 'Signature verification failed' });
