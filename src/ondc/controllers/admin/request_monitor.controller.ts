@@ -37,11 +37,14 @@ type BecknAction = (typeof ACTIONS)[number];
 export async function getActionCounts(req: Request, res: Response): Promise<void> {
   const days = Math.min(365, Math.max(0, parseInt(String(req.query['days'] ?? '7'), 10) || 7));
   const since = days > 0 ? `AND created_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)` : '';
+  const domain = String(req.query['domain'] ?? '').trim();
+  const domainCond = domain ? 'AND domain = ?' : '';
   const rows = await ondcQuery<{ action: string; cnt: number }>(
     `SELECT action, COUNT(DISTINCT transaction_id) AS cnt
      FROM ondc_txn_logs
-     WHERE direction = 'inbound' ${since}
+     WHERE direction = 'inbound' ${since} ${domainCond}
      GROUP BY action`,
+    domain ? [domain] : [],
   );
   const counts: Record<string, number> = {};
   for (const r of rows) counts[r.action] = Number(r.cnt);
@@ -66,6 +69,7 @@ export async function listByAction(req: Request, res: Response): Promise<void> {
 
   const days = Math.min(365, Math.max(0, parseInt(String(req.query['days'] ?? '7'), 10) || 7));
   const q = String(req.query['q'] ?? '').trim();
+  const domain = String(req.query['domain'] ?? '').trim();
   const ack = String(req.query['ack'] ?? '').toUpperCase();
   const page = Math.max(1, parseInt(String(req.query['page'] ?? '1'), 10) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(String(req.query['limit'] ?? '25'), 10) || 25));
@@ -78,6 +82,10 @@ export async function listByAction(req: Request, res: Response): Promise<void> {
   if (q) {
     where += ' AND transaction_id LIKE ?';
     whereParams.push(`%${q}%`);
+  }
+  if (domain) {
+    where += ' AND domain = ?';
+    whereParams.push(domain);
   }
 
   // Correlated subqueries for outbound ack — each binds ONE outAction param
