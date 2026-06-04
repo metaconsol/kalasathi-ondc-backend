@@ -17,7 +17,11 @@ import {
   getProvider,
   toggleProvider,
 } from '~/ondc/controllers/admin/providers.controller';
-import { listLogs, getLogsByTransaction } from '~/ondc/controllers/admin/logs.controller';
+import {
+  listLogs,
+  getLogsByTransaction,
+  deleteLogs,
+} from '~/ondc/controllers/admin/logs.controller';
 import { listTransactions } from '~/ondc/controllers/admin/transactions.controller';
 import {
   getActionCounts,
@@ -57,6 +61,7 @@ router.post('/ppf/trigger', ...sellerGuard, triggerPpfRecon);
 
 // ---- Logs ----
 router.get('/logs', ...adminGuard, listLogs);
+router.delete('/logs', ...adminGuard, deleteLogs);
 router.get('/logs/:transactionId', ...adminGuard, getLogsByTransaction);
 
 // ---- Transactions (funnel from overall_txns) ----

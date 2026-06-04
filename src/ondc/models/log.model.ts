@@ -8,6 +8,34 @@ import type { OndcTxnLog } from '~/ondc/types/api.types';
 
 type InsertPayload = Omit<OndcTxnLog, 'id' | 'created_at'>;
 
+/** Build the shared WHERE clause used by listFiltered / countFiltered. */
+function buildLogFilter(filters: {
+  q?: string;
+  action?: string;
+  direction?: string;
+  domain?: string;
+}): { where: string; params: unknown[] } {
+  const conds: string[] = [];
+  const params: unknown[] = [];
+  if (filters.action) {
+    conds.push('action = ?');
+    params.push(filters.action);
+  }
+  if (filters.direction) {
+    conds.push('direction = ?');
+    params.push(filters.direction);
+  }
+  if (filters.domain) {
+    conds.push('domain = ?');
+    params.push(filters.domain);
+  }
+  if (filters.q) {
+    conds.push('transaction_id LIKE ?');
+    params.push(`%${filters.q}%`);
+  }
+  return { where: conds.length ? `WHERE ${conds.join(' AND ')}` : '', params };
+}
+
 export const txnLogModel = {
   async insert(data: InsertPayload): Promise<number> {
     const result = await ondcExec(
@@ -51,41 +79,76 @@ export const txnLogModel = {
     offset?: number;
     q?: string;
     action?: string;
+    direction?: string;
+    domain?: string;
   }): Promise<OndcTxnLog[]> {
-    const conds: string[] = [];
-    const params: unknown[] = [];
-    if (filters.action) {
-      conds.push('action = ?');
-      params.push(filters.action);
-    }
-    if (filters.q) {
-      conds.push('transaction_id LIKE ?');
-      params.push(`%${filters.q}%`);
-    }
-    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    const { where, params } = buildLogFilter(filters);
     return ondcQuery<OndcTxnLog>(
       `SELECT * FROM ondc_txn_logs ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
       [...params, filters.limit ?? 100, filters.offset ?? 0],
     );
   },
 
-  async countFiltered(filters: { q?: string; action?: string }): Promise<number> {
-    const conds: string[] = [];
-    const params: unknown[] = [];
-    if (filters.action) {
-      conds.push('action = ?');
-      params.push(filters.action);
-    }
-    if (filters.q) {
-      conds.push('transaction_id LIKE ?');
-      params.push(`%${filters.q}%`);
-    }
-    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+  async countFiltered(filters: {
+    q?: string;
+    action?: string;
+    direction?: string;
+    domain?: string;
+  }): Promise<number> {
+    const { where, params } = buildLogFilter(filters);
     const rows = await ondcQuery<{ total: number }>(
       `SELECT COUNT(*) AS total FROM ondc_txn_logs ${where}`,
       params,
     );
     return rows[0]?.total ?? 0;
+  },
+
+  /**
+   * Delete logs matching a set of selectors (all ANDed together).
+   * Returns the number of rows removed. Returns 0 (no-op) when NO selector is
+   * supplied — a guard so an empty payload can never wipe the whole table.
+   */
+  async deleteFiltered(filters: {
+    ids?: number[];
+    transactionIds?: string[];
+    action?: string;
+    direction?: string;
+    domain?: string;
+    q?: string;
+  }): Promise<number> {
+    const conds: string[] = [];
+    const params: unknown[] = [];
+
+    if (filters.ids && filters.ids.length) {
+      conds.push(`id IN (${filters.ids.map(() => '?').join(',')})`);
+      params.push(...filters.ids);
+    }
+    if (filters.transactionIds && filters.transactionIds.length) {
+      conds.push(`transaction_id IN (${filters.transactionIds.map(() => '?').join(',')})`);
+      params.push(...filters.transactionIds);
+    }
+    if (filters.action) {
+      conds.push('action = ?');
+      params.push(filters.action);
+    }
+    if (filters.direction) {
+      conds.push('direction = ?');
+      params.push(filters.direction);
+    }
+    if (filters.domain) {
+      conds.push('domain = ?');
+      params.push(filters.domain);
+    }
+    if (filters.q) {
+      conds.push('transaction_id LIKE ?');
+      params.push(`%${filters.q}%`);
+    }
+
+    // Safety net: never run an unbounded DELETE.
+    if (conds.length === 0) return 0;
+
+    const result = await ondcExec(`DELETE FROM ondc_txn_logs WHERE ${conds.join(' AND ')}`, params);
+    return result.affectedRows;
   },
 
   async countAll(): Promise<number> {
