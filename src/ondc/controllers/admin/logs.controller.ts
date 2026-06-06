@@ -8,9 +8,28 @@ import { txnLogModel } from '~/ondc/models/log.model';
 
 /** GET /api/v1/ondc/admin/logs */
 export async function listLogs(req: Request, res: Response): Promise<void> {
-  const { limit = '100', offset = '0', q, action } = req.query as Record<string, string>;
-  const limitNum = parseInt(limit, 10);
-  const offsetNum = parseInt(offset, 10);
+  const {
+    limit = '100',
+    offset,
+    page,
+    q,
+    action,
+    direction,
+    domain,
+  } = req.query as Record<string, string>;
+  const limitNum = Math.max(1, parseInt(limit, 10) || 100);
+  // Prefer the `page` convention (what the UI sends); fall back to an explicit
+  // `offset` for older callers. Without this, every page returned OFFSET 0.
+  const pageNum = Math.max(1, parseInt(page ?? '', 10) || 1);
+  const offsetNum =
+    offset !== undefined ? Math.max(0, parseInt(offset, 10) || 0) : (pageNum - 1) * limitNum;
+  const dir = direction === 'inbound' || direction === 'outbound' ? direction : undefined;
+  const filter = {
+    ...(q ? { q } : {}),
+    ...(action ? { action } : {}),
+    ...(dir ? { direction: dir } : {}),
+    ...(domain ? { domain } : {}),
+  };
   const [logs, total] = await Promise.all([
     txnLogModel.listFiltered({
       limit: limitNum,
