@@ -8,20 +8,26 @@ import { txnLogModel } from '~/ondc/models/log.model';
 
 /** GET /api/v1/ondc/admin/logs */
 export async function listLogs(req: Request, res: Response): Promise<void> {
-  const { limit = '100', offset = '0', q, action } = req.query as Record<string, string>;
+  const {
+    limit = '100',
+    offset = '0',
+    q,
+    action,
+    direction,
+    domain,
+  } = req.query as Record<string, string>;
   const limitNum = parseInt(limit, 10);
   const offsetNum = parseInt(offset, 10);
+  const dir = direction === 'inbound' || direction === 'outbound' ? direction : undefined;
+  const filter = {
+    ...(q ? { q } : {}),
+    ...(action ? { action } : {}),
+    ...(dir ? { direction: dir } : {}),
+    ...(domain ? { domain } : {}),
+  };
   const [logs, total] = await Promise.all([
-    txnLogModel.listFiltered({
-      limit: limitNum,
-      offset: offsetNum,
-      ...(q ? { q } : {}),
-      ...(action ? { action } : {}),
-    }),
-    txnLogModel.countFiltered({
-      ...(q ? { q } : {}),
-      ...(action ? { action } : {}),
-    }),
+    txnLogModel.listFiltered({ limit: limitNum, offset: offsetNum, ...filter }),
+    txnLogModel.countFiltered(filter),
   ]);
   ApiResponse.success(res, 'Transaction logs', logs, {
     total,
@@ -29,6 +35,60 @@ export async function listLogs(req: Request, res: Response): Promise<void> {
     limit: limitNum,
     totalPages: Math.max(1, Math.ceil(total / limitNum)),
   });
+}
+
+/**
+ * DELETE /api/v1/ondc/admin/logs
+ * Deletes logs from ondc_txn_logs. Selectors (all ANDed) come from the body:
+ *   ids[]             — specific ondc_txn_logs.id rows
+ *   transaction_ids[] — every log belonging to these transactions
+ *   action            — e.g. 'search', 'on_search'
+ *   direction         — 'inbound' | 'outbound'
+ *   domain            — e.g. 'ONDC:RET16'
+ *   q                 — transaction_id LIKE match
+ * At least one selector is required, otherwise 400 (guards against wiping the table).
+ */
+export async function deleteLogs(req: Request, res: Response): Promise<void> {
+  const body = (req.body ?? {}) as {
+    ids?: unknown;
+    transaction_ids?: unknown;
+    action?: unknown;
+    direction?: unknown;
+    domain?: unknown;
+    q?: unknown;
+  };
+
+  const ids = Array.isArray(body.ids)
+    ? body.ids.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0)
+    : [];
+  const transactionIds = Array.isArray(body.transaction_ids)
+    ? body.transaction_ids.map((t) => String(t).trim()).filter(Boolean)
+    : [];
+  const action = body.action ? String(body.action).trim() : undefined;
+  const direction =
+    body.direction === 'inbound' || body.direction === 'outbound'
+      ? (body.direction as string)
+      : undefined;
+  const domain = body.domain ? String(body.domain).trim() : undefined;
+  const q = body.q ? String(body.q).trim() : undefined;
+
+  const hasSelector =
+    ids.length > 0 || transactionIds.length > 0 || !!action || !!direction || !!domain || !!q;
+  if (!hasSelector) {
+    ApiResponse.badRequest(res, 'Provide at least one filter or selection to delete logs');
+    return;
+  }
+
+  const deleted = await txnLogModel.deleteFiltered({
+    ...(ids.length ? { ids } : {}),
+    ...(transactionIds.length ? { transactionIds } : {}),
+    ...(action ? { action } : {}),
+    ...(direction ? { direction } : {}),
+    ...(domain ? { domain } : {}),
+    ...(q ? { q } : {}),
+  });
+
+  ApiResponse.success(res, `Deleted ${deleted} log${deleted === 1 ? '' : 's'}`, { deleted });
 }
 
 /** GET /api/v1/ondc/admin/logs/:transactionId */
