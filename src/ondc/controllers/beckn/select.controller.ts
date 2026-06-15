@@ -38,20 +38,7 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
     const order = message?.order ?? {};
 
     try {
-      await txnLogModel.insert({
-        transaction_id: txnId,
-        message_id: ctx.message_id,
-        action: 'select',
-        direction: 'inbound',
-        bap_id: ctx.bap_id,
-        bpp_id: ctx.bpp_id ?? null,
-        domain: ctx.domain,
-        http_status: null,
-        ack_status: 'ACK',
-        payload_json: JSON.stringify(req.body),
-        error_message: null,
-      });
-
+      // Inbound request is logged centrally by ondcRequestLogger middleware.
       await transactionModel.upsert({
         transaction_id: txnId,
         bap_id: ctx.bap_id,

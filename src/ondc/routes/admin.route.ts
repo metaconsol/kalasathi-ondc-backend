@@ -32,6 +32,7 @@ import {
   getTimeline,
 } from '~/ondc/controllers/admin/request_monitor.controller';
 import { listOndcIssues } from '~/ondc/controllers/admin/issues.controller';
+import { getDashboardStats } from '~/ondc/controllers/admin/stats.controller';
 import {
   listPpfRecon,
   getPpfReconByOrder,
@@ -42,6 +43,9 @@ const router = express.Router();
 
 const adminGuard = [authMiddleware, isAdmin];
 const sellerGuard = [authMiddleware, isAdminOrSeller];
+
+// ---- Dashboard (aggregate stats; role-scoped for sellers) ----
+router.get('/dashboard/stats', ...sellerGuard, getDashboardStats);
 
 // ---- Catalog (read-only, built live from ondc_odop_db) ----
 router.get('/catalog/debug', ...adminGuard, debugCatalog);
