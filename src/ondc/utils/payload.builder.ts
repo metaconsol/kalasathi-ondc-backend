@@ -31,7 +31,7 @@ export function buildResponseContext(incomingCtx: BecknContext, action: string):
     action: action as BecknContext['action'],
     bpp_id: ondcEnv.subscriberId,
     bpp_uri: ondcEnv.baseUri,
-    timestamp: new Date().toISOString(),
+    timestamp: nowIso(),
   };
 }
 
@@ -50,10 +50,11 @@ export function buildNack(context: BecknContext, error: BecknError): OndcAckResp
 
 // ─── /on_search ────────────────────────────────────────────────────────────
 
+// Per ONDC 1.2.5 MSN contract: bpp/payments is NOT at catalog level.
+// Payment terms echo back inside each provider as @ondc/org/payments.
 export interface OnSearchCatalog {
   'bpp/descriptor': object;
   'bpp/fulfillments': object[];
-  'bpp/payments': object[];
   'bpp/offers'?: unknown[];
   'bpp/providers': object[];
 }
@@ -191,8 +192,9 @@ export function buildOnRating(incomingCtx: BecknContext): object {
 export function newMessageId(): string {
   return randomUUID();
 }
+/** ONDC timestamps are millisecond-zeroed ISO-8601 (e.g. 2025-01-08T07:00:30.000Z). */
 export function nowIso(): string {
-  return new Date().toISOString();
+  return new Date().toISOString().replace(/\.\d{3}Z$/, '.000Z');
 }
 
 export function formatPrice(value: number, decimals = 2): string {

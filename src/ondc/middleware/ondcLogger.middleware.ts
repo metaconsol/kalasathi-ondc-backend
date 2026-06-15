@@ -77,24 +77,38 @@ export function ondcRequestLogger(req: Request, res: Response, next: NextFunctio
     }
   });
 
-  // Fire-and-forget DB log — never blocks the request
-  txnLogModel
-    .insert({
-      transaction_id: transactionId,
-      message_id: ctx?.message_id ?? 'unknown',
-      action,
-      direction: 'inbound',
-      bap_id: bapId,
-      bpp_id: ctx?.bpp_id ?? null,
-      domain: ctx?.domain ?? null,
-      http_status: null,
-      ack_status: null,
-      payload_json: JSON.stringify(req.body),
-      error_message: null,
-    })
-    .catch(() => {
-      // Logging must never fail a request
-    });
+    // Single inbound DB log — written here (after flush) so it records the
+    // ACK/NACK we actually returned to the BAP, captured from syncResponse.
+    // This is the ONE place inbound requests are logged; beckn controllers
+    // only log their outbound callbacks. Fire-and-forget: never fails a request.
+    const resp = syncResponse as
+      | {
+          context?: { bpp_id?: string };
+          message?: { ack?: { status?: string } };
+          error?: { message?: string };
+        }
+      | undefined;
+    const ackRaw = resp?.message?.ack?.status;
+    const ackStatus: 'ACK' | 'NACK' | null = ackRaw === 'ACK' || ackRaw === 'NACK' ? ackRaw : null;
+
+    txnLogModel
+      .insert({
+        transaction_id: transactionId,
+        message_id: ctx?.message_id ?? 'unknown',
+        action,
+        direction: 'inbound',
+        bap_id: bapId,
+        bpp_id: resp?.context?.bpp_id ?? ctx?.bpp_id ?? null,
+        domain: ctx?.domain ?? null,
+        http_status: res.statusCode,
+        ack_status: ackStatus,
+        payload_json: JSON.stringify(req.body),
+        error_message: resp?.error?.message ?? null,
+      })
+      .catch(() => {
+        // Logging must never fail a request
+      });
+  });
 
   next();
 }

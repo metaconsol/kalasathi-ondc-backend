@@ -32,12 +32,10 @@ export async function handleSearch(req: Request, res: Response): Promise<void> {
   const ctx = body.context;
 
   if (!ctx) {
-    res
-      .status(400)
-      .json({
-        message: { ack: { status: 'NACK' } },
-        error: { code: 'E100', message: 'Missing context' },
-      });
+    res.status(400).json({
+      message: { ack: { status: 'NACK' } },
+      error: { code: 'E100', message: 'Missing context' },
+    });
     return;
   }
 
@@ -46,15 +44,13 @@ export async function handleSearch(req: Request, res: Response): Promise<void> {
     .toUpperCase()
     .trim();
   if (!ALLOWED_DOMAINS.has(domain)) {
-    res
-      .status(200)
-      .json(
-        buildNack(ctx, {
-          type: 'CONTEXT-ERROR',
-          code: '20000',
-          message: `Unsupported domain: ${ctx.domain}`,
-        }),
-      );
+    res.status(200).json(
+      buildNack(ctx, {
+        type: 'CONTEXT-ERROR',
+        code: '20000',
+        message: `Unsupported domain: ${ctx.domain}`,
+      }),
+    );
     return;
   }
 
@@ -69,20 +65,7 @@ export async function handleSearch(req: Request, res: Response): Promise<void> {
     const intent = body.message?.intent ?? {};
 
     try {
-      // 1. Log inbound
-      await txnLogModel.insert({
-        transaction_id: txnId,
-        message_id: ctx.message_id,
-        action: 'search',
-        direction: 'inbound',
-        bap_id: bapId,
-        bpp_id: ctx.bpp_id ?? null,
-        domain: ctx.domain,
-        http_status: null,
-        ack_status: 'ACK',
-        payload_json: JSON.stringify(req.body),
-        error_message: null,
-      });
+      // 1. Inbound request is logged centrally by ondcRequestLogger middleware.
 
       // 2. Upsert bap_terms
       if (bapId) {

@@ -12,35 +12,19 @@
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- -----------------------------------------------------------------------------
--- STEP 1 — Idempotent ALTER helper (adds a column only when missing)
+-- STEP 1 — Add ONDC fulfilment / serviceability columns to store_locations
+--
+-- Uses MariaDB's native `ADD COLUMN IF NOT EXISTS` (supported since 10.0.2),
+-- so this stays idempotent WITHOUT a stored procedure. Avoiding stored
+-- procedures also sidesteps MariaDB error #1558 ("Column count of mysql.proc
+-- is wrong") on servers whose data directory predates the running version.
 -- -----------------------------------------------------------------------------
-DROP PROCEDURE IF EXISTS _ondc_add_column;
-DELIMITER $$
-CREATE PROCEDURE _ondc_add_column(IN tbl VARCHAR(64), IN col VARCHAR(64), IN ddl TEXT)
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME   = tbl
-      AND COLUMN_NAME  = col
-  ) THEN
-    SET @sql = CONCAT('ALTER TABLE `', tbl, '` ADD COLUMN ', ddl);
-    PREPARE stmt FROM @sql;
-    EXECUTE stmt;
-    DEALLOCATE PREPARE stmt;
-  END IF;
-END$$
-DELIMITER ;
-
--- -----------------------------------------------------------------------------
--- STEP 2 — Add ONDC fulfilment / serviceability columns to store_locations
--- -----------------------------------------------------------------------------
-CALL _ondc_add_column('store_locations', 'radius_km',        '`radius_km` INT(11) NULL AFTER `longitude`');
-CALL _ondc_add_column('store_locations', 'time_from',        '`time_from` SMALLINT(6) NULL COMMENT ''HHMM, e.g. 900 = 09:00'' AFTER `radius_km`');
-CALL _ondc_add_column('store_locations', 'time_to',          '`time_to` SMALLINT(6) NULL COMMENT ''HHMM, e.g. 2100 = 21:00'' AFTER `time_from`');
-CALL _ondc_add_column('store_locations', 'day_from',         '`day_from` TINYINT(4) NULL COMMENT ''1=Mon ... 7=Sun'' AFTER `time_to`');
-CALL _ondc_add_column('store_locations', 'day_to',           '`day_to` TINYINT(4) NULL COMMENT ''1=Mon ... 7=Sun'' AFTER `day_from`');
-CALL _ondc_add_column('store_locations', 'fulfillment_type', '`fulfillment_type` VARCHAR(32) NULL DEFAULT ''Delivery'' AFTER `day_to`');
+ALTER TABLE `store_locations` ADD COLUMN IF NOT EXISTS `radius_km` INT(11) NULL AFTER `longitude`;
+ALTER TABLE `store_locations` ADD COLUMN IF NOT EXISTS `time_from` SMALLINT(6) NULL COMMENT 'HHMM, e.g. 900 = 09:00' AFTER `radius_km`;
+ALTER TABLE `store_locations` ADD COLUMN IF NOT EXISTS `time_to` SMALLINT(6) NULL COMMENT 'HHMM, e.g. 2100 = 21:00' AFTER `time_from`;
+ALTER TABLE `store_locations` ADD COLUMN IF NOT EXISTS `day_from` TINYINT(4) NULL COMMENT '1=Mon ... 7=Sun' AFTER `time_to`;
+ALTER TABLE `store_locations` ADD COLUMN IF NOT EXISTS `day_to` TINYINT(4) NULL COMMENT '1=Mon ... 7=Sun' AFTER `day_from`;
+ALTER TABLE `store_locations` ADD COLUMN IF NOT EXISTS `fulfillment_type` VARCHAR(32) NULL DEFAULT 'Delivery' AFTER `day_to`;
 
 -- Backfill from the legacy columns. Safe to re-run (COALESCE only fills NULLs).
 UPDATE `store_locations`
@@ -52,8 +36,6 @@ SET
   `day_to`           = COALESCE(`day_to`,   7),
   `fulfillment_type` = COALESCE(`fulfillment_type`,
                                 CASE WHEN `location_type` = 'SELF_PICKUP' THEN 'Self-Pickup' ELSE 'Delivery' END);
-
-DROP PROCEDURE _ondc_add_column;
 
 -- =============================================================================
 -- STEP 3 — Create ONDC runtime tables (verbatim copies from ondc_odop_db)
