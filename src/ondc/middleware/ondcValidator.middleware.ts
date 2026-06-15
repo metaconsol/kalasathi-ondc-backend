@@ -24,6 +24,10 @@ const REQUIRED_CONTEXT_FIELDS: (keyof BecknContext)[] = [
   'timestamp',
 ];
 
+function isBlank(value: unknown): boolean {
+  return value == null || (typeof value === 'string' && value.trim().length === 0);
+}
+
 export function ondcContextValidator(req: Request, res: Response, next: NextFunction): void {
   const body = req.body as { context?: Partial<BecknContext>; message?: unknown };
 
@@ -34,8 +38,14 @@ export function ondcContextValidator(req: Request, res: Response, next: NextFunc
 
   const ctx = body.context as Partial<BecknContext>;
 
+  for (const [key, value] of Object.entries(ctx)) {
+    if (typeof value === 'string') {
+      (ctx as Record<string, unknown>)[key] = value.trim();
+    }
+  }
+
   for (const field of REQUIRED_CONTEXT_FIELDS) {
-    if (!ctx[field]) {
+    if (isBlank(ctx[field])) {
       const fakeCtx = { ...ctx, action: ctx.action ?? 'unknown' } as BecknContext;
       res.status(400).json(
         buildNack(fakeCtx, {
