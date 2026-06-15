@@ -54,6 +54,27 @@ export function ondcRequestLogger(req: Request, res: Response, next: NextFunctio
       syncStatusCode: res.statusCode,
       elapsedMs: Date.now() - startTime,
     });
+
+    const syncAckStatus = (syncResponse as any)?.message?.ack?.status;
+    if (syncResponse) {
+      txnLogModel
+        .insert({
+          transaction_id: transactionId,
+          message_id: (syncResponse as any)?.context?.message_id ?? ctx?.message_id ?? 'unknown',
+          action,
+          direction: 'outbound',
+          bap_id: bapId,
+          bpp_id: (syncResponse as any)?.context?.bpp_id ?? ctx?.bpp_id ?? null,
+          domain: (syncResponse as any)?.context?.domain ?? ctx?.domain ?? null,
+          http_status: res.statusCode,
+          ack_status: syncAckStatus === 'ACK' || syncAckStatus === 'NACK' ? syncAckStatus : null,
+          payload_json: JSON.stringify(syncResponse),
+          error_message: (syncResponse as any)?.error?.message ?? null,
+        })
+        .catch(() => {
+          // Logging must never fail a request
+        });
+    }
   });
 
   // Fire-and-forget DB log — never blocks the request
