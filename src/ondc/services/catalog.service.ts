@@ -18,7 +18,6 @@ import {
 import {
   buildBppDescriptor,
   buildBppFulfillments,
-  buildBppPayments,
   buildProviderEntry,
   applyVariantGrouping,
   type ProviderBuildInfo,
@@ -35,7 +34,7 @@ export const catalogService = {
    * into one item per leaf variant (or one per product if no variants).
    * Skips items whose resolved ONDC domain doesn't match the requested one.
    */
-  async buildSearchCatalog(domain: string, _searchQuery?: string): Promise<OnSearchCatalog> {
+  async buildSearchCatalog(domain: string): Promise<OnSearchCatalog> {
     const providers: object[] = [];
     const requestedDomain = (domain || 'ONDC:RET12') as OndcRetailDomain;
 
@@ -54,7 +53,7 @@ export const catalogService = {
       }
 
       const locationId = ondcLocations[0]?.id ?? 'L1';
-      const fulfillmentId = 'F1';
+      const fulfillmentId = '1'; // Delivery — matches bpp/fulfillments[0].id
 
       // Products + variants
       let rows: OndcCatalogRow[];
@@ -72,7 +71,14 @@ export const catalogService = {
       const builtItems: ItemWithVariantMeta[] = [];
       for (const row of rows) {
         try {
-          const built = await buildOndcItemFromRow(row, { providerId, locationId, fulfillmentId });
+          const built = await buildOndcItemFromRow(row, {
+            providerId,
+            locationId,
+            fulfillmentId,
+            storeName: store.name,
+            storeEmail: store.email,
+            storePhone: store.phone,
+          });
           if (built.domain !== requestedDomain) continue;
 
           builtItems.push({
@@ -108,10 +114,11 @@ export const catalogService = {
       );
     }
 
+    // Per ONDC 1.2.5: NO bpp/payments at catalog level — payment terms live
+    // inside each provider as @ondc/org/payments (built in buildProviderEntry).
     return {
       'bpp/descriptor': buildBppDescriptor(),
       'bpp/fulfillments': buildBppFulfillments(),
-      'bpp/payments': buildBppPayments(),
       'bpp/providers': providers,
     };
   },

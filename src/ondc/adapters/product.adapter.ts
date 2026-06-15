@@ -75,10 +75,15 @@ export interface OndcCatalogRow {
   cancellable_enum: string | null;
   returnable_enum: string | null;
   gst_percent: number;
+  hsn_sac_code: string | null;
+  /** Manual out-of-stock override (products.force_out_of_stock). */
+  force_out_of_stock: boolean;
   sku: string | null;
   gtin_ean: string | null;
   variant_attribute_value: string | null;
   variant_level_name: string | null;
+  /** Raw product_variants.variant_name (used as a colour fallback for grouping). */
+  variant_name: string | null;
   color_code: string | null;
   /** Merged product-level + variant-chain ondc attributes (keyed by attribute_key). */
   ondc_attrs: Record<string, { value: string; color_name: string | null }>;
@@ -116,6 +121,8 @@ interface ProductBaseRow {
   cancellable: string | null;
   returnable: string | null;
   gst_percent: number | null;
+  hsn_sac_code: string | null;
+  force_out_of_stock: number | null;
 }
 
 interface VariantBaseRow {
@@ -170,7 +177,9 @@ const PRODUCT_SELECT = `
   p.time_to_ship_unit,
   p.cancellable,
   p.returnable,
-  p.gst_percent`;
+  p.gst_percent,
+  p.hsn_sac_code,
+  p.force_out_of_stock`;
 
 // ─── Row fetchers ──────────────────────────────────────────────────────────
 
@@ -432,10 +441,13 @@ function buildRowForProduct(
     cancellable_enum: p.cancellable ?? 'DEFAULT',
     returnable_enum: p.returnable ?? 'DEFAULT',
     gst_percent: p.gst_percent ? parseFloat(String(p.gst_percent)) : 0,
+    hsn_sac_code: p.hsn_sac_code ?? null,
+    force_out_of_stock: Boolean(p.force_out_of_stock),
     sku: null,
     gtin_ean: null,
     variant_attribute_value: null,
     variant_level_name: null,
+    variant_name: null,
     color_code: null,
     ondc_attrs: attrs,
     images,
@@ -508,10 +520,13 @@ function buildRowForVariant(
     cancellable_enum: p.cancellable ?? 'DEFAULT',
     returnable_enum: p.returnable ?? 'DEFAULT',
     gst_percent: p.gst_percent ? parseFloat(String(p.gst_percent)) : 0,
+    hsn_sac_code: p.hsn_sac_code ?? null,
+    force_out_of_stock: Boolean(p.force_out_of_stock),
     sku: v.sku,
     gtin_ean: v.gtin_ean,
     variant_attribute_value: v.attribute_value,
     variant_level_name: v.level_name,
+    variant_name: v.variant_name ?? null,
     color_code: v.color_code,
     ondc_attrs: attrs,
     images,
@@ -640,7 +655,14 @@ function attrValue(attrs: OndcCatalogRow['ondc_attrs'], key: string): string | u
 
 export async function buildOndcItemFromRow(
   row: OndcCatalogRow,
-  ctx: { providerId: string; locationId: string; fulfillmentId: string },
+  ctx: {
+    providerId: string;
+    locationId: string;
+    fulfillmentId: string;
+    storeName?: string | null;
+    storeEmail?: string | null;
+    storePhone?: string | null;
+  },
 ): Promise<BuiltOndcItem> {
   const { domain, categoryId } = await resolveOndcCategory(row);
   const cfg = getDomainConfig(domain);
@@ -677,7 +699,15 @@ export async function buildOndcItemFromRow(
     new Date().toISOString().slice(0, 7);
   const origin = row.country_of_origin ?? attrValue(row.ondc_attrs, 'origin_country') ?? 'IND';
 
-  const colour = attrValue(row.ondc_attrs, 'colour') ?? row.color_code ?? undefined;
+  // Colour resolution: structured ondc attribute → variant color_code → fallback.
+  // Fallback: when a variant carries no structured colour but has a distinct
+  // variant_name (e.g. "carousel pink"), use it so variant grouping still works
+  // without per-variant attributes seeded. Skips empty / "Default" names.
+  const vName = row.variant_name?.trim();
+  const colour =
+    attrValue(row.ondc_attrs, 'colour') ??
+    row.color_code ??
+    (row.variant_id !== null && vName && vName.toLowerCase() !== 'default' ? vName : undefined);
   const sizeFromVariant =
     row.variant_level_name && row.variant_level_name.toLowerCase().includes('size')
       ? (row.variant_attribute_value ?? undefined)
@@ -694,9 +724,9 @@ export async function buildOndcItemFromRow(
     packagedCommodity: {
       manufacturerOrPackerName: mfgName,
       manufacturerOrPackerAddress: mfgAddress,
-      commonOrGenericNameOfCommodity: attrValue(row.ondc_attrs, 'commodity_name') ?? row.name,
+      // common/generic commodity name = the product's category (categories.name)
+      commonOrGenericNameOfCommodity: row.category_name ?? row.name,
       monthYearOfManufacture: mfgMonth,
-      importedProductCountryOfOrigin: origin !== 'IND' ? origin : undefined,
     },
   };
   if (cfg.requiresVegNonveg) {
@@ -715,6 +745,14 @@ export async function buildOndcItemFromRow(
   }
 
   const unit = row.weight_g ? { unit: 'gram', value: String(row.weight_g) } : undefined;
+
+  // descriptor.code in "type:code" form (1-EAN, 2-ISBN, 3-GTIN, 4-HSN, 5-other).
+  // Prefer HSN (products.hsn_sac_code → type 4); fall back to variant GTIN/EAN (type 3).
+  const idCode = row.hsn_sac_code
+    ? `4:${row.hsn_sac_code}`
+    : row.gtin_ean
+      ? `3:${row.gtin_ean}`
+      : undefined;
 
   const item = buildOndcItem({
     productId: row.product_id,
@@ -736,9 +774,17 @@ export async function buildOndcItemFromRow(
     timeToShip,
     sellerPickupReturn: row.seller_pickup_return,
     availableOnCod: row.is_cod_available,
-    consumerCareContact: `${SELLER_PROFILE.SUPPORT_NAME},${SELLER_PROFILE.SUPPORT_EMAIL},${SELLER_PROFILE.SUPPORT_PHONE}`,
+    // Consumer-care = seller's store contact (stores.store_name, support_email, support_phone),
+    // falling back to the platform support profile when a store field is missing.
+    consumerCareContact: [
+      ctx.storeName ?? SELLER_PROFILE.SUPPORT_NAME,
+      ctx.storeEmail ?? SELLER_PROFILE.SUPPORT_EMAIL,
+      ctx.storePhone ?? SELLER_PROFILE.SUPPORT_PHONE,
+    ].join(','),
     attributes: attrs,
     unit,
+    idCode,
+    outOfStock: row.force_out_of_stock,
   }) as OndcItem;
 
   // Variant group: PHP uses 'VG-<product_id>' for all variants of one product.

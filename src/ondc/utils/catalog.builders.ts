@@ -1,16 +1,30 @@
 /**
  * Domain-aware ONDC payload builders for /on_search, /on_select, /on_init, /on_confirm.
- * Builds payloads matching the ONDC retail API contract v1.2.0 exactly.
+ * Builds payloads matching the ONDC retail API contract v1.2.5 exactly.
  */
 
 import { ondcEnv } from '~/config/ondc.config';
 import { SELLER_PROFILE } from '~/ondc/config/constants';
-import {
-  getDomainConfig,
-  FULFILLMENT_CATEGORIES,
-  type OndcRetailDomain,
-} from '~/ondc/config/domain.config';
-/** Minimal provider info needed to build a bpp/providers entry — replaces ProviderBuildInfo */
+import { getDomainConfig, type OndcRetailDomain } from '~/ondc/config/domain.config';
+
+/**
+ * ONDC timestamps are millisecond-zeroed ISO-8601 (e.g. 2025-01-08T07:00:30.000Z).
+ * new Date().toISOString() yields real millis (…507Z) which some validators reject.
+ */
+export function ondcTimestamp(d: Date = new Date()): string {
+  return d.toISOString().replace(/\.\d{3}Z$/, '.000Z');
+}
+
+/** Hardcoded brand logo used for provider descriptor symbol/images (for now). */
+const ODOP_LOGO_URL = 'https://test.odopmartmp.com/assets/ODOP%20LOGO-DmZ6QXZC.jpeg';
+
+/**
+ * Default provider rating shown in on_search.
+ * ONDC: aggregate 1-5 scale, up to 1 decimal, maintained by the SNP.
+ * TODO: source from real review aggregate once provider ratings are tracked.
+ */
+const DEFAULT_PROVIDER_RATING = '4';
+/** Minimal provider info needed to build a bpp/providers entry */
 export interface ProviderBuildInfo {
   provider_id: string;
   name: string;
@@ -19,76 +33,70 @@ export interface ProviderBuildInfo {
   logo_url?: string | null;
   fssai_license?: string | null;
   updated_at?: Date | string | null;
+  /** Aggregate SNP rating 1-5, 1 decimal digit. Defaults if not set. */
+  rating?: string | null;
 }
 
 // ─── Provider tags ─────────────────────────────────────────────────────────
 
+/** A timing entry helper for provider tags. */
+function timingTag(
+  type: string,
+  locationId: string,
+  timeFrom: string,
+  timeTo: string,
+): { code: string; list: Array<{ code: string; value: string }> } {
+  return {
+    code: 'timing',
+    list: [
+      { code: 'type', value: type },
+      { code: 'location', value: locationId },
+      { code: 'day_from', value: '1' },
+      { code: 'day_to', value: '7' },
+      { code: 'time_from', value: timeFrom },
+      { code: 'time_to', value: timeTo },
+    ],
+  };
+}
+
 /**
- * Build provider-level tags for on_search.
- * Includes: serviceability, timing, bpp_terms, bap_terms.
+ * Build provider-level tags for on_search (ONDC 1.2.5).
+ * Emits timing (Order / Self-Pickup / Delivery) + serviceability (pan-India).
+ * Store accepts Orders 24/7 (0000-2359); Self-Pickup & Delivery have service windows.
+ * No bpp_terms here — those live in bpp/descriptor.
  */
 export function buildProviderTags(
-  providerRow: ProviderBuildInfo,
+  _providerRow: ProviderBuildInfo,
   domain: OndcRetailDomain,
   locationId: string,
   categoryId: string,
-  serviceabilityRadiusKm: number = 10,
 ): object[] {
-  const tags: object[] = [];
+  const tags: object[] = [
+    // Orders accepted 24/7
+    timingTag('Order', locationId, '0000', '2359'),
+    // Self-Pickup service window
+    timingTag('Self-Pickup', locationId, '1100', '2000'),
+    // Delivery service window
+    timingTag('Delivery', locationId, '1100', '2200'),
+    // Serviceability — pan-India (type 12), val=IND, unit=country
+    {
+      code: 'serviceability',
+      list: [
+        { code: 'location', value: locationId },
+        { code: 'category', value: categoryId },
+        { code: 'type', value: '12' }, // 10=hyperlocal, 11=intercity, 12=pan-India
+        { code: 'val', value: 'IND' },
+        { code: 'unit', value: 'country' },
+      ],
+    },
+  ];
 
-  // 1. Serviceability — what areas this provider serves
-  tags.push({
-    code: 'serviceability',
-    list: [
-      { code: 'location', value: locationId },
-      { code: 'category', value: categoryId },
-      { code: 'type', value: '10' }, // 10=hyperlocal, 11=intercity, 12=pan-India
-      { code: 'val', value: String(serviceabilityRadiusKm) },
-      { code: 'unit', value: 'km' },
-    ],
-  });
-
-  // 2. Timing — when this provider accepts orders / does delivery
-  tags.push({
-    code: 'timing',
-    list: [
-      { code: 'type', value: 'Order' },
-      { code: 'location', value: locationId },
-      { code: 'day_from', value: '1' },
-      { code: 'day_to', value: '7' },
-      { code: 'time_from', value: '0900' },
-      { code: 'time_to', value: '2100' },
-    ],
-  });
-
-  tags.push({
-    code: 'timing',
-    list: [
-      { code: 'type', value: 'Delivery' },
-      { code: 'location', value: locationId },
-      { code: 'day_from', value: '1' },
-      { code: 'day_to', value: '7' },
-      { code: 'time_from', value: '0900' },
-      { code: 'time_to', value: '2100' },
-    ],
-  });
-
-  // 3. BPP terms — non-negotiable terms for buyer app
-  tags.push({
-    code: 'bpp_terms',
-    list: [
-      { code: 'np_type', value: 'MSN' }, // Multi-Seller Network
-      { code: 'accept_bap_terms', value: 'Y' },
-      { code: 'collect_payment', value: 'N' }, // BAP collects (prepaid)
-    ],
-  });
-
-  // FSSAI license for grocery (RET10)
+  // FSSAI license tag — RET10 grocery only
   const cfg = getDomainConfig(domain);
-  if (cfg.requiresFssai && providerRow.fssai_license) {
+  if (cfg.requiresFssai && _providerRow.fssai_license) {
     tags.push({
       code: '@ondc/org/fssai_license_no',
-      list: [{ code: 'fssai_license_no', value: providerRow.fssai_license }],
+      list: [{ code: 'fssai_license_no', value: _providerRow.fssai_license }],
     });
   }
 
@@ -172,31 +180,9 @@ export function buildItemTags(inp: ItemTagInputs): object[] {
     tags.push({ code: 'attribute', list: attrs });
   }
 
-  // g2 — statutory_reqs_packaged_commodities (optional but commonly required)
-  if (inp.packagedCommodity) {
-    const pc = inp.packagedCommodity;
-    const g2: Array<{ code: string; value: string }> = [];
-    if (pc.manufacturerOrPackerName)
-      g2.push({ code: 'manufacturer_or_packer_name', value: pc.manufacturerOrPackerName });
-    if (pc.manufacturerOrPackerAddress)
-      g2.push({ code: 'manufacturer_or_packer_address', value: pc.manufacturerOrPackerAddress });
-    if (pc.commonOrGenericNameOfCommodity)
-      g2.push({
-        code: 'common_or_generic_name_of_commodity',
-        value: pc.commonOrGenericNameOfCommodity,
-      });
-    if (pc.monthYearOfManufacture)
-      g2.push({
-        code: 'month_year_of_manufacture_packing_import',
-        value: pc.monthYearOfManufacture,
-      });
-    if (pc.importedProductCountryOfOrigin)
-      g2.push({
-        code: 'imported_product_country_of_origin',
-        value: pc.importedProductCountryOfOrigin,
-      });
-    if (g2.length) tags.push({ code: 'g2', list: g2 });
-  }
+  // NOTE: packaged-commodities statutory info is emitted as the top-level
+  // item field `@ondc/org/statutory_reqs_packaged_commodities` (see buildOndcItem),
+  // NOT as a "g2" item tag — per ONDC 1.2.5.
 
   // g3 — statutory_reqs_prepackaged_food (RET10 mandatory if applicable)
   if (cfg.requiresFoodStatutory && inp.prepackagedFood) {
@@ -231,13 +217,13 @@ export interface ProviderLocation {
   };
   circle?: {
     gps: string;
-    radius: { type: string; value: string; unit: string };
+    radius: { unit: string; value: string };
   };
   time: {
     label: string;
     timestamp: string;
     days: string;
-    schedule: { holidays: string[] };
+    schedule: { holidays: string[]; frequency: string; times: string[] };
     range: { start: string; end: string };
   };
 }
@@ -247,8 +233,8 @@ export function buildProviderLocation(
   gps: string,
   address: ProviderLocation['address'],
   serviceRadiusKm: number = 10,
-  timeFrom: string = '0900',
-  timeTo: string = '2100',
+  timeFrom: string = '0000',
+  timeTo: string = '2359',
   days: string = '1,2,3,4,5,6,7',
 ): ProviderLocation {
   return {
@@ -257,13 +243,14 @@ export function buildProviderLocation(
     address,
     circle: {
       gps,
-      radius: { type: 'constant', value: String(serviceRadiusKm), unit: 'km' },
+      // ONDC 1.2.5: radius is { unit, value } only — no "type".
+      radius: { unit: 'km', value: String(serviceRadiusKm) },
     },
     time: {
       label: 'enable',
-      timestamp: new Date().toISOString(),
+      timestamp: ondcTimestamp(),
       days,
-      schedule: { holidays: [] },
+      schedule: { holidays: [], frequency: 'PT4H', times: ['0000', '2359'] },
       range: { start: timeFrom, end: timeTo },
     },
   };
@@ -284,7 +271,6 @@ export function buildBppDescriptor() {
         list: [
           { code: 'np_type', value: 'MSN' },
           { code: 'accept_bap_terms', value: 'Y' },
-          { code: 'collect_payment', value: 'N' },
         ],
       },
     ],
@@ -293,23 +279,39 @@ export function buildBppDescriptor() {
 
 // ─── BPP fulfillments + payments ───────────────────────────────────────────
 
+/**
+ * Top-level bpp/fulfillments — per ONDC 1.2.5 this is just {id, type}.
+ * No @ondc/org/category, @ondc/org/TAT or contact at catalog level.
+ */
 export function buildBppFulfillments() {
   return [
+    { id: '1', type: 'Delivery' },
+    { id: '2', type: 'Self-Pickup' },
+  ];
+}
+
+/**
+ * Provider-level fulfillments for bpp/providers[*].fulfillments.
+ * Per ONDC 1.2.5: only id, type, contact — no @ondc/org/category or @ondc/org/TAT.
+ * Those fields belong only in the top-level bpp/fulfillments array.
+ */
+export function buildProviderFulfillments(): object[] {
+  return [
     {
-      id: 'F1',
+      id: '1',
       type: 'Delivery',
-      '@ondc/org/category': FULFILLMENT_CATEGORIES.Delivery.Standard,
-      '@ondc/org/TAT': 'P1D',
       contact: { phone: SELLER_PROFILE.SUPPORT_PHONE, email: SELLER_PROFILE.SUPPORT_EMAIL },
     },
     {
-      id: 'F2',
+      id: '2',
       type: 'Self-Pickup',
       contact: { phone: SELLER_PROFILE.SUPPORT_PHONE, email: SELLER_PROFILE.SUPPORT_EMAIL },
     },
   ];
 }
 
+/** @deprecated - bpp/payments is no longer emitted at catalog level in ONDC 1.2.5.
+ * Payment terms now live inside each provider as @ondc/org/payments. */
 export function buildBppPayments() {
   return [
     {
@@ -347,13 +349,28 @@ export interface BuildOndcItemInput {
   attributes?: Omit<ItemTagInputs, 'domain'> | undefined;
   /** Optional unit-of-measure */
   unit?: { unit: string; value: string } | undefined;
+  /** descriptor.code in "type:code" form (1-EAN, 2-ISBN, 3-GTIN, 4-HSN, 5-other). */
+  idCode?: string | undefined;
+  /** Manual out-of-stock override (products.force_out_of_stock). */
+  outOfStock?: boolean | undefined;
 }
 
 export function buildOndcItem(inp: BuildOndcItemInput): object {
+  // In-stock unless manually flagged OOS or stock depleted.
+  const inStock = !inp.outOfStock && inp.stock > 0;
+  // available.count is the ONDC sentinel: "99" when available, "0" when out of stock.
+  const availableCount = inStock ? '99' : '0';
+  // maximum.count = the actual stock count, taken directly from products.stock.
+  const maximumCount = String(inp.stock);
+
   return {
     id: inp.ondcItemId,
+    time: { label: 'enable', timestamp: ondcTimestamp() },
+    // SNP-maintained item rating; '' when not yet rated.
+    rating: '',
     descriptor: {
       name: inp.name,
+      ...(inp.idCode ? { code: inp.idCode } : {}),
       symbol: inp.images[0],
       short_desc: inp.shortDesc.slice(0, 200),
       long_desc: inp.longDesc,
@@ -361,8 +378,8 @@ export function buildOndcItem(inp: BuildOndcItemInput): object {
     },
     quantity: {
       ...(inp.unit ? { unitized: { measure: inp.unit } } : {}),
-      available: { count: String(Math.min(99, inp.stock)) },
-      maximum: { count: String(Math.min(10, inp.stock)) },
+      available: { count: availableCount },
+      maximum: { count: maximumCount },
     },
     price: {
       currency: 'INR',
@@ -380,6 +397,18 @@ export function buildOndcItem(inp: BuildOndcItemInput): object {
     '@ondc/org/time_to_ship': inp.timeToShip,
     '@ondc/org/available_on_cod': inp.availableOnCod,
     '@ondc/org/contact_details_consumer_care': inp.consumerCareContact,
+
+    // Top-level statutory object (ONDC 1.2.5) — replaces the old "g2" item tag.
+    '@ondc/org/statutory_reqs_packaged_commodities': {
+      manufacturer_or_packer_name:
+        inp.attributes?.packagedCommodity?.manufacturerOrPackerName ?? '',
+      manufacturer_or_packer_address:
+        inp.attributes?.packagedCommodity?.manufacturerOrPackerAddress ?? '',
+      common_or_generic_name_of_commodity:
+        inp.attributes?.packagedCommodity?.commonOrGenericNameOfCommodity ?? '',
+      month_year_of_manufacture_packing_import:
+        inp.attributes?.packagedCommodity?.monthYearOfManufacture ?? '',
+    },
 
     tags: buildItemTags({ domain: inp.domain, ...(inp.attributes ?? {}) }),
   };
@@ -592,40 +621,45 @@ export function buildProviderEntry(
           }),
         ];
 
-  const categories: object[] = [
-    {
-      id: cfg.defaultCategoryCode,
-      descriptor: { name: cfg.defaultCategoryCode, code: cfg.defaultCategoryCode },
-    },
-    ...variantCategories,
-  ];
+  // Provider `categories` carries ONLY variant groups (ONDC 1.2.5). The standard
+  // retail category lives on each item's `category_id`, not here — so when a
+  // provider has no variant groups, `categories` is omitted entirely.
+  const providerTimestamp = providerRow.updated_at
+    ? ondcTimestamp(new Date(providerRow.updated_at))
+    : ondcTimestamp();
 
-  return {
+  const entry: Record<string, unknown> = {
     id: providerRow.provider_id,
-    time: {
-      label: 'enable',
-      timestamp:
-        providerRow.updated_at instanceof Date
-          ? providerRow.updated_at.toISOString()
-          : providerRow.updated_at
-            ? new Date(providerRow.updated_at).toISOString()
-            : new Date().toISOString(),
-    },
-    fulfillments: buildBppFulfillments(),
+    time: { label: 'enable', timestamp: providerTimestamp },
+    // SNP-maintained aggregate rating, 1-5 scale, 1 decimal digit.
+    rating: providerRow.rating ?? DEFAULT_PROVIDER_RATING,
+    // Provider-level fulfillments: id/type/contact ONLY (no @ondc/org/TAT or category).
+    fulfillments: buildProviderFulfillments(),
     descriptor: {
       name: providerRow.name,
-      symbol: providerRow.logo_url ?? '',
+      symbol: ODOP_LOGO_URL,
       short_desc: providerRow.short_desc ?? '',
       long_desc: providerRow.long_desc ?? '',
-      images: providerRow.logo_url ? [providerRow.logo_url] : [],
+      images: [ODOP_LOGO_URL],
     },
-    '@ondc/org/fssai_license_no': cfg.requiresFssai ? (providerRow.fssai_license ?? '') : undefined,
     ttl: 'PT24H',
     locations: resolvedLocations,
-    categories,
     items,
     tags: buildProviderTags(providerRow, domain, firstLocId, cfg.defaultCategoryCode),
   };
+
+  // Variant groups only — include `categories` solely when the product(s) here
+  // actually form variant groups; omit the key entirely otherwise.
+  if (variantCategories.length > 0) {
+    entry['categories'] = variantCategories;
+  }
+
+  // FSSAI only for RET10 (grocery)
+  if (cfg.requiresFssai) {
+    entry['@ondc/org/fssai_license_no'] = providerRow.fssai_license ?? '';
+  }
+
+  return entry;
 }
 
 // ─── Variant grouping ──────────────────────────────────────────────────────

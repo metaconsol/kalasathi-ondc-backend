@@ -148,19 +148,6 @@ export async function fetchStoreLocations(storeId: number): Promise<MainDbStoreL
   }));
 }
 
-/** Format HHMM smallint as 4-char string: 900 → "0900", 2100 → "2100" */
-function formatTime(hhmm: number | null, fallback: string): string {
-  if (hhmm === null) return fallback;
-  return String(hhmm).padStart(4, '0');
-}
-
-/** Build days string from day_from/day_to: "1,2,3,4,5,6,7" */
-function buildDays(from: number | null, to: number | null): string {
-  const f = from ?? 1;
-  const t = to ?? 7;
-  return Array.from({ length: t - f + 1 }, (_, i) => String(f + i)).join(',');
-}
-
 /** Convert store_locations row → ONDC ProviderLocation */
 export function mapStoreLocationToOndcLocation(loc: MainDbStoreLocation): ProviderLocation {
   const lat = loc.latitude ?? 23.2599;
@@ -168,6 +155,9 @@ export function mapStoreLocationToOndcLocation(loc: MainDbStoreLocation): Provid
   const gps = `${lat},${lng}`;
   const radiusKm = Math.max(1, loc.radius_km ?? 10);
 
+  // Store operates 24/7 — location time defaults to 0000-2359, all days
+  // (buildProviderLocation applies those defaults). Per-fulfillment service
+  // windows are expressed in the provider timing tags instead.
   return buildProviderLocation(
     String(loc.id),
     gps,
@@ -179,9 +169,6 @@ export function mapStoreLocationToOndcLocation(loc: MainDbStoreLocation): Provid
       state: loc.state,
     },
     radiusKm,
-    formatTime(loc.time_from, '0900'),
-    formatTime(loc.time_to, '2100'),
-    buildDays(loc.day_from, loc.day_to),
   );
 }
 
