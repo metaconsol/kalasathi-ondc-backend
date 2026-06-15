@@ -75,13 +75,15 @@ export function buildOnSelect(
     items: object[];
     fulfillments: object[];
     quote: object;
-    payment: object;
   },
+  error?: BecknError,
 ): object {
-  return {
+  const payload: Record<string, unknown> = {
     context: buildResponseContext(incomingCtx, 'on_select'),
     message: { order },
   };
+  if (error) payload['error'] = error;
+  return payload;
 }
 
 // ─── /on_init ──────────────────────────────────────────────────────────────

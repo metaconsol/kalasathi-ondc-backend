@@ -80,7 +80,9 @@ export function ondcRequestLogger(req: Request, res: Response, next: NextFunctio
         domain: ctx?.domain ?? null,
         http_status: res.statusCode,
         ack_status: ackStatus,
-        payload_json: JSON.stringify(req.body),
+        payload_json: JSON.stringify(
+          ackStatus === 'NACK' && syncResponse ? syncResponse : req.body,
+        ),
         error_message: resp?.error?.message ?? null,
       })
       .catch(() => {
