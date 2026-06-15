@@ -470,23 +470,16 @@ export interface QuoteBuildOutput {
   ttl: string;
 }
 
-export interface QuoteBuildOptions {
-  includeZeroBreakups?: boolean;
-  fulfillmentTax?: number;
-}
-
 export function buildQuote(
   lines: QuoteLineInput[],
   fulfillmentId: string = 'F1',
   deliveryCharge: number = 0,
   packingCharge: number = 0,
   convenienceFee: number = 0,
-  options: QuoteBuildOptions = {},
 ): QuoteBuildOutput {
-  const { includeZeroBreakups = false, fulfillmentTax = 0 } = options;
   const breakup: object[] = [];
   let total = 0;
-  const totalTax = 0;
+  let totalTax = 0;
 
   for (const l of lines) {
     const lineTotal = l.unitPrice * l.quantity;
@@ -507,22 +500,22 @@ export function buildQuote(
       },
     });
 
-    const tax = l.taxPercent && l.taxPercent > 0 ? (lineTotal * l.taxPercent) / 100 : 0;
-    // if (tax > 0 || includeZeroBreakups) {
-    //   totalTax += tax;
-    //   breakup.push({
-    //     '@ondc/org/item_id': l.itemId,
-    //     '@ondc/org/item_quantity': { count: l.quantity },
-    //     title: 'Tax',
-    //     '@ondc/org/title_type': 'tax',
-    //     price: { currency: 'INR', value: tax.toFixed(2) },
-    //   });
-    // }
+    if (l.taxPercent && l.taxPercent > 0) {
+      const tax = (lineTotal * l.taxPercent) / 100;
+      totalTax += tax;
+      breakup.push({
+        '@ondc/org/item_id': l.itemId,
+        '@ondc/org/item_quantity': { count: l.quantity },
+        title: 'Tax',
+        '@ondc/org/title_type': 'tax',
+        price: { currency: 'INR', value: tax.toFixed(2) },
+      });
+    }
   }
 
   total += totalTax;
 
-  if (deliveryCharge > 0 || includeZeroBreakups) {
+  if (deliveryCharge > 0) {
     breakup.push({
       '@ondc/org/item_id': fulfillmentId,
       title: 'Delivery charges',
@@ -532,25 +525,7 @@ export function buildQuote(
     total += deliveryCharge;
   }
 
-  if (fulfillmentTax > 0 || includeZeroBreakups) {
-    breakup.push({
-      '@ondc/org/item_id': fulfillmentId,
-      title: 'Tax',
-      '@ondc/org/title_type': 'tax',
-      price: { currency: 'INR', value: fulfillmentTax.toFixed(2) },
-      item: {
-        tags: [
-          {
-            code: 'quote',
-            list: [{ code: 'type', value: 'fulfillment' }],
-          },
-        ],
-      },
-    });
-    total += fulfillmentTax;
-  }
-
-  if (packingCharge > 0 || includeZeroBreakups) {
+  if (packingCharge > 0) {
     breakup.push({
       '@ondc/org/item_id': fulfillmentId,
       title: 'Packing charges',
@@ -560,7 +535,7 @@ export function buildQuote(
     total += packingCharge;
   }
 
-  if (convenienceFee > 0 || includeZeroBreakups) {
+  if (convenienceFee > 0) {
     breakup.push({
       '@ondc/org/item_id': fulfillmentId,
       title: 'Convenience Fee',
