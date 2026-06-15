@@ -66,7 +66,7 @@ export const fulfillmentService = {
 
   /** Get current fulfillment state for an order */
   async getState(ondcOrderId: string, fulfillmentId = 'F1'): Promise<OndcFulfillmentState | null> {
-    const fulfillments = await fulfillmentModel.findByOrderId(ondcOrderId);
+    const fulfillments = (await fulfillmentModel.findByOrderId(ondcOrderId)) ?? [];
     const f = fulfillments.find((ff) => ff.fulfillment_id === fulfillmentId);
     return f?.state ?? null;
   },

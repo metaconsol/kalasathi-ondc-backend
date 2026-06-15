@@ -47,16 +47,33 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
 
       // Compute total from quote
       const total = parseFloat(String(order?.['quote']?.['price']?.['value'] ?? '0')) || 0;
+      const inboundItems = Array.isArray(order['items']) ? order['items'] : [];
+      const inboundFulfillments = Array.isArray(order['fulfillments']) ? order['fulfillments'] : [];
+      const inboundBreakup = Array.isArray(order?.['quote']?.['breakup'])
+        ? order['quote']['breakup']
+        : [];
+      const inboundTags = Array.isArray(order['tags']) ? order['tags'] : undefined;
+      const builtPayment = buildOnInitPayment(total) as {
+        [key: string]: unknown;
+        '@ondc/org/settlement_details'?: unknown;
+      };
+
+      if (!Array.isArray(builtPayment['@ondc/org/settlement_details'])) {
+        builtPayment['@ondc/org/settlement_details'] = [];
+      }
 
       const initOrder = {
         provider: order['provider'],
-        items: order['items'] ?? [],
+        items: inboundItems,
         billing: order['billing'] ?? {},
-        fulfillments: order['fulfillments'] ?? [],
-        quote: order['quote'] ?? {},
-        payment: buildOnInitPayment(total),
+        fulfillments: inboundFulfillments,
+        quote: {
+          ...(order['quote'] ?? {}),
+          breakup: inboundBreakup,
+        },
+        payment: builtPayment,
         cancellation_terms: COMPLETE_CANCELLATION_TERMS,
-        ...(order['tags'] ? { tags: order['tags'] } : {}),
+        ...(inboundTags ? { tags: inboundTags } : {}),
       };
 
       const payload = buildOnInit(ctx, initOrder) as any;
