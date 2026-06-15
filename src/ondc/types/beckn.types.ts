@@ -5,8 +5,6 @@
 
 export interface BecknContext {
   domain: string;
-  country: string;
-  city: string;
   action: BecknAction;
   core_version: string;
   bap_id: string;
@@ -15,6 +13,8 @@ export interface BecknContext {
   bpp_uri?: string;
   transaction_id: string;
   message_id: string;
+  city: string;
+  country: string;
   timestamp: string; // ISO-8601
   key?: string;
   ttl?: string; // ISO-8601 duration e.g. "PT30S"
