@@ -17,12 +17,20 @@ import { becknService } from '~/ondc/services/beckn.service';
 import { observabilityService } from '~/ondc/services/observability.service';
 import { orderModel } from '~/ondc/models/order.model';
 import { providerModel } from '~/ondc/models/provider.model';
+import { resolveOndcCatalogRow } from '~/ondc/adapters/product.adapter';
+import {
+  fetchSellerProfileByStoreId,
+  fetchStoreById,
+  fetchStoreLocations,
+  type MainDbStoreLocation,
+} from '~/ondc/adapters/seller.adapter';
 import { transactionModel } from '~/ondc/models/transaction.model';
 import { txnLogModel } from '~/ondc/models/log.model';
 import { overallTxnsModel } from '~/ondc/models/overall_txns.model';
 import { ondcLogger } from '~/ondc/utils/logger.util';
 import { ondcEnv } from '~/config/ondc.config';
-import { withOndcTransaction } from '~/lib/ondcSql';
+import { ondcQuery, withOndcTransaction } from '~/lib/ondcSql';
+import { buildQuote, type QuoteLineInput } from '~/ondc/utils/catalog.builders';
 import type { BecknContext } from '~/ondc/types/beckn.types';
 
 /** Extract numeric string value from quote.price.value */
@@ -33,6 +41,107 @@ function quoteTotal(order: Record<string, any>): number {
 /** Sum item quantities */
 function itemQtyTotal(items: any[]): number {
   return items.reduce((s, i) => s + (parseInt(i?.quantity?.count ?? '1', 10) || 1), 0);
+}
+
+type LooseObject = Record<string, any>;
+
+interface FallbackCatalogRow {
+  store_id: number;
+  name: string;
+  price: number;
+  stock: number;
+  gst_percent: number;
+  time_to_ship_value: number | null;
+  time_to_ship_unit: string | null;
+}
+
+async function resolveFallbackCatalogRow(
+  itemId: string,
+  providerId?: string,
+): Promise<FallbackCatalogRow | null> {
+  const rows = await ondcQuery<any>(
+    `SELECT
+       p.store_id,
+       p.product_name AS name,
+       COALESCE(p.default_price, p.mrp, 0) AS price,
+       COALESCE(p.stock, 0) AS stock,
+       COALESCE(p.gst_percent, 0) AS gst_percent,
+       p.time_to_ship_value,
+       p.time_to_ship_unit
+     FROM ondc_catalog_items oci
+     INNER JOIN products p ON p.id = oci.main_db_product_id
+     WHERE oci.ondc_item_id = ?
+       AND oci.sync_status = 'synced'
+       AND (? = '' OR oci.provider_id = ?)
+     ORDER BY oci.updated_at DESC
+     LIMIT 1`,
+    [itemId, providerId ?? '', providerId ?? ''],
+  );
+
+  if (!rows[0]) return null;
+  return {
+    store_id: Number(rows[0].store_id),
+    name: String(rows[0].name ?? ''),
+    price: Number(rows[0].price ?? 0),
+    stock: Number(rows[0].stock ?? 0),
+    gst_percent: Number(rows[0].gst_percent ?? 0),
+    time_to_ship_value:
+      rows[0].time_to_ship_value != null ? Number(rows[0].time_to_ship_value) : null,
+    time_to_ship_unit: rows[0].time_to_ship_unit ?? null,
+  };
+}
+
+function normalizeAddress(address: LooseObject = {}, includeEmpty = false): LooseObject {
+  const normalized = {
+    name: String(address?.name ?? address?.door ?? ''),
+    building: String(address?.building ?? ''),
+    locality: String(address?.locality ?? address?.street ?? ''),
+    city: String(address?.city ?? ''),
+    state: String(address?.state ?? ''),
+    country: String(address?.country ?? ''),
+    area_code: String(address?.area_code ?? ''),
+  };
+
+  if (includeEmpty) return normalized;
+
+  return Object.fromEntries(Object.entries(normalized).filter(([, value]) => value !== ''));
+}
+
+function normalizeBilling(billing: LooseObject = {}, includeEmpty = false): LooseObject {
+  const normalized = {
+    name: String(billing?.name ?? ''),
+    address: normalizeAddress(billing?.address ?? {}, includeEmpty),
+    email: String(billing?.email ?? ''),
+    phone: String(billing?.phone ?? ''),
+    created_at: String(billing?.created_at ?? ''),
+    updated_at: String(billing?.updated_at ?? ''),
+  };
+
+  if (includeEmpty) return normalized;
+
+  return {
+    ...Object.fromEntries(
+      Object.entries(normalized).filter(([key, value]) => key === 'address' || value !== ''),
+    ),
+    address: normalized.address,
+  };
+}
+
+function buildTimeToShip(
+  value: number | null | undefined,
+  unit: string | null | undefined,
+): string {
+  if (!value || !unit) return 'P1D';
+  switch (String(unit).toUpperCase()) {
+    case 'MINUTES':
+      return `PT${value}M`;
+    case 'HOURS':
+      return `PT${value}H`;
+    case 'DAYS':
+      return `P${value}D`;
+    default:
+      return 'P1D';
+  }
 }
 
 export async function handleConfirm(req: Request, res: Response): Promise<void> {
@@ -65,17 +174,104 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
       // Parse billing / payment / fulfillment details
       const billing = order['billing'] ?? {};
       const payment = order['payment'] ?? {};
-      const items: any[] = order['items'] ?? [];
-      const fulfillments: any[] = order['fulfillments'] ?? [];
-      const total = quoteTotal(order);
+      const items: any[] = Array.isArray(order['items']) ? order['items'] : [];
+      const fulfillments: any[] = Array.isArray(order['fulfillments']) ? order['fulfillments'] : [];
       const itemCount = itemQtyTotal(items);
+      const inboundBreakup: any[] = safeJsonParse(
+        JSON.stringify(order['quote']?.['breakup'] ?? []),
+        [],
+      );
+      const fallbackFulfillmentId = String(items[0]?.fulfillment_id ?? fulfillments[0]?.id ?? 'F1');
+      const quoteLines: QuoteLineInput[] = [];
+      let resolvedStoreId: number | null =
+        Number.parseInt(String(order['provider']?.['id'] ?? ''), 10) || null;
+      const normalizedItems: Array<{
+        id: string;
+        quantity: { count: number };
+        fulfillment_id: string;
+      }> = [];
+      let firstTat = 'P1D';
+      for (const item of items) {
+        const qty = parseInt(item?.quantity?.count ?? '1', 10) || 1;
+        if (!item?.id || qty <= 0) continue;
+        const fulfillmentId = String(item.fulfillment_id ?? fallbackFulfillmentId);
+        normalizedItems.push({
+          id: String(item.id),
+          quantity: { count: qty },
+          fulfillment_id: fulfillmentId,
+        });
+        const catalogRow =
+          (await resolveOndcCatalogRow(String(item.id))) ??
+          (await resolveFallbackCatalogRow(
+            String(item.id),
+            String(order['provider']?.['id'] ?? ''),
+          ));
+        if (!catalogRow) continue;
+        if (resolvedStoreId !== null && catalogRow.store_id !== resolvedStoreId) continue;
+        resolvedStoreId = catalogRow.store_id;
+        firstTat = buildTimeToShip(catalogRow.time_to_ship_value, catalogRow.time_to_ship_unit);
+        quoteLines.push({
+          itemId: String(item.id),
+          itemName: catalogRow.name,
+          unitPrice: catalogRow.price,
+          quantity: qty,
+          stockAvailable: catalogRow.stock > 0 ? 99 : 0,
+          stockMaximum: catalogRow.stock > 0 ? 99 : 0,
+          taxPercent: catalogRow.gst_percent,
+        });
+      }
+      const computedQuote = buildQuote(quoteLines, fallbackFulfillmentId, 0, 0, 0, {
+        includeZeroBreakups: true,
+        fulfillmentTax: 0,
+      });
+      const breakup: any[] = (() => {
+        if (inboundBreakup.length === 0) return computedQuote.breakup as any[];
+        const merged = [...inboundBreakup];
+        const seen = new Set(
+          inboundBreakup.map((entry: any) =>
+            [
+              String(entry?.['@ondc/org/item_id'] ?? ''),
+              String(entry?.['@ondc/org/title_type'] ?? ''),
+              String(entry?.title ?? ''),
+            ].join('|'),
+          ),
+        );
+        for (const entry of computedQuote.breakup as any[]) {
+          const key = [
+            String(entry?.['@ondc/org/item_id'] ?? ''),
+            String(entry?.['@ondc/org/title_type'] ?? ''),
+            String(entry?.title ?? ''),
+          ].join('|');
+          if (seen.has(key)) continue;
+          merged.push(entry);
+          seen.add(key);
+        }
+        return merged;
+      })();
+      const total =
+        parseFloat(
+          String(order?.['quote']?.['price']?.['value'] ?? computedQuote.price.value ?? '0'),
+        ) || 0;
 
-      // Derive quote breakup totals
-      const breakup: any[] = safeJsonParse(JSON.stringify(order['quote']?.['breakup'] ?? []), []);
+      const storeId = resolvedStoreId;
+      const [store, storeLocations, sellerProfile] = await Promise.all([
+        storeId ? fetchStoreById(storeId) : Promise.resolve(null),
+        storeId ? fetchStoreLocations(storeId) : Promise.resolve([]),
+        storeId ? fetchSellerProfileByStoreId(storeId) : Promise.resolve(null),
+      ]);
+      const providerId = storeId ? String(storeId) : String(order['provider']?.['id'] ?? '');
+      const providerLocationIds = storeLocations.map((loc: MainDbStoreLocation) => ({
+        id: String(loc.id),
+      }));
+      const startLoc = storeLocations[0];
+      const providerName = store?.name ?? '';
+
       let itemTotal = 0,
         deliveryCharge = 0,
         packingCharge = 0,
-        taxTotal = 0;
+        taxTotal = 0,
+        convenienceFee = 0,
+        discountTotal = 0;
       for (const b of breakup) {
         const v = parseFloat(String(b?.price?.value ?? '0')) || 0;
         const t = String(b?.['@ondc/org/title_type'] ?? '');
@@ -83,10 +279,11 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
         if (t === 'delivery') deliveryCharge += v;
         if (t === 'packing') packingCharge += v;
         if (t === 'tax') taxTotal += v;
+        if (t === 'misc') convenienceFee += v;
+        if (t === 'discount') discountTotal += v;
       }
 
       const ondcOrderId = String(order['id'] || `ONDC-${txnId.slice(0, 8).toUpperCase()}`);
-      const providerId = String(order['provider']?.['id'] ?? '');
 
       // Resolve seller / store from the underlying stores row (provider_id = String(stores.id)).
       const provider = providerId ? await providerModel.findById(providerId) : null;
@@ -117,15 +314,15 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
             delivery_charges: deliveryCharge.toFixed(2),
             packing_charges: packingCharge.toFixed(2),
             tax_total: taxTotal.toFixed(2),
-            convenience_fee: '0.00',
-            discount_total: '0.00',
+            convenience_fee: convenienceFee.toFixed(2),
+            discount_total: discountTotal.toFixed(2),
             order_total: total.toFixed(2),
             currency: order['quote']?.['price']?.['currency'] ?? 'INR',
             item_count: itemCount,
             customer_name: billing['name'] ?? null,
             customer_phone: billing['phone'] ?? null,
             customer_email: billing['email'] ?? null,
-            billing_json: JSON.stringify(billing),
+            billing_json: JSON.stringify(normalizeBilling(billing)),
             tracking_number: null,
             tracking_link: null,
             logistics_provider: null,
@@ -137,15 +334,13 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
         );
 
         // Line items
-        for (const item of items) {
-          const qty = parseInt(item?.quantity?.count ?? '1', 10) || 1;
+        for (const item of normalizedItems) {
+          const qty = parseInt(String(item?.quantity?.count ?? '1'), 10) || 1;
           const price =
             parseFloat(
               String(
-                item?.price?.value ??
-                  breakup.find((b: any) => b?.['@ondc/org/item_id'] === item.id)?.item?.price
-                    ?.value ??
-                  '0',
+                breakup.find((b: any) => b?.['@ondc/org/item_id'] === item.id)?.item?.price
+                  ?.value ?? '0',
               ),
             ) || 0;
           await orderModel.insertItem(
@@ -156,7 +351,7 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
               product_id: parseInt(String(item.id ?? '').replace(/\D/g, '') || '0', 10),
               variant_id: null,
               provider_id: providerId,
-              seller_id: 0,
+              seller_id: provider?.seller_id ?? 0,
               quantity: qty,
               unit_price: price.toFixed(2),
               tax_percent: null,
@@ -205,22 +400,103 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
       });
 
       // Build on_confirm
+      const settlementDetails = [
+        {
+          settlement_counterparty: 'seller-app',
+          settlement_phase: 'sale-amount',
+          settlement_type: sellerProfile?.upi_id ? 'upi' : 'neft',
+          beneficiary_name: String(sellerProfile?.business_name ?? store?.name ?? ''),
+          upi_address: String(sellerProfile?.upi_id ?? ''),
+          settlement_bank_account_no: String(sellerProfile?.bank_account_no ?? ''),
+          settlement_ifsc_code: String(sellerProfile?.bank_ifsc ?? ''),
+          bank_name: '',
+          branch_name: '',
+        },
+      ];
+      const confirmTags = [
+        {
+          code: 'bpp_terms',
+          list: [
+            { code: 'tax_number', value: String(sellerProfile?.gstin ?? '') },
+            { code: 'provider_tax_number', value: String(sellerProfile?.pan ?? '') },
+          ],
+        },
+      ];
+
       const onConfirmOrder = {
         id: ondcOrderId,
-        state: 'CREATED',
-        provider: order['provider'],
-        items: order['items'] ?? [],
-        billing: billing,
-        fulfillments: fulfillments.map((f: any) => ({
-          ...f,
-          state: { descriptor: { code: 'Pending' } },
+        state: 'Accepted',
+        provider: {
+          id: providerId,
+          locations: providerLocationIds.length ? providerLocationIds : [{ id: '' }],
+        },
+        items: normalizedItems,
+        billing: normalizeBilling(billing, true),
+        fulfillments: (fulfillments.length
+          ? fulfillments
+          : [{ id: fallbackFulfillmentId, type: 'Delivery' }]
+        ).map((f: any) => ({
+          id: String(f?.id ?? fallbackFulfillmentId),
+          '@ondc/org/provider_name': providerName,
+          state: { descriptor: { code: String(f?.state?.descriptor?.code ?? 'Pending') } },
+          type: String(f?.type ?? 'Delivery'),
+          tracking: true,
+          '@ondc/org/TAT': firstTat,
+          start: {
+            location: {
+              id: String(startLoc?.id ?? ''),
+              descriptor: { name: providerName },
+              gps:
+                startLoc?.latitude != null && startLoc?.longitude != null
+                  ? `${startLoc.latitude},${startLoc.longitude}`
+                  : '',
+              address: {
+                // name: '',
+                // building: '',
+                locality: String(startLoc?.address_line2 ?? startLoc?.address_line1 ?? ''),
+                city: String(startLoc?.city ?? ''),
+                state: String(startLoc?.state ?? ''),
+                country: String(startLoc?.country ?? ''),
+                area_code: String(startLoc?.pincode ?? ''),
+              },
+            },
+            contact: {
+              phone: String(store?.phone ?? ''),
+              email: String(store?.email ?? ''),
+            },
+          },
+          end: {
+            location: {
+              gps: String(f?.end?.location?.gps ?? ''),
+              address: normalizeAddress(f?.end?.location?.address ?? {}, true),
+            },
+            person: { name: String(billing?.name ?? '') },
+            contact: {
+              phone: String(f?.end?.contact?.phone ?? billing?.phone ?? ''),
+              email: String(f?.end?.contact?.email ?? billing?.email ?? ''),
+            },
+          },
         })),
-        quote: order['quote'],
+        quote: {
+          ...(order['quote'] ?? {}),
+          breakup,
+          ttl: order?.['quote']?.['ttl'] ?? computedQuote.ttl ?? 'P1D',
+        },
         payment: {
           ...payment,
           status: payment['status'] ?? 'NOT-PAID',
+          '@ondc/org/buyer_app_finder_fee_type': String(
+            payment['@ondc/org/buyer_app_finder_fee_type'] ?? 'percent',
+          ),
+          '@ondc/org/buyer_app_finder_fee_amount': String(
+            payment['@ondc/org/buyer_app_finder_fee_amount'] ?? ondcEnv.buyerFinderFeeDefault,
+          ),
+          '@ondc/org/settlement_basis': String(payment['@ondc/org/settlement_basis'] ?? 'delivery'),
+          '@ondc/org/settlement_window': String(payment['@ondc/org/settlement_window'] ?? 'P1D'),
+          '@ondc/org/withholding_amount': String(payment['@ondc/org/withholding_amount'] ?? '0.00'),
+          '@ondc/org/settlement_details': settlementDetails,
         },
-        ...(order['tags'] ? { tags: order['tags'] } : {}),
+        tags: confirmTags,
         created_at: nowIso(),
         updated_at: nowIso(),
       };
