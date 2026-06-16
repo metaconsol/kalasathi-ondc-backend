@@ -97,7 +97,6 @@ export function buildOnInit(
     fulfillments: object[];
     quote: object;
     payment: object;
-    cancellation_terms: object[];
     tags?: object[];
   },
 ): object {

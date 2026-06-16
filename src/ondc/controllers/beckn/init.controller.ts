@@ -10,12 +10,130 @@ import type { Request, Response } from 'express';
 import { buildAck, buildOnInit } from '~/ondc/utils/payload.builder';
 import { becknService } from '~/ondc/services/beckn.service';
 import { observabilityService } from '~/ondc/services/observability.service';
+import { resolveOndcCatalogRow } from '~/ondc/adapters/product.adapter';
+import {
+  fetchSellerProfileByStoreId,
+  fetchStoreById,
+  fetchStoreLocations,
+} from '~/ondc/adapters/seller.adapter';
+import { ondcQuery } from '~/lib/ondcSql';
 import { transactionModel } from '~/ondc/models/transaction.model';
 import { txnLogModel } from '~/ondc/models/log.model';
 import { overallTxnsModel } from '~/ondc/models/overall_txns.model';
-import { COMPLETE_CANCELLATION_TERMS, buildOnInitPayment } from '~/ondc/utils/catalog.builders';
+import { ondcEnv } from '~/config/ondc.config';
 import { ondcLogger } from '~/ondc/utils/logger.util';
+import { buildQuote, type QuoteLineInput } from '~/ondc/utils/catalog.builders';
 import type { BecknContext } from '~/ondc/types/beckn.types';
+
+type LooseObject = Record<string, any>;
+
+interface FallbackCatalogRow {
+  store_id: number;
+  name: string;
+  price: number;
+  stock: number;
+  gst_percent: number;
+  time_to_ship_value: number | null;
+  time_to_ship_unit: string | null;
+}
+
+async function resolveFallbackCatalogRow(
+  itemId: string,
+  providerId?: string,
+): Promise<FallbackCatalogRow | null> {
+  const rows = await ondcQuery<any>(
+    `SELECT
+       p.store_id,
+       p.product_name AS name,
+       COALESCE(p.default_price, p.mrp, 0) AS price,
+       COALESCE(p.stock, 0) AS stock,
+       COALESCE(p.gst_percent, 0) AS gst_percent,
+       p.time_to_ship_value,
+       p.time_to_ship_unit
+     FROM ondc_catalog_items oci
+     INNER JOIN products p ON p.id = oci.main_db_product_id
+     WHERE oci.ondc_item_id = ?
+       AND oci.sync_status = 'synced'
+       AND (? = '' OR oci.provider_id = ?)
+     ORDER BY oci.updated_at DESC
+     LIMIT 1`,
+    [itemId, providerId ?? '', providerId ?? ''],
+  );
+
+  if (!rows[0]) return null;
+  return {
+    store_id: Number(rows[0].store_id),
+    name: String(rows[0].name ?? ''),
+    price: Number(rows[0].price ?? 0),
+    stock: Number(rows[0].stock ?? 0),
+    gst_percent: Number(rows[0].gst_percent ?? 0),
+    time_to_ship_value:
+      rows[0].time_to_ship_value != null ? Number(rows[0].time_to_ship_value) : null,
+    time_to_ship_unit: rows[0].time_to_ship_unit ?? null,
+  };
+}
+
+function normalizeAddress(address: LooseObject = {}): LooseObject {
+  return {
+    ...(address?.name || address?.door ? { name: String(address.name ?? address.door) } : {}),
+    ...(address?.building ? { building: String(address.building) } : {}),
+    ...(address?.locality || address?.street
+      ? { locality: String(address.locality ?? address.street) }
+      : {}),
+    ...(address?.city ? { city: String(address.city) } : {}),
+    ...(address?.state ? { state: String(address.state) } : {}),
+    ...(address?.country ? { country: String(address.country) } : {}),
+    ...(address?.area_code ? { area_code: String(address.area_code) } : {}),
+  };
+}
+
+function normalizeBilling(billing: LooseObject = {}): LooseObject {
+  return {
+    ...(billing?.name ? { name: String(billing.name) } : {}),
+    address: normalizeAddress(billing?.address ?? {}),
+    ...(billing?.tax_number ? { tax_number: String(billing.tax_number) } : {}),
+    ...(billing?.email ? { email: String(billing.email) } : {}),
+    ...(billing?.phone ? { phone: String(billing.phone) } : {}),
+    ...(billing?.created_at ? { created_at: String(billing.created_at) } : {}),
+    ...(billing?.updated_at ? { updated_at: String(billing.updated_at) } : {}),
+  };
+}
+
+function normalizeFulfillments(fulfillments: LooseObject[] = []): LooseObject[] {
+  return fulfillments.map((fulfillment, index) => ({
+    id: String(fulfillment?.id ?? `F${index + 1}`),
+    type: String(fulfillment?.type ?? 'Delivery'),
+    tracking: false,
+    ...(fulfillment?.end
+      ? {
+          end: {
+            ...(fulfillment.end?.location
+              ? {
+                  location: {
+                    ...(fulfillment.end.location?.gps
+                      ? { gps: String(fulfillment.end.location.gps) }
+                      : {}),
+                    address: normalizeAddress(fulfillment.end.location?.address ?? {}),
+                  },
+                }
+              : {}),
+            ...(fulfillment.end?.contact
+              ? {
+                  contact: {
+                    ...(fulfillment.end.contact?.phone
+                      ? { phone: String(fulfillment.end.contact.phone) }
+                      : {}),
+                    ...(fulfillment.end.contact?.email
+                      ? { email: String(fulfillment.end.contact.email) }
+                      : {}),
+                  },
+                }
+              : {}),
+          },
+        }
+      : {}),
+  }));
+}
 
 export async function handleInit(req: Request, res: Response): Promise<void> {
   const { context: ctx, message } = req.body as {
@@ -45,36 +163,162 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
       await overallTxnsModel.upsert(txnId);
       await overallTxnsModel.patch(txnId, { on_init: 1 });
 
-      // Compute total from quote
-      const total = parseFloat(String(order?.['quote']?.['price']?.['value'] ?? '0')) || 0;
+      const storeIdFromProvider =
+        Number.parseInt(String(order?.['provider']?.['id'] ?? ''), 10) || null;
       const inboundItems = Array.isArray(order['items']) ? order['items'] : [];
       const inboundFulfillments = Array.isArray(order['fulfillments']) ? order['fulfillments'] : [];
       const inboundBreakup = Array.isArray(order?.['quote']?.['breakup'])
         ? order['quote']['breakup']
         : [];
       const inboundTags = Array.isArray(order['tags']) ? order['tags'] : undefined;
-      const builtPayment = buildOnInitPayment(total) as {
-        [key: string]: unknown;
-        '@ondc/org/settlement_details'?: unknown;
-      };
+      const fallbackFulfillmentId = String(
+        inboundItems[0]?.fulfillment_id ?? inboundFulfillments[0]?.id ?? 'F1',
+      );
 
-      if (!Array.isArray(builtPayment['@ondc/org/settlement_details'])) {
-        builtPayment['@ondc/org/settlement_details'] = [];
+      const quoteLines: QuoteLineInput[] = [];
+      let resolvedStoreId: number | null = storeIdFromProvider;
+      const normalizedItems: Array<{
+        id: string;
+        quantity: { count: number };
+        fulfillment_id: string;
+      }> = [];
+      for (const rawItem of inboundItems) {
+        const quantity = Number(rawItem?.quantity?.count);
+        if (!rawItem?.id || !Number.isFinite(quantity) || quantity <= 0) continue;
+
+        const fulfillmentId = String(rawItem.fulfillment_id ?? fallbackFulfillmentId);
+        normalizedItems.push({
+          id: String(rawItem.id),
+          quantity: { count: quantity },
+          fulfillment_id: fulfillmentId,
+        });
+
+        const catalogRow =
+          (await resolveOndcCatalogRow(String(rawItem.id))) ??
+          (await resolveFallbackCatalogRow(
+            String(rawItem.id),
+            String(order?.['provider']?.['id'] ?? ''),
+          ));
+        if (!catalogRow) continue;
+        if (resolvedStoreId !== null && catalogRow.store_id !== resolvedStoreId) continue;
+
+        resolvedStoreId = catalogRow.store_id;
+        quoteLines.push({
+          itemId: String(rawItem.id),
+          itemName: catalogRow.name,
+          unitPrice: catalogRow.price,
+          quantity,
+          stockAvailable: catalogRow.stock > 0 ? 99 : 0,
+          stockMaximum: catalogRow.stock > 0 ? 99 : 0,
+          taxPercent: catalogRow.gst_percent,
+        });
       }
 
-      const initOrder = {
-        provider: order['provider'],
-        items: inboundItems,
-        billing: order['billing'] ?? {},
-        fulfillments: inboundFulfillments,
-        quote: {
+      const quote = (() => {
+        const computedQuote = buildQuote(quoteLines, fallbackFulfillmentId, 0, 0, 0, {
+          includeZeroBreakups: true,
+          fulfillmentTax: 0,
+        });
+        if (inboundBreakup.length === 0) return computedQuote;
+
+        const mergedBreakup = [...inboundBreakup];
+        const seenKeys = new Set(
+          inboundBreakup.map((entry: any) =>
+            [
+              String(entry?.['@ondc/org/item_id'] ?? ''),
+              String(entry?.['@ondc/org/title_type'] ?? ''),
+              String(entry?.title ?? ''),
+            ].join('|'),
+          ),
+        );
+
+        for (const entry of computedQuote.breakup as any[]) {
+          const key = [
+            String(entry?.['@ondc/org/item_id'] ?? ''),
+            String(entry?.['@ondc/org/title_type'] ?? ''),
+            String(entry?.title ?? ''),
+          ].join('|');
+          if (seenKeys.has(key)) continue;
+          mergedBreakup.push(entry);
+          seenKeys.add(key);
+        }
+
+        return {
           ...(order['quote'] ?? {}),
-          breakup: inboundBreakup,
+          breakup: mergedBreakup,
+          ttl: order?.['quote']?.['ttl'] ?? computedQuote.ttl ?? 'P1D',
+        };
+      })();
+      const total = parseFloat(String(quote?.price?.value ?? '0')) || 0;
+      const storeId = resolvedStoreId;
+      const [store, storeLocations, sellerProfile] = await Promise.all([
+        storeId ? fetchStoreById(storeId) : Promise.resolve(null),
+        storeId ? fetchStoreLocations(storeId) : Promise.resolve([]),
+        storeId ? fetchSellerProfileByStoreId(storeId) : Promise.resolve(null),
+      ]);
+
+      const providerLocationIds = storeLocations.map((loc) => ({ id: String(loc.id) }));
+      const providerId = storeId ? String(storeId) : String(order?.['provider']?.['id'] ?? '');
+      const buyerFeeAmount =
+        String(order?.['payment']?.['@ondc/org/buyer_app_finder_fee_amount'] ?? '').trim() ||
+        String(ondcEnv.buyerFinderFeeDefault);
+
+      const settlementDetails = [
+        {
+          settlement_counterparty: 'seller-app',
+          settlement_phase: 'sale-amount',
+          settlement_type: sellerProfile?.upi_id ? 'upi' : 'neft',
+          beneficiary_name: String(sellerProfile?.business_name ?? store?.name ?? ''),
+          upi_address: String(sellerProfile?.upi_id ?? ''),
+          settlement_bank_account_no: String(sellerProfile?.bank_account_no ?? ''),
+          settlement_ifsc_code: String(sellerProfile?.bank_ifsc ?? ''),
+          bank_name: '',
+          branch_name: '',
         },
-        payment: builtPayment,
-        cancellation_terms: COMPLETE_CANCELLATION_TERMS,
-        ...(inboundTags ? { tags: inboundTags } : {}),
+      ];
+
+      const bppTerms = [
+        {
+          code: 'bpp_terms',
+          list: [
+            { code: 'tax_number', value: String(sellerProfile?.gstin ?? '') },
+            { code: 'provider_tax_number', value: String(sellerProfile?.pan ?? '') },
+          ],
+        },
+      ];
+
+      const initOrder: {
+        provider: object;
+        items: object[];
+        billing: object;
+        fulfillments: object[];
+        quote: object;
+        payment: object;
+        tags?: object[];
+      } = {
+        provider: {
+          id: providerId,
+          ...(providerLocationIds.length ? { locations: providerLocationIds } : {}),
+        },
+        items: normalizedItems,
+        billing: normalizeBilling(order['billing'] ?? {}),
+        fulfillments: normalizeFulfillments(
+          inboundFulfillments.length
+            ? inboundFulfillments
+            : [{ id: fallbackFulfillmentId, type: 'Delivery' }],
+        ),
+        quote: {
+          ...quote,
+          ttl: order?.['quote']?.['ttl'] ?? quote.ttl ?? 'P1D',
+        },
+        payment: {
+          '@ondc/org/buyer_app_finder_fee_type': 'percent',
+          '@ondc/org/buyer_app_finder_fee_amount': buyerFeeAmount,
+          '@ondc/org/settlement_details': settlementDetails,
+        },
       };
+      const finalTags = inboundTags ? [...inboundTags, ...bppTerms] : bppTerms;
+      if (finalTags) initOrder.tags = finalTags;
 
       const payload = buildOnInit(ctx, initOrder) as any;
       const { statusCode, error: cbErr } = await becknService.sendCallback(

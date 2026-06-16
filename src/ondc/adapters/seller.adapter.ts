@@ -49,6 +49,16 @@ export interface MainDbStoreLocation {
   is_active: boolean;
 }
 
+export interface MainDbSellerProfile {
+  user_id: number;
+  gstin: string | null;
+  pan: string | null;
+  business_name: string | null;
+  bank_account_no: string | null;
+  bank_ifsc: string | null;
+  upi_id: string | null;
+}
+
 const STORE_SELECT = `
   s.id,
   s.seller_user_id,
@@ -97,6 +107,37 @@ export async function fetchStoreById(storeId: number): Promise<MainDbSeller | nu
     storeId,
   ]);
   return rows[0] ? mapStoreRow(rows[0]) : null;
+}
+
+export async function fetchSellerProfileByStoreId(
+  storeId: number,
+): Promise<MainDbSellerProfile | null> {
+  const rows = await ondcQuery<any>(
+    `SELECT
+       sp.user_id,
+       sp.gstin,
+       sp.pan,
+       sp.business_name,
+       sp.bank_account_no,
+       sp.bank_ifsc,
+       sp.upi_id
+     FROM stores s
+     INNER JOIN seller_profiles sp ON sp.user_id = s.seller_user_id
+     WHERE s.id = ?
+     LIMIT 1`,
+    [storeId],
+  );
+
+  if (!rows[0]) return null;
+  return {
+    user_id: rows[0].user_id,
+    gstin: rows[0].gstin ?? null,
+    pan: rows[0].pan ?? null,
+    business_name: rows[0].business_name ?? null,
+    bank_account_no: rows[0].bank_account_no ?? null,
+    bank_ifsc: rows[0].bank_ifsc ?? null,
+    upi_id: rows[0].upi_id ?? null,
+  };
 }
 
 /** Fetch active locations for a store */
