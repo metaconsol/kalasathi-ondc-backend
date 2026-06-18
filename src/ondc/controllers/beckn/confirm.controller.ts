@@ -27,6 +27,7 @@ import {
 import { transactionModel } from '~/ondc/models/transaction.model';
 import { txnLogModel } from '~/ondc/models/log.model';
 import { overallTxnsModel } from '~/ondc/models/overall_txns.model';
+import { bapTermsModel } from '~/ondc/models/bap_terms.model';
 import { ondcLogger } from '~/ondc/utils/logger.util';
 import { ondcEnv } from '~/config/ondc.config';
 import { ondcQuery, withOndcTransaction } from '~/lib/ondcSql';
@@ -42,6 +43,20 @@ function quoteTotal(order: Record<string, any>): number {
 function itemQtyTotal(items: any[]): number {
   return items.reduce((s, i) => s + (parseInt(i?.quantity?.count ?? '1', 10) || 1), 0);
 }
+
+function sanitizeQuoteBreakup(breakup: any[]): any[] {
+  return breakup.map((entry: any) => {
+    const item = entry?.item;
+    if (!item || typeof item !== 'object') return entry;
+
+    const sanitizedItem = { ...item };
+    delete sanitizedItem.quantity;
+    return { ...entry, item: sanitizedItem };
+  });
+}
+
+const DEFAULT_STATIC_TERMS_URL =
+  'https://github.com/ONDC-Official/protocol-network-extension/discussions/79';
 
 type LooseObject = Record<string, any>;
 
@@ -187,8 +202,8 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
         Number.parseInt(String(order['provider']?.['id'] ?? ''), 10) || null;
       const normalizedItems: Array<{
         id: string;
-        quantity: { count: number };
         fulfillment_id: string;
+        quantity: { count: number };
       }> = [];
       let firstTat = 'P1D';
       for (const item of items) {
@@ -197,8 +212,8 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
         const fulfillmentId = String(item.fulfillment_id ?? fallbackFulfillmentId);
         normalizedItems.push({
           id: String(item.id),
-          quantity: { count: qty },
           fulfillment_id: fulfillmentId,
+          quantity: { count: qty },
         });
         const catalogRow =
           (await resolveOndcCatalogRow(String(item.id))) ??
@@ -225,7 +240,9 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
         fulfillmentTax: 0,
       });
       const breakup: any[] = (() => {
-        if (inboundBreakup.length === 0) return computedQuote.breakup as any[];
+        if (inboundBreakup.length === 0) {
+          return sanitizeQuoteBreakup((computedQuote.breakup as any[]) ?? []);
+        }
         const merged = [...inboundBreakup];
         const seen = new Set(
           inboundBreakup.map((entry: any) =>
@@ -246,7 +263,7 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
           merged.push(entry);
           seen.add(key);
         }
-        return merged;
+        return sanitizeQuoteBreakup(merged);
       })();
       const total =
         parseFloat(
@@ -259,6 +276,7 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
         storeId ? fetchStoreLocations(storeId) : Promise.resolve([]),
         storeId ? fetchSellerProfileByStoreId(storeId) : Promise.resolve(null),
       ]);
+      const bapTerms = ctx?.bap_id ? await bapTermsModel.findByBapId(String(ctx.bap_id)) : null;
       const providerId = storeId ? String(storeId) : String(order['provider']?.['id'] ?? '');
       const providerLocationIds = storeLocations.map((loc: MainDbStoreLocation) => ({
         id: String(loc.id),
@@ -404,7 +422,7 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
         {
           settlement_counterparty: 'seller-app',
           settlement_phase: 'sale-amount',
-          settlement_type: sellerProfile?.upi_id ? 'upi' : 'neft',
+          settlement_type: 'neft',
           beneficiary_name: String(sellerProfile?.business_name ?? store?.name ?? ''),
           upi_address: String(sellerProfile?.upi_id ?? ''),
           settlement_bank_account_no: String(sellerProfile?.bank_account_no ?? ''),
@@ -417,11 +435,40 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
         {
           code: 'bpp_terms',
           list: [
+            { code: 'np_type', value: 'MSN' },
             { code: 'tax_number', value: String(sellerProfile?.gstin ?? '') },
             { code: 'provider_tax_number', value: String(sellerProfile?.pan ?? '') },
+            { code: 'accept_bap_terms', value: 'Y' },
+          ],
+        },
+        {
+          code: 'bap_terms',
+          list: [
+            {
+              code: 'static_terms',
+              value: String(
+                bapTerms?.static_terms_new ?? bapTerms?.static_terms ?? DEFAULT_STATIC_TERMS_URL,
+              ),
+            },
+            { code: 'tax_number', value: String(billing?.tax_number ?? '') },
           ],
         },
       ];
+
+      const inboundPaymentType = payment['type'];
+      const inboundCollectedBy = payment['collected_by'];
+      const inboundPaymentStatus = payment['status'];
+      const inboundPaymentParams =
+        payment['params'] && typeof payment['params'] === 'object' ? payment['params'] : {};
+      const inboundPaymentUrl = payment['url'] ?? payment['uri'];
+      const inboundTlMethod = payment['tl_method'];
+
+      const {
+        currency: inboundCurrency,
+        transaction_id: inboundTransactionId,
+        amount: inboundAmount,
+        ...remainingPaymentParams
+      } = inboundPaymentParams;
 
       const onConfirmOrder = {
         id: ondcOrderId,
@@ -440,7 +487,7 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
           '@ondc/org/provider_name': providerName,
           state: { descriptor: { code: String(f?.state?.descriptor?.code ?? 'Pending') } },
           type: String(f?.type ?? 'Delivery'),
-          tracking: true,
+          tracking: false,
           '@ondc/org/TAT': firstTat,
           start: {
             location: {
@@ -456,7 +503,7 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
                 locality: String(startLoc?.address_line2 ?? startLoc?.address_line1 ?? ''),
                 city: String(startLoc?.city ?? ''),
                 state: String(startLoc?.state ?? ''),
-                country: String(startLoc?.country ?? ''),
+                // country: String(startLoc?.country ?? ''),
                 area_code: String(startLoc?.pincode ?? ''),
               },
             },
@@ -483,8 +530,22 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
           ttl: order?.['quote']?.['ttl'] ?? computedQuote.ttl ?? 'P1D',
         },
         payment: {
-          ...payment,
-          status: payment['status'] ?? 'NOT-PAID',
+          url: String(inboundPaymentUrl ?? ''),
+          tl_method: String(inboundTlMethod ?? 'http/get'),
+          params: {
+            currency: String(inboundCurrency ?? 'INR'),
+            transaction_id: String(inboundTransactionId ?? ''),
+            amount: String(inboundAmount ?? (total > 0 ? total.toFixed(2) : '0.00')),
+            ...Object.fromEntries(
+              Object.entries(remainingPaymentParams).map(([key, value]) => [
+                key,
+                String(value ?? ''),
+              ]),
+            ),
+          },
+          status: String(inboundPaymentStatus ?? 'NOT-PAID'),
+          type: String(inboundPaymentType ?? 'ON-ORDER'),
+          collected_by: String(inboundCollectedBy ?? 'BAP'),
           '@ondc/org/buyer_app_finder_fee_type': String(
             payment['@ondc/org/buyer_app_finder_fee_type'] ?? 'percent',
           ),

@@ -99,6 +99,17 @@ function normalizeBilling(billing: LooseObject = {}): LooseObject {
   };
 }
 
+function sanitizeQuoteBreakup(breakup: any[]): any[] {
+  return breakup.map((entry: any) => {
+    const item = entry?.item;
+    if (!item || typeof item !== 'object') return entry;
+
+    const sanitizedItem = { ...item };
+    delete sanitizedItem.quantity;
+    return { ...entry, item: sanitizedItem };
+  });
+}
+
 function normalizeFulfillments(fulfillments: LooseObject[] = []): LooseObject[] {
   return fulfillments.map((fulfillment, index) => ({
     id: String(fulfillment?.id ?? `F${index + 1}`),
@@ -123,9 +134,9 @@ function normalizeFulfillments(fulfillments: LooseObject[] = []): LooseObject[] 
                     ...(fulfillment.end.contact?.phone
                       ? { phone: String(fulfillment.end.contact.phone) }
                       : {}),
-                    ...(fulfillment.end.contact?.email
-                      ? { email: String(fulfillment.end.contact.email) }
-                      : {}),
+                    // ...(fulfillment.end.contact?.email
+                    //   ? { email: String(fulfillment.end.contact.email) }
+                    //   : {}),
                   },
                 }
               : {}),
@@ -179,8 +190,8 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
       let resolvedStoreId: number | null = storeIdFromProvider;
       const normalizedItems: Array<{
         id: string;
-        quantity: { count: number };
         fulfillment_id: string;
+        quantity: { count: number };
       }> = [];
       for (const rawItem of inboundItems) {
         const quantity = Number(rawItem?.quantity?.count);
@@ -189,8 +200,8 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
         const fulfillmentId = String(rawItem.fulfillment_id ?? fallbackFulfillmentId);
         normalizedItems.push({
           id: String(rawItem.id),
-          quantity: { count: quantity },
           fulfillment_id: fulfillmentId,
+          quantity: { count: quantity },
         });
 
         const catalogRow =
@@ -219,7 +230,12 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
           includeZeroBreakups: true,
           fulfillmentTax: 0,
         });
-        if (inboundBreakup.length === 0) return computedQuote;
+        if (inboundBreakup.length === 0) {
+          return {
+            ...computedQuote,
+            breakup: sanitizeQuoteBreakup((computedQuote.breakup as any[]) ?? []),
+          };
+        }
 
         const mergedBreakup = [...inboundBreakup];
         const seenKeys = new Set(
@@ -245,7 +261,7 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
 
         return {
           ...(order['quote'] ?? {}),
-          breakup: mergedBreakup,
+          breakup: sanitizeQuoteBreakup(mergedBreakup),
           ttl: order?.['quote']?.['ttl'] ?? computedQuote.ttl ?? 'P1D',
         };
       })();
@@ -267,7 +283,7 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
         {
           settlement_counterparty: 'seller-app',
           settlement_phase: 'sale-amount',
-          settlement_type: sellerProfile?.upi_id ? 'upi' : 'neft',
+          settlement_type: 'neft',
           beneficiary_name: String(sellerProfile?.business_name ?? store?.name ?? ''),
           upi_address: String(sellerProfile?.upi_id ?? ''),
           settlement_bank_account_no: String(sellerProfile?.bank_account_no ?? ''),
