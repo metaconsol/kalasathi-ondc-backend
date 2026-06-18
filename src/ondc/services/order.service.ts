@@ -19,6 +19,7 @@ import { OndcError } from '~/ondc/utils/error.handler';
 import type { BecknContext } from '~/ondc/types/beckn.types';
 import type { OndcOrder } from '~/ondc/types/order.types';
 import type { ConfirmMessage } from '~/ondc/adapters/order.adapter';
+import { buildDbBackedOnStatusOrder } from '~/ondc/utils/onStatusOrder.builder';
 
 export const orderService = {
   /** Handle /confirm — create order and send /on_confirm callback */
@@ -81,7 +82,9 @@ export const orderService = {
     const order = await orderModel.findByOndcOrderId(message.order_id);
     if (!order) throw OndcError.orderNotFound(message.order_id);
 
-    const ondcOrder = adaptOrderRowToOndcOrder(order);
+    const items = await orderModel.getItems(order.ondc_order_id);
+    const fulfillments = await orderModel.getFulfillments(order.ondc_order_id);
+    const ondcOrder = await buildDbBackedOnStatusOrder(order, items, fulfillments);
     const callbackPayload = {
       context: buildResponseContext(context, 'on_status'),
       message: { order: ondcOrder },
