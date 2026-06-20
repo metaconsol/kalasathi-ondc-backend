@@ -31,7 +31,19 @@ import {
   listByAction,
   getTimeline,
 } from '~/ondc/controllers/admin/request_monitor.controller';
-import { listOndcIssues } from '~/ondc/controllers/admin/issues.controller';
+import {
+  addOndcIssueMessage,
+  closeOndcIssue,
+  getOndcIssue,
+  listOndcIssues,
+  resolveOndcIssue,
+  updateOndcIssueStatus,
+} from '~/ondc/controllers/admin/issues.controller';
+import {
+  getCustomerTicket,
+  getTicketAttachments,
+  listCustomerTickets,
+} from '~/ondc/controllers/admin/customerTickets.controller';
 import { getDashboardStats } from '~/ondc/controllers/admin/stats.controller';
 import {
   listPpfRecon,
@@ -82,5 +94,15 @@ router.get('/request-monitor/:transactionId', ...adminGuard, getTimeline);
 
 // ---- IGM ----
 router.get('/issues', ...sellerGuard, listOndcIssues);
+router.get('/issues/:id', ...sellerGuard, getOndcIssue);
+router.post('/issues/:id/message', ...sellerGuard, addOndcIssueMessage);
+router.patch('/issues/:id/status', ...sellerGuard, updateOndcIssueStatus);
+router.patch('/issues/:id/resolve', ...sellerGuard, resolveOndcIssue);
+router.patch('/issues/:id/close', ...sellerGuard, closeOndcIssue);
+
+// ---- Customer Tickets (IGM v1.2) ----
+router.get('/customer-tickets', ...sellerGuard, listCustomerTickets);
+router.get('/customer-tickets/:ticketId', ...sellerGuard, getCustomerTicket);
+router.get('/customer-tickets/:ticketId/attachments', ...sellerGuard, getTicketAttachments);
 
 export default router;

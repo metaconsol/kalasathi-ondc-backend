@@ -21,6 +21,10 @@ export interface OndcProviderRow {
   support_email: string | null;
   domain: string;
   is_active: boolean;
+  seller_name: string | null;
+  seller_email: string | null;
+  seller_phone: string | null;
+  business_name: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -37,6 +41,10 @@ const STORE_SELECT = `
   NULL                                   AS fssai_license,
   s.support_phone                        AS support_phone,
   s.support_email                        AS support_email,
+  u.name                                 AS seller_name,
+  u.email                                AS seller_email,
+  u.phoneNumber                          AS seller_phone,
+  sp.business_name                       AS business_name,
   'ONDC:RET12'                           AS domain,
   s.is_active                            AS is_active,
   s.created_at                           AS created_at,
@@ -55,6 +63,10 @@ function mapRow(r: any): OndcProviderRow {
     fssai_license: r.fssai_license ?? null,
     support_phone: r.support_phone ?? null,
     support_email: r.support_email ?? null,
+    seller_name: r.seller_name ?? null,
+    seller_email: r.seller_email ?? null,
+    seller_phone: r.seller_phone ?? null,
+    business_name: r.business_name ?? null,
     domain: r.domain ?? 'ONDC:RET12',
     is_active: Boolean(r.is_active),
     created_at: r.created_at,
@@ -67,7 +79,12 @@ export const providerModel = {
     const storeId = parseInt(providerId, 10);
     if (!Number.isFinite(storeId)) return null;
     const rows = await ondcQuery<any>(
-      `SELECT ${STORE_SELECT} FROM stores s WHERE s.id = ? LIMIT 1`,
+      `SELECT ${STORE_SELECT}
+       FROM stores s
+       LEFT JOIN user u ON u.id = s.seller_user_id
+       LEFT JOIN seller_profiles sp ON sp.user_id = s.seller_user_id
+       WHERE s.id = ?
+       LIMIT 1`,
       [storeId],
     );
     return rows[0] ? mapRow(rows[0]) : null;
@@ -75,7 +92,10 @@ export const providerModel = {
 
   async findBySellerId(sellerId: number): Promise<OndcProviderRow | null> {
     const rows = await ondcQuery<any>(
-      `SELECT ${STORE_SELECT} FROM stores s
+      `SELECT ${STORE_SELECT}
+       FROM stores s
+       LEFT JOIN user u ON u.id = s.seller_user_id
+       LEFT JOIN seller_profiles sp ON sp.user_id = s.seller_user_id
        WHERE s.seller_user_id = ?
        ORDER BY s.is_active DESC, s.id ASC
        LIMIT 1`,
@@ -87,7 +107,11 @@ export const providerModel = {
   /** Every store — active and inactive — so admin can toggle them. */
   async listAll(): Promise<OndcProviderRow[]> {
     const rows = await ondcQuery<any>(
-      `SELECT ${STORE_SELECT} FROM stores s ORDER BY s.is_active DESC, s.store_name ASC`,
+      `SELECT ${STORE_SELECT}
+       FROM stores s
+       LEFT JOIN user u ON u.id = s.seller_user_id
+       LEFT JOIN seller_profiles sp ON sp.user_id = s.seller_user_id
+       ORDER BY s.is_active DESC, s.store_name ASC`,
     );
     return rows.map(mapRow);
   },
