@@ -7,14 +7,13 @@
  */
 
 import { orderModel } from '~/ondc/models/order.model';
-import { fulfillmentModel } from '~/ondc/models/fulfillment.model';
 import { becknService } from '~/ondc/services/beckn.service';
 import { observabilityService } from '~/ondc/services/observability.service';
 import { buildResponseContext } from '~/ondc/utils/payload.builder';
 import { ondcLogger } from '~/ondc/utils/logger.util';
-import { adaptOrderRowToOndcOrder } from '~/ondc/adapters/order.adapter';
 import { OndcError } from '~/ondc/utils/error.handler';
 import type { OndcFulfillmentState } from '~/ondc/types/order.types';
+import { buildDbBackedOnStatusOrder } from '~/ondc/utils/onStatusOrder.builder';
 
 export const flow1AService = {
   /** Push /on_status update to BAP */
@@ -22,18 +21,14 @@ export const flow1AService = {
     const order = await orderModel.findByOndcOrderId(ondcOrderId);
     if (!order) throw OndcError.orderNotFound(ondcOrderId);
 
-    const fulfillments = await fulfillmentModel.findByOrderId(ondcOrderId);
-    const ondcOrder = adaptOrderRowToOndcOrder(order);
-
-    // Inject updated fulfillment state
-    const updatedFulfillments = ondcOrder.fulfillments.map((f, i) => ({
-      ...f,
-      state: {
-        descriptor: { code: fulfillmentState },
-        updated_at: new Date().toISOString(),
-      },
-      tracking: !!fulfillments[i]?.tracking_url,
-    }));
+    const items = await orderModel.getItems(ondcOrderId);
+    const fulfillments = await orderModel.getFulfillments(ondcOrderId);
+    const onStatusOrder = await buildDbBackedOnStatusOrder(
+      order,
+      items,
+      fulfillments,
+      fulfillmentState,
+    );
 
     const callbackContext = {
       domain: order.domain,
@@ -54,7 +49,7 @@ export const flow1AService = {
     const callbackPayload = {
       context: responseContext,
       message: {
-        order: { ...ondcOrder, fulfillments: updatedFulfillments },
+        order: onStatusOrder,
       },
     };
 

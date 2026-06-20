@@ -12,6 +12,7 @@ import { txnLogModel } from '~/ondc/models/log.model';
 import { overallTxnsModel } from '~/ondc/models/overall_txns.model';
 import { ondcLogger } from '~/ondc/utils/logger.util';
 import type { BecknContext } from '~/ondc/types/beckn.types';
+import { buildDbBackedOnStatusOrder } from '~/ondc/utils/onStatusOrder.builder';
 
 export async function handleStatus(req: Request, res: Response): Promise<void> {
   const { context: ctx, message } = req.body as {
@@ -40,29 +41,7 @@ export async function handleStatus(req: Request, res: Response): Promise<void> {
       const items = await orderModel.getItems(dbOrder.ondc_order_id);
       const fulfillments = await orderModel.getFulfillments(dbOrder.ondc_order_id);
 
-      const onStatusOrder = {
-        id: dbOrder.ondc_order_id,
-        state: dbOrder.status,
-        provider: { id: dbOrder.provider_id },
-        items: items.map((i) => ({
-          id: i.item_id,
-          quantity: { count: i.quantity },
-          fulfillment_id: i.fulfillment_id ?? 'F1',
-        })),
-        fulfillments: fulfillments.map((f) => ({
-          id: f.fulfillment_id,
-          type: f.fulfillment_type,
-          state: {
-            descriptor: { code: f.state },
-            updated_at: (f.updated_at ?? new Date()).toISOString(),
-          },
-          tracking: !!f.tracking_url,
-          ...(f.tracking_url ? { '@ondc/org/tracking': true } : {}),
-        })),
-        billing: JSON.parse(dbOrder.billing_json ?? '{}'),
-        payment: JSON.parse(dbOrder.payment_json ?? '{}'),
-        updated_at: (dbOrder.updated_at ?? new Date()).toISOString(),
-      };
+      const onStatusOrder = await buildDbBackedOnStatusOrder(dbOrder, items, fulfillments);
 
       await overallTxnsModel.patch(txnId, { on_status: 1, order_status: dbOrder.status });
 
