@@ -351,9 +351,21 @@ export const orderModel = {
     triggeredBy: string,
     note?: string | null,
     payloadJson?: string | null,
+    extras?: Partial<
+      Pick<
+        OndcOrderRow,
+        | 'tracking_number'
+        | 'tracking_link'
+        | 'logistics_provider'
+        | 'cancel_reason_id'
+        | 'return_reason_id'
+        | 'payment_status'
+        | 'payment_json'
+      >
+    >,
   ): Promise<void> {
     await withOndcTransaction(async (tx) => {
-      await this.updateStatus(ondcOrderId, to, {}, tx);
+      await this.updateStatus(ondcOrderId, to, extras ?? {}, tx);
       await this.addStatusHistory(
         {
           ondc_order_id: ondcOrderId,

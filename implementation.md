@@ -1,3 +1,29 @@
+## BRANCH-003
+
+Date: 22-06-2026
+
+Status: Implemented / Completed
+
+Area: ONDC BPP Callback Engine (on_cancel payload logic)
+
+What:
+on_cancel response payload ke saare hardcoded values (cancellation reason ID, buyer finder fee amount, settlement details, tracking boolean status aur cancel fulfillment ID) ko dynamic kiya gaya hai. Ab yeh saara data directly database tables (ondc_orders, ondc_fulfillments, bap_terms, seller_profiles, stores, ondc_order_actions) se fetch hokar return hota hai.
+
+Why:
+ONDC Pramaan contract compliance test ko bina kisi validation error ke pass karne ke liye aur flow operations (full/partial cancellation) ke dauran database state aur callbacks ke beech absolute sync maintain karne ke liye.
+
+Changes:
+
+1. File: src/ondc/models/order.model.ts
+   - transitionStatus method ko update kiya gaya taaki yeh optional 'extras' params accept kar sake aur cancel_reason_id ko database ke ondc_orders table mein directly update kar sake.
+
+2. File: src/ondc/controllers/beckn/cancel.controller.ts
+   - cancellation_reason_id ko DB mein save karne ke liye transitionStatus parameter mein pass kiya.
+   - bap_terms table se bap_id ke matching record ke bff_percent ko fetch karke buyer finder fee amount dynamic kiya.
+   - ondc_order_actions table se partial cancel ka unique action_id fetch kiya aur product cancellation ke liye dynamic fulfillment ID set ki (na milne par 'C1' fallback ke sath).
+   - ondc_fulfillments table ke tracking_url column se track boolean status dynamically map kiya (false jab link na ho).
+   - seller_profiles aur stores tables se bank account, upi, bank branch aur beneficiary details fetch karke settlement_details dynamic banaya.
+
 ## BRANCH-002
 
 **Date:** 2026-06-20
