@@ -68,14 +68,7 @@ export const fulfillmentModel = {
     ondcOrderId: string,
     fulfillmentId: string,
     state: OndcFulfillmentState,
-    tracking?: {
-      url?: string;
-      awb?: string;
-      courier?: string;
-      agentName?: string;
-      agentPhone?: string;
-      actualDelivery?: Date;
-    },
+    tracking?: { url?: string; awb?: string; courier?: string },
   ): Promise<void> {
     const sets = ['state = ?', 'updated_at = NOW()'];
     const params: unknown[] = [state];
@@ -90,18 +83,6 @@ export const fulfillmentModel = {
     if (tracking?.courier) {
       sets.push('courier_name = ?');
       params.push(tracking.courier);
-    }
-    if (tracking?.agentName !== undefined) {
-      sets.push('agent_name = ?');
-      params.push(tracking.agentName);
-    }
-    if (tracking?.agentPhone !== undefined) {
-      sets.push('agent_phone = ?');
-      params.push(tracking.agentPhone);
-    }
-    if (tracking?.actualDelivery !== undefined) {
-      sets.push('actual_delivery = ?');
-      params.push(tracking.actualDelivery);
     }
     params.push(ondcOrderId, fulfillmentId);
     await ondcExec(
