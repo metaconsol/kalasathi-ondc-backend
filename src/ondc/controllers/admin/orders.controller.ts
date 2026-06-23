@@ -60,9 +60,6 @@ export async function updateFulfillment(req: Request, res: Response): Promise<vo
     case 'packed':
       await fulfillmentService.markPacked(orderId, fulfillment_id);
       break;
-    case 'agent_assigned':
-      await fulfillmentService.markAgentAssigned(orderId, fulfillment_id, agent_name, agent_phone);
-      break;
     case 'picked_up':
       await fulfillmentService.markPickedUp(orderId, fulfillment_id, awb!, courier!, tracking_url);
       break;
