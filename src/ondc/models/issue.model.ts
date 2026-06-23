@@ -7,14 +7,6 @@ import { ondcExec, ondcQuery } from '~/lib/ondcSql';
 
 export type IssueStatus = 'OPEN' | 'PROCESSING' | 'RESOLVED' | 'CLOSED';
 export type IssueCategory = 'ITEM' | 'FULFILLMENT' | 'PAYMENT' | 'AGENT' | 'GRIEVANCE';
-export type IssueDisplayStatus =
-  | 'OPEN'
-  | 'PROCESSING'
-  | 'IN_PROGRESS'
-  | 'WAITING_CUSTOMER'
-  | 'RESOLVED'
-  | 'CLOSED'
-  | 'REJECTED';
 
 export interface OndcIssueRow {
   id: number;
@@ -33,23 +25,6 @@ export interface OndcIssueRow {
   actions_json: string; // JSON array of actions taken
   created_at: Date;
   updated_at: Date;
-}
-
-export interface OndcIssueAction {
-  type:
-    | 'created'
-    | 'message'
-    | 'info_request'
-    | 'status'
-    | 'resolution_options'
-    | 'resolved'
-    | 'closed';
-  actor: string;
-  actor_role: string;
-  message?: string | null;
-  note?: string | null;
-  status?: IssueDisplayStatus | null;
-  created_at: string;
 }
 
 export const issueModel = {
@@ -87,41 +62,6 @@ export const issueModel = {
     return rows[0] ?? null;
   },
 
-  async findById(id: number, sellerId?: number): Promise<OndcIssueRow | null> {
-    const rows = await ondcQuery<OndcIssueRow>(
-      `SELECT i.*
-       FROM ondc_issues i
-       WHERE i.id = ?
-         ${
-           sellerId !== undefined
-             ? `AND EXISTS (
-                SELECT 1
-                FROM ondc_orders o
-                WHERE o.ondc_order_id = i.order_id
-                  AND o.seller_id = ?
-              )`
-             : ''
-         }
-       LIMIT 1`,
-      sellerId !== undefined ? [id, sellerId] : [id],
-    );
-    return rows[0] ?? null;
-  },
-
-  async createIfMissing(
-    data: Omit<OndcIssueRow, 'id' | 'created_at' | 'updated_at'>,
-  ): Promise<OndcIssueRow> {
-    const existing = await this.findByIssueId(data.issue_id);
-    if (existing) return existing;
-
-    await this.create(data);
-    const created = await this.findByIssueId(data.issue_id);
-    if (!created) {
-      throw new Error(`Issue row not found after create: ${data.issue_id}`);
-    }
-    return created;
-  },
-
   async updateStatus(issueId: string, status: IssueStatus, resolution?: string): Promise<void> {
     const sets = ['status = ?', 'updated_at = NOW()'];
     const params: unknown[] = [status];
@@ -131,29 +71,6 @@ export const issueModel = {
     }
     params.push(issueId);
     await ondcExec(`UPDATE ondc_issues SET ${sets.join(', ')} WHERE issue_id = ?`, params);
-  },
-
-  parseActions(actionsJson: string | null | undefined): OndcIssueAction[] {
-    if (!actionsJson || actionsJson.trim() === '') return [];
-    try {
-      const parsed = JSON.parse(actionsJson);
-      return Array.isArray(parsed) ? (parsed as OndcIssueAction[]) : [];
-    } catch {
-      return [];
-    }
-  },
-
-  async appendAction(issueId: string, action: OndcIssueAction): Promise<void> {
-    const issue = await this.findByIssueId(issueId);
-    if (!issue) return;
-    const current = this.parseActions(issue.actions_json);
-    current.push(action);
-    await ondcExec(
-      `UPDATE ondc_issues
-       SET actions_json = ?, updated_at = NOW()
-       WHERE issue_id = ?`,
-      [JSON.stringify(current), issueId],
-    );
   },
 
   async list(
