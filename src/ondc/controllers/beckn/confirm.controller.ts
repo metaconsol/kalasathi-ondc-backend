@@ -106,17 +106,6 @@ async function resolveFallbackCatalogRow(
   };
 }
 
-function isDuplicateOrderError(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'code' in err &&
-    (err as { code?: string }).code === 'ER_DUP_ENTRY' &&
-    'sqlMessage' in err &&
-    String((err as { sqlMessage?: string }).sqlMessage ?? '').includes('uq_ondc_order_id')
-  );
-}
-
 function normalizeAddress(address: LooseObject = {}, includeEmpty = false): LooseObject {
   const normalized = {
     name: String(address?.name ?? address?.door ?? ''),
@@ -137,7 +126,6 @@ function normalizeBilling(billing: LooseObject = {}, includeEmpty = false): Loos
   const normalized = {
     name: String(billing?.name ?? ''),
     address: normalizeAddress(billing?.address ?? {}, includeEmpty),
-    tax_number: String(billing?.tax_number ?? ''),
     email: String(billing?.email ?? ''),
     phone: String(billing?.phone ?? ''),
     created_at: String(billing?.created_at ?? ''),
@@ -318,121 +306,107 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
       // Resolve seller / store from the underlying stores row (provider_id = String(stores.id)).
       const provider = providerId ? await providerModel.findById(providerId) : null;
 
-      let existingOrder = await orderModel.findByOndcOrderId(ondcOrderId);
-      const persistOrder = async () => {
-        await withOndcTransaction(async (tx) => {
-          await orderModel.create(
+      // Atomic: create order + items + fulfillments
+      await withOndcTransaction(async (tx) => {
+        await orderModel.create(
+          {
+            ondc_order_id: ondcOrderId,
+            transaction_id: txnId,
+            message_id: ctx.message_id,
+            domain: ctx.domain,
+            city: ctx.city ?? null,
+            country: ctx.country ?? null,
+            core_version: ctx.core_version ?? null,
+            bap_id: ctx.bap_id,
+            bap_uri: bapUri,
+            bpp_id: ondcEnv.subscriberId,
+            provider_id: providerId,
+            seller_id: provider?.seller_id ?? 0,
+            store_id: provider?.store_id ?? null,
+            status: 'CREATED',
+            payment_method: (payment['type'] === 'ON-DELIVERY' ? 'COD' : 'PREPAID') as any,
+            payment_status: payment['status'] === 'PAID' ? 'PAID' : 'NOT_PAID',
+            payment_transaction_ref: payment['params']?.['transaction_id'] ?? null,
+            payment_json: JSON.stringify(payment),
+            item_total: itemTotal.toFixed(2),
+            delivery_charges: deliveryCharge.toFixed(2),
+            packing_charges: packingCharge.toFixed(2),
+            tax_total: taxTotal.toFixed(2),
+            convenience_fee: convenienceFee.toFixed(2),
+            discount_total: discountTotal.toFixed(2),
+            order_total: total.toFixed(2),
+            currency: order['quote']?.['price']?.['currency'] ?? 'INR',
+            item_count: itemCount,
+            customer_name: billing['name'] ?? null,
+            customer_phone: billing['phone'] ?? null,
+            customer_email: billing['email'] ?? null,
+            billing_json: JSON.stringify(normalizeBilling(billing)),
+            tracking_number: null,
+            tracking_link: null,
+            logistics_provider: null,
+            cancel_reason_id: null,
+            return_reason_id: null,
+            raw_confirm_payload: JSON.stringify(req.body),
+          },
+          tx,
+        );
+
+        // Line items
+        for (const item of normalizedItems) {
+          const qty = parseInt(String(item?.quantity?.count ?? '1'), 10) || 1;
+          const price =
+            parseFloat(
+              String(
+                breakup.find((b: any) => b?.['@ondc/org/item_id'] === item.id)?.item?.price
+                  ?.value ?? '0',
+              ),
+            ) || 0;
+          await orderModel.insertItem(
             {
               ondc_order_id: ondcOrderId,
               transaction_id: txnId,
-              message_id: ctx.message_id,
-              domain: ctx.domain,
-              city: ctx.city ?? null,
-              country: ctx.country ?? null,
-              core_version: ctx.core_version ?? null,
-              bap_id: ctx.bap_id,
-              bap_uri: bapUri,
-              bpp_id: ondcEnv.subscriberId,
+              item_id: String(item.id ?? ''),
+              product_id: parseInt(String(item.id ?? '').replace(/\D/g, '') || '0', 10),
+              variant_id: null,
               provider_id: providerId,
               seller_id: provider?.seller_id ?? 0,
-              store_id: provider?.store_id ?? null,
-              status: 'CREATED',
-              payment_method: (payment['type'] === 'ON-DELIVERY' ? 'COD' : 'PREPAID') as any,
-              payment_status: payment['status'] === 'PAID' ? 'PAID' : 'NOT_PAID',
-              payment_transaction_ref: payment['params']?.['transaction_id'] ?? null,
-              payment_json: JSON.stringify(payment),
-              item_total: itemTotal.toFixed(2),
-              delivery_charges: deliveryCharge.toFixed(2),
-              packing_charges: packingCharge.toFixed(2),
-              tax_total: taxTotal.toFixed(2),
-              convenience_fee: convenienceFee.toFixed(2),
-              discount_total: discountTotal.toFixed(2),
-              order_total: total.toFixed(2),
-              currency: order['quote']?.['price']?.['currency'] ?? 'INR',
-              item_count: itemCount,
-              customer_name: billing['name'] ?? null,
-              customer_phone: billing['phone'] ?? null,
-              customer_email: billing['email'] ?? null,
-              billing_json: JSON.stringify(normalizeBilling(billing)),
-              tracking_number: null,
-              tracking_link: null,
-              logistics_provider: null,
-              cancel_reason_id: null,
-              return_reason_id: null,
-              raw_confirm_payload: JSON.stringify(req.body),
+              quantity: qty,
+              unit_price: price.toFixed(2),
+              tax_percent: null,
+              line_amount: (price * qty).toFixed(2),
+              currency: 'INR',
+              fulfillment_id: item?.fulfillment_id ?? null,
+              raw_item_json: JSON.stringify(item),
             },
             tx,
           );
-
-          for (const item of normalizedItems) {
-            const qty = parseInt(String(item?.quantity?.count ?? '1'), 10) || 1;
-            const price =
-              parseFloat(
-                String(
-                  breakup.find((b: any) => b?.['@ondc/org/item_id'] === item.id)?.item?.price
-                    ?.value ?? '0',
-                ),
-              ) || 0;
-            await orderModel.insertItem(
-              {
-                ondc_order_id: ondcOrderId,
-                transaction_id: txnId,
-                item_id: String(item.id ?? ''),
-                product_id: parseInt(String(item.id ?? '').replace(/\D/g, '') || '0', 10),
-                variant_id: null,
-                provider_id: providerId,
-                seller_id: provider?.seller_id ?? 0,
-                quantity: qty,
-                unit_price: price.toFixed(2),
-                tax_percent: null,
-                line_amount: (price * qty).toFixed(2),
-                currency: 'INR',
-                fulfillment_id: item?.fulfillment_id ?? null,
-                raw_item_json: JSON.stringify(item),
-              },
-              tx,
-            );
-          }
-
-          for (const f of fulfillments) {
-            await orderModel.upsertFulfillment(
-              {
-                ondc_order_id: ondcOrderId,
-                transaction_id: txnId,
-                fulfillment_id: String(f.id ?? 'F1'),
-                fulfillment_type: String(f.type ?? 'Delivery'),
-                fulfillment_role: 'primary_forward',
-                state: 'Pending',
-                contact_phone: f?.end?.contact?.phone ?? null,
-                contact_email: f?.end?.contact?.email ?? null,
-                tracking_url: null,
-                awb_number: null,
-                courier_name: null,
-                agent_name: null,
-                agent_phone: null,
-                estimated_delivery: null,
-                actual_delivery: null,
-                meta_json: JSON.stringify(f),
-              },
-              tx,
-            );
-          }
-        });
-      };
-
-      if (!existingOrder) {
-        try {
-          await persistOrder();
-          existingOrder = await orderModel.findByOndcOrderId(ondcOrderId);
-        } catch (err) {
-          if (!isDuplicateOrderError(err)) throw err;
-          existingOrder = await orderModel.findByOndcOrderId(ondcOrderId);
-          ondcLogger.warn('confirm retry hit existing order; reusing persisted order', {
-            ondcOrderId,
-            txnId,
-          });
         }
-      }
+
+        // Fulfillments
+        for (const f of fulfillments) {
+          await orderModel.upsertFulfillment(
+            {
+              ondc_order_id: ondcOrderId,
+              transaction_id: txnId,
+              fulfillment_id: String(f.id ?? 'F1'),
+              fulfillment_type: String(f.type ?? 'Delivery'),
+              fulfillment_role: 'primary_forward',
+              state: 'Pending',
+              contact_phone: f?.end?.contact?.phone ?? null,
+              contact_email: f?.end?.contact?.email ?? null,
+              tracking_url: null,
+              awb_number: null,
+              courier_name: null,
+              agent_name: null,
+              agent_phone: null,
+              estimated_delivery: null,
+              actual_delivery: null,
+              meta_json: JSON.stringify(f),
+            },
+            tx,
+          );
+        }
+      });
 
       // overall_txns
       await overallTxnsModel.patch(txnId, {
@@ -495,16 +469,6 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
         amount: inboundAmount,
         ...remainingPaymentParams
       } = inboundPaymentParams;
-      const normalizedPaymentParams = {
-        currency: String(inboundCurrency ?? 'INR'),
-        transaction_id: String(inboundTransactionId ?? ''),
-        amount: String(inboundAmount ?? (total > 0 ? total.toFixed(2) : '0.00')),
-        ...Object.fromEntries(
-          Object.entries(remainingPaymentParams).map(([key, value]) => [key, String(value ?? '')]),
-        ),
-      };
-      const paymentUrl = String(inboundPaymentUrl ?? '').trim();
-      const tlMethod = String(inboundTlMethod ?? '').trim();
 
       const onConfirmOrder = {
         id: ondcOrderId,
@@ -566,9 +530,19 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
           ttl: order?.['quote']?.['ttl'] ?? computedQuote.ttl ?? 'P1D',
         },
         payment: {
-          ...(paymentUrl ? { url: paymentUrl } : {}),
-          ...(paymentUrl || tlMethod ? { tl_method: tlMethod || 'http/get' } : {}),
-          params: normalizedPaymentParams,
+          url: String(inboundPaymentUrl ?? ''),
+          tl_method: String(inboundTlMethod ?? 'http/get'),
+          params: {
+            currency: String(inboundCurrency ?? 'INR'),
+            transaction_id: String(inboundTransactionId ?? ''),
+            amount: String(inboundAmount ?? (total > 0 ? total.toFixed(2) : '0.00')),
+            ...Object.fromEntries(
+              Object.entries(remainingPaymentParams).map(([key, value]) => [
+                key,
+                String(value ?? ''),
+              ]),
+            ),
+          },
           status: String(inboundPaymentStatus ?? 'NOT-PAID'),
           type: String(inboundPaymentType ?? 'ON-ORDER'),
           collected_by: String(inboundCollectedBy ?? 'BAP'),
@@ -600,7 +574,7 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
       const ackOk = statusCode !== undefined && statusCode >= 200 && statusCode < 300;
 
       // If BAP ACKed → confirm the order
-      if (ackOk && existingOrder?.status === 'CREATED') {
+      if (ackOk) {
         await orderModel.transitionStatus(
           ondcOrderId,
           'CREATED',
