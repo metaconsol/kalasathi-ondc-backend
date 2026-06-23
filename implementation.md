@@ -1,34 +1,3 @@
-## BRANCH-002
-
-**Date:** 2026-06-20
-
-**Status:** Completed
-
-**Area:** ONDC confirm flow, Pramaan retry handling, and `on_confirm` payload stability
-
-**What:**
-
-- Improved the ONDC `/confirm` flow to handle repeated confirm requests safely.
-- Fixed the `on_confirm` payload so important billing data is preserved.
-- Removed empty payment callback fields that could cause validation issues in Pramaan.
-
-**Why:**
-
-- Pramaan sometimes triggers `/confirm` again for the same order, and our old logic failed on duplicate `ondc_order_id`, which stopped `on_confirm` from being sent.
-- `billing.tax_number` was getting dropped from the outgoing `on_confirm` payload.
-- Empty `payment.url` and forced `tl_method` values were being sent even when no payment URL existed, which could create payload validation problems.
-
-**Changes:**
-
-- `src/ondc/controllers/beckn/confirm.controller.ts`
-  - Added duplicate-order detection for `ER_DUP_ENTRY` on `uq_ondc_order_id`.
-  - Made the confirm flow idempotent so repeated `/confirm` requests reuse the existing order instead of failing.
-  - Allowed `on_confirm` to continue sending even when the same order is retried.
-  - Prevented duplicate status transition by updating order status to `CONFIRMED` only when the existing order is still in `CREATED` state.
-  - Preserved `billing.tax_number` in the normalized billing object.
-  - Stopped sending empty `payment.url` and unnecessary `tl_method` fields when no actual payment URL is present.
-  - Normalized payment params before building the outgoing `on_confirm` payload.
-
 ## BRANCH-001
 
 **Date:** 2026-06-20
