@@ -1,3 +1,33 @@
+## Branch-008
+
+**Date:** 2026-06-24
+
+**Status:** Completed (documentation + tooling only — no source code changed)
+
+**Area:** Full ONDC codebase + UI audit against API contract v1.2.5, Postman testing collection, and the master implementation plan.
+
+**What:**
+
+- Audited the entire `src/ondc/**` backend and the `odop_ui` ONDC admin UI against ONDC v1.2.5 (retail), IGM 2.0.0, and PPF/NTS10 settlement.
+- Produced an endpoint inventory: 12 network-facing Beckn endpoints (4 fully working, 7 partial) + 21 admin endpoints (all working), with per-endpoint contract gaps.
+- Confirmed onboarding is done (whitelisted on preprod), settlement uses PPF not RSF (both PPF APIs present), role is MSN, and the localhost signature bypass is intentional.
+- Built a single self-contained Postman collection (all endpoints + v1.2.5 request bodies + collection variables) for local testing, and fixed the `insecure=1` localhost bypass so Postman actually sends it.
+- Wrote `implementationplan.md` — master plan of done vs pending, with a 3-phase, 3-person roadmap.
+
+**Why:**
+
+- The 3-person team needed one source of truth for what is built, partial, and left before the Pramaan/workbench flows pass.
+- Easy, repeatable local API testing was needed (Postman → localhost with signature bypass; Pramaan/workbench for signed preprod).
+- To document the real deployment facts (already whitelisted, PPF, MSN, localhost bypass) so settled decisions are not re-litigated.
+
+**Changes:**
+
+- `implementationplan.md` (new)
+  Master implementation plan: endpoint status tables, v1.2.5 contract-gap punch list, preprod-readiness checklist, DB→UI data-coverage analysis, UI enhancement plan, and the phased roadmap.
+
+- `ONDC_v1.2.5_Workbench.postman_collection.json` (new)
+  Single merged Postman collection — 4 folders (network Beckn, admin APIs, health/test, domain search examples), v1.2.5 bodies, collection-level variables (defaults to localhost), and `insecure=1` query param baked into Beckn requests for the localhost signature bypass.
+
 ## BRANCH-003
 
 Date: 22-06-2026
