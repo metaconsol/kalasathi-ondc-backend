@@ -580,10 +580,16 @@ export async function handleCancel(req: Request, res: Response): Promise<void> {
 
       const cancelledOrder = {
         id: dbOrder.ondc_order_id,
-        state: 'Cancelled',
-        provider,
-        items: itemsPayload,
-        billing,
+        state: 'CANCELLED',
+        provider: { id: dbOrder.provider_id },
+        items: items.flatMap((i) => {
+          const cFulfId = cancelFulfIdMap.get(i.item_id) ?? 'C1';
+          return [
+            { id: i.item_id, fulfillment_id: i.fulfillment_id || 'F1', quantity: { count: 0 } },
+            { id: i.item_id, fulfillment_id: cFulfId, quantity: { count: i.quantity } },
+          ];
+        }),
+        billing: JSON.parse(dbOrder.billing_json ?? '{}'),
         cancellation: {
           cancelled_by: dbOrder.bap_id || ctx.bap_id || 'bnp.com',
           reason: {
