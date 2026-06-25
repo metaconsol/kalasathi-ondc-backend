@@ -4,7 +4,7 @@
  */
 
 import type { Request, Response } from 'express';
-import { buildAck, buildOnTrack } from '~/ondc/utils/payload.builder';
+import { buildAck, buildOnTrack, buildResponseContext } from '~/ondc/utils/payload.builder';
 import { becknService } from '~/ondc/services/beckn.service';
 import { observabilityService } from '~/ondc/services/observability.service';
 import { orderModel } from '~/ondc/models/order.model';
@@ -36,18 +36,35 @@ export async function handleTrack(req: Request, res: Response): Promise<void> {
       const primaryFulfillment = fulfillments[0];
       const trackingUrl = primaryFulfillment?.tracking_url ?? null;
 
-      const tracking = {
-        id: `TRK-${orderId}`,
-        url: trackingUrl,
-        status: trackingUrl ? 'active' : 'inactive',
-      };
+      let payload: any;
+      let actionName = 'on_track';
+      let isNack = false;
+
+      if (!trackingUrl) {
+        isNack = true;
+        actionName = 'on_track'; // Still sent to /on_track endpoint, but structured with context action on_track + error object
+        payload = {
+          context: buildResponseContext(ctx, 'on_track'),
+          error: {
+            type: 'CONTEXT-ERROR',
+            code: '30016', // ONDC standard code for tracking details not available
+            message: 'Tracking not available',
+          },
+        };
+      } else {
+        const tracking = {
+          id: `TRK-${orderId}`,
+          url: trackingUrl,
+          status: 'active',
+        };
+        payload = buildOnTrack(ctx, tracking);
+      }
 
       await overallTxnsModel.patch(txnId, {
         on_track: 1,
         track_link: trackingUrl ?? null,
       });
 
-      const payload = buildOnTrack(ctx, tracking) as any;
       const { statusCode, error: cbErr } = await becknService.sendCallback(
         becknService.buildCallbackUrl(bapUri, 'on_track'),
         'on_track',
@@ -64,9 +81,9 @@ export async function handleTrack(req: Request, res: Response): Promise<void> {
         bpp_id: payload.context.bpp_id ?? null,
         domain: ctx.domain,
         http_status: statusCode ?? null,
-        ack_status: statusCode && statusCode < 300 ? 'ACK' : 'NACK',
+        ack_status: isNack ? 'NACK' : statusCode && statusCode < 300 ? 'ACK' : 'NACK',
         payload_json: JSON.stringify(payload),
-        error_message: cbErr ?? null,
+        error_message: isNack ? 'Tracking not available' : (cbErr ?? null),
       });
 
       observabilityService.push('on_track', payload);

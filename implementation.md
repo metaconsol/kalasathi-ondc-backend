@@ -1,3 +1,24 @@
+## Branch-011
+
+**Date:** 2026-06-25
+
+**Status:** In Progress / Uncommitted
+
+**Area:** ONDC Tracking Flow / Payload Validation
+
+**What:**
+
+- Updated the `/track` controller to return a standard ONDC NACK error (code 30016) when a tracking URL is unavailable, instead of sending a successful payload with `status: 'inactive'`.
+- Ensured transaction logs accurately reflect the NACK status when tracking fails.
+
+**Why:**
+
+- Sending an `on_track` payload with `status: 'inactive'` and no tracking URL can cause contract validation failures or misrepresent the tracking state to the buyer network. The correct ONDC protocol behavior is to return an error (NACK) with code 30016 ("Tracking not available") when the tracking link is absent.
+
+**Changes:**
+
+- `src/ondc/controllers/beckn/track.controller.ts`: Refactored `handleTrack` to conditionally construct a NACK error response (code 30016) if `trackingUrl` is null. Updated callback logging parameters (`ack_status` and `error_message`) to accurately record NACKs in the transaction history.
+
 ## Branch-010
 
 **Date:** 2026-06-25
