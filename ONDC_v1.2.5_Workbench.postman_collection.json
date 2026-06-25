@@ -1,0 +1,1117 @@
+{
+  "info": {
+    "name": "ONDC ODOP BPP — v1.2.5 Workbench",
+    "description": "Full endpoint collection for the ODOP ONDC BPP, aligned to API contract v1.2.5. Use with the 'ONDC ODOP — v1.2.5 (preprod)' environment. Folder 1 = network-facing Beckn endpoints (the workbench/Pramaan calls these). Folder 2 = JWT-protected admin APIs. See implementationplan.md for endpoint status.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Beckn Protocol — BAP→BPP (network-facing)",
+      "description": "These are the endpoints the ONDC workbench / Pramaan (acting as BAP) POSTs to. In production every request must carry a valid ONDC `Authorization` signature header. For LOCAL testing without signing, point ONDC_BASE at {{LOCAL_BASE}} and append {{INSECURE}} to the path (e.g. /search?insecure=1) — works only when NODE_ENV != production. Each endpoint ACKs synchronously, then POSTs the on_<action> callback to {{BAP_URI}}/<action>.",
+      "item": [
+        {
+          "name": "POST /search",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"{{DOMAIN}}\",\n    \"action\": \"search\",\n    \"country\": \"IND\",\n    \"city\": \"{{CITY}}\",\n    \"core_version\": \"{{CORE_VERSION}}\",\n    \"bap_id\": \"{{BAP_ID}}\",\n    \"bap_uri\": \"{{BAP_URI}}\",\n    \"transaction_id\": \"{{TXN_ID}}\",\n    \"message_id\": \"{{MSG_ID}}\",\n    \"timestamp\": \"{{$isoTimestamp}}\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"intent\": {\n      \"item\": {\n        \"descriptor\": {\n          \"name\": \"kurta\"\n        }\n      },\n      \"fulfillment\": {\n        \"type\": \"Delivery\",\n        \"end\": {\n          \"location\": {\n            \"gps\": \"12.9715987,77.5945627\",\n            \"address\": {\n              \"area_code\": \"560001\"\n            }\n          }\n        }\n      },\n      \"payment\": {\n        \"@ondc/org/buyer_app_finder_fee_type\": \"percent\",\n        \"@ondc/org/buyer_app_finder_fee_amount\": \"3\"\n      },\n      \"tags\": [\n        {\n          \"code\": \"bap_terms\",\n          \"list\": [\n            {\n              \"code\": \"static_terms\",\n              \"value\": \"https://buyerapp.com/legal\"\n            },\n            {\n              \"code\": \"static_terms_new\",\n              \"value\": \"https://buyerapp.com/legal-2024\"\n            },\n            {\n              \"code\": \"effective_date\",\n              \"value\": \"2024-01-01T00:00:00.000Z\"\n            }\n          ]\n        }\n      ]\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{ONDC_BASE}}/search?insecure=1",
+              "host": ["{{ONDC_BASE}}"],
+              "path": ["search"],
+              "query": [
+                {
+                  "key": "insecure",
+                  "value": "1",
+                  "description": "Localhost signature bypass. Disable/delete this param when testing signed."
+                }
+              ]
+            },
+            "description": "Buyer search intent → on_search catalog."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /select",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"{{DOMAIN}}\",\n    \"action\": \"select\",\n    \"country\": \"IND\",\n    \"city\": \"{{CITY}}\",\n    \"core_version\": \"{{CORE_VERSION}}\",\n    \"bap_id\": \"{{BAP_ID}}\",\n    \"bap_uri\": \"{{BAP_URI}}\",\n    \"bpp_id\": \"{{BPP_ID}}\",\n    \"bpp_uri\": \"{{BPP_URI}}\",\n    \"transaction_id\": \"{{TXN_ID}}\",\n    \"message_id\": \"{{MSG_ID}}\",\n    \"timestamp\": \"{{$isoTimestamp}}\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"order\": {\n      \"provider\": {\n        \"id\": \"{{PROVIDER_ID}}\",\n        \"locations\": [\n          {\n            \"id\": \"L1\"\n          }\n        ]\n      },\n      \"items\": [\n        {\n          \"id\": \"{{ITEM_ID}}\",\n          \"location_id\": \"L1\",\n          \"quantity\": {\n            \"count\": 1\n          }\n        }\n      ],\n      \"fulfillments\": [\n        {\n          \"end\": {\n            \"location\": {\n              \"gps\": \"12.9715987,77.5945627\",\n              \"address\": {\n                \"area_code\": \"560001\"\n              }\n            }\n          }\n        }\n      ]\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{ONDC_BASE}}/select?insecure=1",
+              "host": ["{{ONDC_BASE}}"],
+              "path": ["select"],
+              "query": [
+                {
+                  "key": "insecure",
+                  "value": "1",
+                  "description": "Localhost signature bypass. Disable/delete this param when testing signed."
+                }
+              ]
+            },
+            "description": "Select items → on_select with quote/breakup."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /init",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"{{DOMAIN}}\",\n    \"action\": \"init\",\n    \"country\": \"IND\",\n    \"city\": \"{{CITY}}\",\n    \"core_version\": \"{{CORE_VERSION}}\",\n    \"bap_id\": \"{{BAP_ID}}\",\n    \"bap_uri\": \"{{BAP_URI}}\",\n    \"bpp_id\": \"{{BPP_ID}}\",\n    \"bpp_uri\": \"{{BPP_URI}}\",\n    \"transaction_id\": \"{{TXN_ID}}\",\n    \"message_id\": \"{{MSG_ID}}\",\n    \"timestamp\": \"{{$isoTimestamp}}\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"order\": {\n      \"provider\": {\n        \"id\": \"{{PROVIDER_ID}}\",\n        \"locations\": [\n          {\n            \"id\": \"L1\"\n          }\n        ]\n      },\n      \"items\": [\n        {\n          \"id\": \"{{ITEM_ID}}\",\n          \"location_id\": \"L1\",\n          \"quantity\": {\n            \"count\": 1\n          }\n        }\n      ],\n      \"billing\": {\n        \"name\": \"Test Buyer\",\n        \"address\": {\n          \"name\": \"Home\",\n          \"building\": \"12\",\n          \"locality\": \"MG Road\",\n          \"city\": \"Bengaluru\",\n          \"state\": \"Karnataka\",\n          \"country\": \"IND\",\n          \"area_code\": \"560001\"\n        },\n        \"email\": \"buyer@example.com\",\n        \"phone\": \"9886098860\",\n        \"tax_number\": \"29ABCDE1234F1Z5\",\n        \"created_at\": \"{{$isoTimestamp}}\",\n        \"updated_at\": \"{{$isoTimestamp}}\"\n      },\n      \"fulfillments\": [\n        {\n          \"type\": \"Delivery\",\n          \"end\": {\n            \"location\": {\n              \"gps\": \"12.9715987,77.5945627\",\n              \"address\": {\n                \"name\": \"Home\",\n                \"building\": \"12\",\n                \"locality\": \"MG Road\",\n                \"city\": \"Bengaluru\",\n                \"state\": \"Karnataka\",\n                \"country\": \"IND\",\n                \"area_code\": \"560001\"\n              }\n            },\n            \"contact\": {\n              \"phone\": \"9886098860\"\n            }\n          }\n        }\n      ],\n      \"payment\": {\n        \"type\": \"ON-FULFILLMENT\",\n        \"collected_by\": \"BAP\",\n        \"@ondc/org/buyer_app_finder_fee_type\": \"percent\",\n        \"@ondc/org/buyer_app_finder_fee_amount\": \"3\"\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{ONDC_BASE}}/init?insecure=1",
+              "host": ["{{ONDC_BASE}}"],
+              "path": ["init"],
+              "query": [
+                {
+                  "key": "insecure",
+                  "value": "1",
+                  "description": "Localhost signature bypass. Disable/delete this param when testing signed."
+                }
+              ]
+            },
+            "description": "Init order (billing+delivery) → on_init with quote + settlement + bpp_terms."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /confirm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"{{DOMAIN}}\",\n    \"action\": \"confirm\",\n    \"country\": \"IND\",\n    \"city\": \"{{CITY}}\",\n    \"core_version\": \"{{CORE_VERSION}}\",\n    \"bap_id\": \"{{BAP_ID}}\",\n    \"bap_uri\": \"{{BAP_URI}}\",\n    \"bpp_id\": \"{{BPP_ID}}\",\n    \"bpp_uri\": \"{{BPP_URI}}\",\n    \"transaction_id\": \"{{TXN_ID}}\",\n    \"message_id\": \"{{MSG_ID}}\",\n    \"timestamp\": \"{{$isoTimestamp}}\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"order\": {\n      \"id\": \"{{ORDER_ID}}\",\n      \"state\": \"Created\",\n      \"provider\": {\n        \"id\": \"{{PROVIDER_ID}}\",\n        \"locations\": [\n          {\n            \"id\": \"L1\"\n          }\n        ]\n      },\n      \"items\": [\n        {\n          \"id\": \"{{ITEM_ID}}\",\n          \"location_id\": \"L1\",\n          \"quantity\": {\n            \"count\": 1\n          }\n        }\n      ],\n      \"billing\": {\n        \"name\": \"Test Buyer\",\n        \"address\": {\n          \"name\": \"Home\",\n          \"building\": \"12\",\n          \"locality\": \"MG Road\",\n          \"city\": \"Bengaluru\",\n          \"state\": \"Karnataka\",\n          \"country\": \"IND\",\n          \"area_code\": \"560001\"\n        },\n        \"email\": \"buyer@example.com\",\n        \"phone\": \"9886098860\",\n        \"tax_number\": \"29ABCDE1234F1Z5\",\n        \"created_at\": \"{{$isoTimestamp}}\",\n        \"updated_at\": \"{{$isoTimestamp}}\"\n      },\n      \"fulfillments\": [\n        {\n          \"id\": \"F1\",\n          \"type\": \"Delivery\",\n          \"end\": {\n            \"location\": {\n              \"gps\": \"12.9715987,77.5945627\",\n              \"address\": {\n                \"name\": \"Home\",\n                \"building\": \"12\",\n                \"locality\": \"MG Road\",\n                \"city\": \"Bengaluru\",\n                \"state\": \"Karnataka\",\n                \"country\": \"IND\",\n                \"area_code\": \"560001\"\n              }\n            },\n            \"contact\": {\n              \"phone\": \"9886098860\"\n            }\n          }\n        }\n      ],\n      \"quote\": {\n        \"price\": {\n          \"currency\": \"INR\",\n          \"value\": \"250.00\"\n        },\n        \"breakup\": [\n          {\n            \"@ondc/org/item_id\": \"{{ITEM_ID}}\",\n            \"@ondc/org/title_type\": \"item\",\n            \"price\": {\n              \"currency\": \"INR\",\n              \"value\": \"250.00\"\n            },\n            \"@ondc/org/item_quantity\": {\n              \"count\": 1\n            }\n          }\n        ],\n        \"ttl\": \"P1D\"\n      },\n      \"payment\": {\n        \"uri\": \"https://ondc.transaction.com/payment\",\n        \"tl_method\": \"http/get\",\n        \"type\": \"ON-FULFILLMENT\",\n        \"collected_by\": \"BAP\",\n        \"status\": \"NOT-PAID\",\n        \"@ondc/org/buyer_app_finder_fee_type\": \"percent\",\n        \"@ondc/org/buyer_app_finder_fee_amount\": \"3\",\n        \"@ondc/org/settlement_basis\": \"delivery\",\n        \"@ondc/org/settlement_window\": \"P1D\",\n        \"@ondc/org/withholding_amount\": \"0.00\"\n      },\n      \"tags\": [\n        {\n          \"code\": \"bpp_terms\",\n          \"list\": [\n            {\n              \"code\": \"max_liability\",\n              \"value\": \"2\"\n            },\n            {\n              \"code\": \"max_liability_cap\",\n              \"value\": \"10000.00\"\n            },\n            {\n              \"code\": \"mandatory_arbitration\",\n              \"value\": \"false\"\n            },\n            {\n              \"code\": \"court_jurisdiction\",\n              \"value\": \"Bengaluru\"\n            },\n            {\n              \"code\": \"delay_interest\",\n              \"value\": \"1000.00\"\n            },\n            {\n              \"code\": \"tax_number\",\n              \"value\": \"29ABCDE1234F1Z5\"\n            }\n          ]\n        }\n      ]\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{ONDC_BASE}}/confirm?insecure=1",
+              "host": ["{{ONDC_BASE}}"],
+              "path": ["confirm"],
+              "query": [
+                {
+                  "key": "insecure",
+                  "value": "1",
+                  "description": "Localhost signature bypass. Disable/delete this param when testing signed."
+                }
+              ]
+            },
+            "description": "Confirm order → on_confirm. Capture order.id into ORDER_ID env var."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /status",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"{{DOMAIN}}\",\n    \"action\": \"status\",\n    \"country\": \"IND\",\n    \"city\": \"{{CITY}}\",\n    \"core_version\": \"{{CORE_VERSION}}\",\n    \"bap_id\": \"{{BAP_ID}}\",\n    \"bap_uri\": \"{{BAP_URI}}\",\n    \"bpp_id\": \"{{BPP_ID}}\",\n    \"bpp_uri\": \"{{BPP_URI}}\",\n    \"transaction_id\": \"{{TXN_ID}}\",\n    \"message_id\": \"{{MSG_ID}}\",\n    \"timestamp\": \"{{$isoTimestamp}}\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"order_id\": \"{{ORDER_ID}}\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{ONDC_BASE}}/status?insecure=1",
+              "host": ["{{ONDC_BASE}}"],
+              "path": ["status"],
+              "query": [
+                {
+                  "key": "insecure",
+                  "value": "1",
+                  "description": "Localhost signature bypass. Disable/delete this param when testing signed."
+                }
+              ]
+            },
+            "description": "Order status → on_status."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /track",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"{{DOMAIN}}\",\n    \"action\": \"track\",\n    \"country\": \"IND\",\n    \"city\": \"{{CITY}}\",\n    \"core_version\": \"{{CORE_VERSION}}\",\n    \"bap_id\": \"{{BAP_ID}}\",\n    \"bap_uri\": \"{{BAP_URI}}\",\n    \"bpp_id\": \"{{BPP_ID}}\",\n    \"bpp_uri\": \"{{BPP_URI}}\",\n    \"transaction_id\": \"{{TXN_ID}}\",\n    \"message_id\": \"{{MSG_ID}}\",\n    \"timestamp\": \"{{$isoTimestamp}}\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"order_id\": \"{{ORDER_ID}}\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{ONDC_BASE}}/track?insecure=1",
+              "host": ["{{ONDC_BASE}}"],
+              "path": ["track"],
+              "query": [
+                {
+                  "key": "insecure",
+                  "value": "1",
+                  "description": "Localhost signature bypass. Disable/delete this param when testing signed."
+                }
+              ]
+            },
+            "description": "Track shipment → on_track."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /cancel",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"{{DOMAIN}}\",\n    \"action\": \"cancel\",\n    \"country\": \"IND\",\n    \"city\": \"{{CITY}}\",\n    \"core_version\": \"{{CORE_VERSION}}\",\n    \"bap_id\": \"{{BAP_ID}}\",\n    \"bap_uri\": \"{{BAP_URI}}\",\n    \"bpp_id\": \"{{BPP_ID}}\",\n    \"bpp_uri\": \"{{BPP_URI}}\",\n    \"transaction_id\": \"{{TXN_ID}}\",\n    \"message_id\": \"{{MSG_ID}}\",\n    \"timestamp\": \"{{$isoTimestamp}}\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"order_id\": \"{{ORDER_ID}}\",\n    \"cancellation_reason_id\": \"001\",\n    \"descriptor\": {\n      \"short_desc\": \"buyer cancelled\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{ONDC_BASE}}/cancel?insecure=1",
+              "host": ["{{ONDC_BASE}}"],
+              "path": ["cancel"],
+              "query": [
+                {
+                  "key": "insecure",
+                  "value": "1",
+                  "description": "Localhost signature bypass. Disable/delete this param when testing signed."
+                }
+              ]
+            },
+            "description": "Cancel order → on_cancel with quote_trail + refund."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /update",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"{{DOMAIN}}\",\n    \"action\": \"update\",\n    \"country\": \"IND\",\n    \"city\": \"{{CITY}}\",\n    \"core_version\": \"{{CORE_VERSION}}\",\n    \"bap_id\": \"{{BAP_ID}}\",\n    \"bap_uri\": \"{{BAP_URI}}\",\n    \"bpp_id\": \"{{BPP_ID}}\",\n    \"bpp_uri\": \"{{BPP_URI}}\",\n    \"transaction_id\": \"{{TXN_ID}}\",\n    \"message_id\": \"{{MSG_ID}}\",\n    \"timestamp\": \"{{$isoTimestamp}}\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"update_target\": \"item\",\n    \"order\": {\n      \"id\": \"{{ORDER_ID}}\",\n      \"provider\": {\n        \"id\": \"{{PROVIDER_ID}}\"\n      },\n      \"items\": [\n        {\n          \"id\": \"{{ITEM_ID}}\",\n          \"quantity\": {\n            \"count\": 0\n          },\n          \"tags\": [\n            {\n              \"code\": \"update_type\",\n              \"list\": [\n                {\n                  \"code\": \"type\",\n                  \"value\": \"cancel\"\n                }\n              ]\n            }\n          ]\n        }\n      ],\n      \"fulfillments\": [\n        {\n          \"id\": \"F1\",\n          \"type\": \"Cancel\"\n        }\n      ]\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{ONDC_BASE}}/update?insecure=1",
+              "host": ["{{ONDC_BASE}}"],
+              "path": ["update"],
+              "query": [
+                {
+                  "key": "insecure",
+                  "value": "1",
+                  "description": "Localhost signature bypass. Disable/delete this param when testing signed."
+                }
+              ]
+            },
+            "description": "Partial cancel / return → on_update."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /rating",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"{{DOMAIN}}\",\n    \"action\": \"rating\",\n    \"country\": \"IND\",\n    \"city\": \"{{CITY}}\",\n    \"core_version\": \"{{CORE_VERSION}}\",\n    \"bap_id\": \"{{BAP_ID}}\",\n    \"bap_uri\": \"{{BAP_URI}}\",\n    \"bpp_id\": \"{{BPP_ID}}\",\n    \"bpp_uri\": \"{{BPP_URI}}\",\n    \"transaction_id\": \"{{TXN_ID}}\",\n    \"message_id\": \"{{MSG_ID}}\",\n    \"timestamp\": \"{{$isoTimestamp}}\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"ratings\": [\n      {\n        \"id\": \"{{ORDER_ID}}\",\n        \"rating_category\": \"Order\",\n        \"value\": \"5\"\n      }\n    ]\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{ONDC_BASE}}/rating?insecure=1",
+              "host": ["{{ONDC_BASE}}"],
+              "path": ["rating"],
+              "query": [
+                {
+                  "key": "insecure",
+                  "value": "1",
+                  "description": "Localhost signature bypass. Disable/delete this param when testing signed."
+                }
+              ]
+            },
+            "description": "Rating → on_rating (v1.2.5)."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /issue (IGM 2.0.0)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"{{DOMAIN}}\",\n    \"action\": \"issue\",\n    \"country\": \"IND\",\n    \"city\": \"{{CITY}}\",\n    \"core_version\": \"{{CORE_VERSION}}\",\n    \"bap_id\": \"{{BAP_ID}}\",\n    \"bap_uri\": \"{{BAP_URI}}\",\n    \"bpp_id\": \"{{BPP_ID}}\",\n    \"bpp_uri\": \"{{BPP_URI}}\",\n    \"transaction_id\": \"{{TXN_ID}}\",\n    \"message_id\": \"{{MSG_ID}}\",\n    \"timestamp\": \"{{$isoTimestamp}}\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"issue\": {\n      \"id\": \"I1\",\n      \"category\": \"ITEM\",\n      \"sub_category\": \"ITM02\",\n      \"complainant_info\": {\n        \"person\": {\n          \"name\": \"Test Buyer\"\n        },\n        \"contact\": {\n          \"phone\": \"9886098860\",\n          \"email\": \"buyer@example.com\"\n        }\n      },\n      \"order_details\": {\n        \"id\": \"{{ORDER_ID}}\",\n        \"state\": \"Completed\",\n        \"items\": [\n          {\n            \"id\": \"{{ITEM_ID}}\",\n            \"quantity\": 1\n          }\n        ],\n        \"fulfillments\": [\n          {\n            \"id\": \"F1\",\n            \"state\": \"Order-delivered\"\n          }\n        ],\n        \"provider_id\": \"{{PROVIDER_ID}}\"\n      },\n      \"description\": {\n        \"short_desc\": \"Damaged item\",\n        \"long_desc\": \"Received a damaged product\",\n        \"additional_desc\": {\n          \"url\": \"https://buyerapp.com/desc\",\n          \"content_type\": \"text/plain\"\n        }\n      },\n      \"source\": {\n        \"network_participant_id\": \"{{BAP_ID}}\",\n        \"type\": \"CONSUMER\"\n      },\n      \"expected_response_time\": {\n        \"duration\": \"PT2H\"\n      },\n      \"expected_resolution_time\": {\n        \"duration\": \"P1D\"\n      },\n      \"status\": \"OPEN\",\n      \"issue_type\": \"ISSUE\",\n      \"created_at\": \"{{$isoTimestamp}}\",\n      \"updated_at\": \"{{$isoTimestamp}}\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{ONDC_BASE}}/issue?insecure=1",
+              "host": ["{{ONDC_BASE}}"],
+              "path": ["issue"],
+              "query": [
+                {
+                  "key": "insecure",
+                  "value": "1",
+                  "description": "Localhost signature bypass. Disable/delete this param when testing signed."
+                }
+              ]
+            },
+            "description": "Raise grievance → on_issue."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /issue_status (IGM 2.0.0)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"{{DOMAIN}}\",\n    \"action\": \"issue_status\",\n    \"country\": \"IND\",\n    \"city\": \"{{CITY}}\",\n    \"core_version\": \"{{CORE_VERSION}}\",\n    \"bap_id\": \"{{BAP_ID}}\",\n    \"bap_uri\": \"{{BAP_URI}}\",\n    \"bpp_id\": \"{{BPP_ID}}\",\n    \"bpp_uri\": \"{{BPP_URI}}\",\n    \"transaction_id\": \"{{TXN_ID}}\",\n    \"message_id\": \"{{MSG_ID}}\",\n    \"timestamp\": \"{{$isoTimestamp}}\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"issue_id\": \"I1\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{ONDC_BASE}}/issue_status?insecure=1",
+              "host": ["{{ONDC_BASE}}"],
+              "path": ["issue_status"],
+              "query": [
+                {
+                  "key": "insecure",
+                  "value": "1",
+                  "description": "Localhost signature bypass. Disable/delete this param when testing signed."
+                }
+              ]
+            },
+            "description": "Issue status → on_issue_status."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /on_receiver_recon (PPF settlement callback)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"{{DOMAIN}}\",\n    \"action\": \"on_receiver_recon\",\n    \"country\": \"IND\",\n    \"city\": \"{{CITY}}\",\n    \"core_version\": \"{{CORE_VERSION}}\",\n    \"bap_id\": \"{{BAP_ID}}\",\n    \"bap_uri\": \"{{BAP_URI}}\",\n    \"bpp_id\": \"{{BPP_ID}}\",\n    \"bpp_uri\": \"{{BPP_URI}}\",\n    \"transaction_id\": \"{{TXN_ID}}\",\n    \"message_id\": \"{{MSG_ID}}\",\n    \"timestamp\": \"{{$isoTimestamp}}\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"recon\": {\n      \"orders\": [\n        {\n          \"id\": \"{{ORDER_ID}}\",\n          \"settlements\": [\n            {\n              \"id\": \"SETTLE-1\",\n              \"amount\": {\n                \"currency\": \"INR\",\n                \"value\": \"250.00\"\n              },\n              \"status\": \"PENDING\",\n              \"recon_status\": \"01\"\n            }\n          ]\n        }\n      ]\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{ONDC_BASE}}/on_receiver_recon?insecure=1",
+              "host": ["{{ONDC_BASE}}"],
+              "path": ["on_receiver_recon"],
+              "query": [
+                {
+                  "key": "insecure",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "ONDC:NTS10 settlement reconciliation callback from BAP. NOTE: currently mounted WITHOUT signature verification."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Admin APIs (JWT-protected — internal dashboard)",
+      "description": "Internal management APIs consumed by the React admin UI. Require a valid admin/seller JWT in {{ADMIN_TOKEN}}.",
+      "item": [
+        {
+          "name": "GET /admin/dashboard/stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/dashboard/stats",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["dashboard", "stats"]
+            },
+            "description": "Aggregate KPIs."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /admin/catalog/debug",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/catalog/debug",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["catalog", "debug"]
+            },
+            "description": "Catalog build diagnostics."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /admin/catalog/items/:providerId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/catalog/items/{{PROVIDER_ID}}?domain=ONDC:RET12",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["catalog", "items", "{{PROVIDER_ID}}"],
+              "query": [
+                {
+                  "key": "domain",
+                  "value": "ONDC:RET12"
+                }
+              ]
+            },
+            "description": "Live /on_search items for a provider."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /admin/orders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/orders?page=1&limit=20",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["orders"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "GET /admin/orders/:orderId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/orders/{{ORDER_ID}}",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["orders", "{{ORDER_ID}}"]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "POST /admin/orders/:orderId/fulfillment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/orders/{{ORDER_ID}}/fulfillment",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["orders", "{{ORDER_ID}}", "fulfillment"]
+            },
+            "description": "Advance fulfillment state (drives on_status forward states).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fulfillment_state\": \"Order-picked-up\",\n  \"tracking_url\": \"https://track.example.com/abc\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /admin/providers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/providers",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["providers"]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "GET /admin/providers/:providerId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/providers/{{PROVIDER_ID}}",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["providers", "{{PROVIDER_ID}}"]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH /admin/providers/:providerId/toggle",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/providers/{{PROVIDER_ID}}/toggle",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["providers", "{{PROVIDER_ID}}", "toggle"]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "GET /admin/ppf",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/ppf?limit=50",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["ppf"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "GET /admin/ppf/order/:orderId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/ppf/order/{{ORDER_ID}}",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["ppf", "order", "{{ORDER_ID}}"]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "POST /admin/ppf/trigger",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/ppf/trigger",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["ppf", "trigger"]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"order_id\": \"{{ORDER_ID}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /admin/logs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/logs?action=on_search&limit=50",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["logs"],
+              "query": [
+                {
+                  "key": "action",
+                  "value": "on_search"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "GET /admin/logs/:transactionId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/logs/{{TXN_ID}}",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["logs", "{{TXN_ID}}"]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE /admin/logs",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/logs",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["logs"]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "GET /admin/transactions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/transactions",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["transactions"]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE /admin/transactions",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/transactions",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["transactions"]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "GET /admin/request-monitor/counts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/request-monitor/counts",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["request-monitor", "counts"]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "GET /admin/request-monitor",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/request-monitor?action=search",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["request-monitor"],
+              "query": [
+                {
+                  "key": "action",
+                  "value": "search"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "GET /admin/request-monitor/:transactionId",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/request-monitor/{{TXN_ID}}",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["request-monitor", "{{TXN_ID}}"]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "GET /admin/issues",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{ADMIN_BASE}}/issues",
+              "host": ["{{ADMIN_BASE}}"],
+              "path": ["issues"]
+            },
+            "description": ""
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Health / Test",
+      "item": [
+        {
+          "name": "GET /ondc (module health)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ONDC_BASE}}/",
+              "host": ["{{ONDC_BASE}}"],
+              "path": []
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "GET /ondc/test/ping",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ONDC_BASE}}/test/ping",
+              "host": ["{{ONDC_BASE}}"],
+              "path": ["test", "ping"]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "GET /ondc/test/catalog",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ONDC_BASE}}/test/catalog",
+              "host": ["{{ONDC_BASE}}"],
+              "path": ["test", "catalog"]
+            },
+            "description": ""
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Domain search examples",
+      "item": [
+        {
+          "name": "POST /search — RET10 Grocery",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"{{DOMAIN}}\",\n    \"action\": \"search\",\n    \"country\": \"IND\",\n    \"city\": \"{{CITY}}\",\n    \"core_version\": \"{{CORE_VERSION}}\",\n    \"bap_id\": \"{{BAP_ID}}\",\n    \"bap_uri\": \"{{BAP_URI}}\",\n    \"transaction_id\": \"{{TXN_ID}}\",\n    \"message_id\": \"{{MSG_ID}}\",\n    \"timestamp\": \"{{$isoTimestamp}}\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"intent\": {\n      \"category\": {\n        \"id\": \"Foodgrains\"\n      },\n      \"fulfillment\": {\n        \"type\": \"Delivery\",\n        \"end\": {\n          \"location\": {\n            \"gps\": \"12.9715987,77.5945627\",\n            \"address\": {\n              \"area_code\": \"560001\"\n            }\n          }\n        }\n      },\n      \"payment\": {\n        \"@ondc/org/buyer_app_finder_fee_type\": \"percent\",\n        \"@ondc/org/buyer_app_finder_fee_amount\": \"3\"\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{ONDC_BASE}}/search?insecure=1",
+              "host": ["{{ONDC_BASE}}"],
+              "path": ["search"],
+              "query": [
+                {
+                  "key": "insecure",
+                  "value": "1",
+                  "description": "Localhost signature bypass. Disable/delete this param when testing signed."
+                }
+              ]
+            },
+            "description": "RET10 grocery search."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /search — RET16 Home & Kitchen",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"{{DOMAIN}}\",\n    \"action\": \"search\",\n    \"country\": \"IND\",\n    \"city\": \"{{CITY}}\",\n    \"core_version\": \"{{CORE_VERSION}}\",\n    \"bap_id\": \"{{BAP_ID}}\",\n    \"bap_uri\": \"{{BAP_URI}}\",\n    \"transaction_id\": \"{{TXN_ID}}\",\n    \"message_id\": \"{{MSG_ID}}\",\n    \"timestamp\": \"{{$isoTimestamp}}\",\n    \"ttl\": \"PT30S\"\n  },\n  \"message\": {\n    \"intent\": {\n      \"category\": {\n        \"id\": \"Home Decor\"\n      },\n      \"fulfillment\": {\n        \"type\": \"Delivery\",\n        \"end\": {\n          \"location\": {\n            \"gps\": \"12.9715987,77.5945627\",\n            \"address\": {\n              \"area_code\": \"560001\"\n            }\n          }\n        }\n      },\n      \"payment\": {\n        \"@ondc/org/buyer_app_finder_fee_type\": \"percent\",\n        \"@ondc/org/buyer_app_finder_fee_amount\": \"3\"\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{ONDC_BASE}}/search?insecure=1",
+              "host": ["{{ONDC_BASE}}"],
+              "path": ["search"],
+              "query": [
+                {
+                  "key": "insecure",
+                  "value": "1",
+                  "description": "Localhost signature bypass. Disable/delete this param when testing signed."
+                }
+              ]
+            },
+            "description": "RET16 home & kitchen search."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "ONDC_BASE",
+      "value": "http://localhost:5001/api/v1/ondc",
+      "type": "string"
+    },
+    {
+      "key": "ADMIN_BASE",
+      "value": "http://localhost:5001/api/v1/ondc/admin",
+      "type": "string"
+    },
+    {
+      "key": "PREPROD_BASE",
+      "value": "https://preprod.odopmartmp.com/api/v1/ondc",
+      "type": "string"
+    },
+    {
+      "key": "LOCAL_BASE",
+      "value": "http://localhost:5001/api/v1/ondc",
+      "type": "string"
+    },
+    {
+      "key": "BPP_ID",
+      "value": "preprod.odopmartmp.com",
+      "type": "string"
+    },
+    {
+      "key": "BPP_URI",
+      "value": "https://preprod.odopmartmp.com/api/v1/ondc",
+      "type": "string"
+    },
+    {
+      "key": "BAP_ID",
+      "value": "pramaan.ondc.org/beta/preprod/mock/buyer",
+      "type": "string"
+    },
+    {
+      "key": "BAP_URI",
+      "value": "https://pramaan.ondc.org/beta/preprod/mock/buyer",
+      "type": "string"
+    },
+    {
+      "key": "DOMAIN",
+      "value": "ONDC:RET12",
+      "type": "string"
+    },
+    {
+      "key": "CORE_VERSION",
+      "value": "1.2.5",
+      "type": "string"
+    },
+    {
+      "key": "CITY",
+      "value": "std:080",
+      "type": "string"
+    },
+    {
+      "key": "TXN_ID",
+      "value": "txn-{{$guid}}",
+      "type": "string"
+    },
+    {
+      "key": "MSG_ID",
+      "value": "msg-{{$guid}}",
+      "type": "string"
+    },
+    {
+      "key": "PROVIDER_ID",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "ITEM_ID",
+      "value": "prod_101_var_201",
+      "type": "string"
+    },
+    {
+      "key": "ORDER_ID",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "INSECURE",
+      "value": "?insecure=1",
+      "type": "string"
+    },
+    {
+      "key": "ADMIN_TOKEN",
+      "value": "Bearer <paste_admin_jwt>",
+      "type": "string"
+    }
+  ]
+}
