@@ -1,3 +1,36 @@
+## Branch-010
+
+**Date:** 2026-06-25
+
+**Status:** In Progress / Uncommitted
+
+**Area:** ONDC RTO Cancellation Flow, Validation, and Fulfillment State Handling
+
+**What:**
+
+- Implemented an RTO (Return to Origin) cancellation service `cancelRto` in flow 3C to push network updates when an RTO is initiated.
+- Added dynamic generic logic to handle cancellation reasons from the admin controller for all standard cancellations.
+- Updated the ONDC validator middleware and cancel controller to construct strict NACK error responses through callbacks when validations fail.
+- Linked new order transitions (e.g., packing, out-for-delivery, agent-assigned) with network update triggers (`flow1AService.pushOnStatus` and `flow3CService.cancelRto`).
+- Created a testing script `test-rto.ts` to simulate database queries for RTO callbacks without state mutations.
+
+**Why:**
+
+- Previous fulfillment states were only mutating the local DB but not correctly pushing `on_status` updates to the ONDC network for events like "Agent-assigned" or "Order-picked-up".
+- Implementing RTO allows sellers to mark orders that fail delivery as returning to origin, triggering an `on_cancel` payload back to the network.
+- Asynchronous validation responses (NACK) required proper payloads to be built and transmitted when requests fail ONDC header rules.
+
+**Changes:**
+
+- `src/ondc/controllers/admin/orders.controller.ts`: Allowed generic cancellation reasons to be correctly passed into standard cancellation flows from the admin interface.
+- `src/ondc/controllers/beckn/cancel.controller.ts`: Refactored callback processing to send explicit NACK errors on validation failure.
+- `src/ondc/flows/flow3C.service.ts`: Added the `cancelRto` method to trigger asynchronous callbacks for RTO flows.
+- `src/ondc/flows/generators/generateFlow3COnCancel.ts`: Implemented a payload generator to shape the ONDC `on_cancel` callback payload specifically for RTO.
+- `src/ondc/middleware/ondcValidator.middleware.ts`: Enhanced validation middleware to properly construct NACK contexts upon request failure.
+- `src/ondc/services/fulfillment.service.ts`: Linked internal state transitions using `orderModel.transitionStatus` and added triggers for `flow1AService.pushOnStatus` on major state updates like `markPacked` and `markAgentAssigned`. Added `markAgentAssigned` action.
+- `src/ondc/test-rto.ts`: (New file) Created a test script to trigger the `cancelRto` mock.
+- `src/ondc/types/order.types.ts`: Added the `Agent-assigned` fulfillment state.
+
 ## Branch-008
 
 **Date:** 2026-06-24
@@ -27,6 +60,44 @@
 
 - `ONDC_v1.2.5_Workbench.postman_collection.json` (new)
   Single merged Postman collection — 4 folders (network Beckn, admin APIs, health/test, domain search examples), v1.2.5 bodies, collection-level variables (defaults to localhost), and `insecure=1` query param baked into Beckn requests for the localhost signature bypass.
+
+## BRANCH-005
+
+**Date:** 2026-06-22
+
+**Status:** Completed
+
+**Area:** ONDC RTO Cancellation Flow, Dynamic Payload Generation, and Validation Fixes
+
+**What:**
+
+- Fixed the `cancelRto` logic to fetch 100% of payload data dynamically from the database.
+- Removed hardcoded values like item fallback titles ("Atta", "Apparel"), delivery/packing charges, and BPP ID ("lsp.com") in the RTO callback.
+- Fixed ES Module file system errors so that outgoing RTO payloads correctly log to `logs/ondc/RTOcancell.log`.
+- Updated ONDC payload validation to accurately check `domain` headers and trigger NACK error callbacks asynchronously.
+- Repaired broken `fulfillmentService` imports preventing state updates.
+- Wrote and verified a test script to validate RTO payloads purely from database queries without hardcoded data.
+
+**Why:**
+
+- The RTO cancel payload previously included mock data defaults (e.g., "50.00", "lsp.com", "Apparel") when real values were missing, which breaks production accuracy.
+- Outbound logging was failing because `require('fs')` crashed within an ES Module environment (`type: "module"`), masking errors.
+- Network validation middleware wasn't robust enough with NACK asynchronous flows and strict domain checking.
+- Merge conflicts broke `fulfillment.service.ts`, preventing status transitions from invoking downstream flows.
+
+**Changes:**
+
+- `src/ondc/flows/flow3C.service.ts`
+  Removed hardcoded `lsp.com` for `initiated_by` and substituted it with dynamic BPP IDs. Removed default fallback logic that set empty DB delivery/packing charges to `50.00` and `25.00`, strictly defaulting to `0.00` instead. Replaced `require` imports for `fs` and `path` with dynamic imports (`await import('fs')`) to successfully write `logs/ondc/RTOcancell.log`.
+
+- `src/ondc/middleware/ondcValidator.middleware.ts`
+  Added strict checks to respond with `NACK` when an invalid or missing `domain` is passed in requests (allowing RET10, RET12, RET16). Fixed `sendCallback` integration to ensure outbound NACK calls are accurately fired with proper reasons.
+
+- `src/ondc/services/fulfillment.service.ts`
+  Resolved git merge conflicts and reinstated valid imports for `flow1AService` and `flow3CService` to fix fulfillment state transition errors.
+
+- `src/ondc/test-rto.ts`
+  Updated this script using `dotenv/config` and proper imports to smoothly test database queries and securely trigger RTO cancel logging without altering real database state.
 
 ## BRANCH-003
 
