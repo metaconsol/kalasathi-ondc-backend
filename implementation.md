@@ -1,3 +1,85 @@
+## Branch-013
+
+**Date:** 2026-06-25
+
+**Status:** In Progress / Uncommitted
+
+**Area:** ONDC `on_search` catalog item payload — workbench schema validation (ITEMS_RATING and MONTH_YEAR_OF_MANUFACTURE_PACKING_IMPORT).
+
+**What:**
+
+- Item `rating` is no longer sent as an empty string. It is now **omitted entirely** unless a valid ONDC value (whole number "1".."5") is available; a decimal is rounded to the nearest 1-5.
+- `month_year_of_manufacture_packing_import` is now normalized to a valid value — it keeps a real `MM/YYYY` value or falls back to `NA`, instead of sending an empty string.
+- Added two helper functions and an optional `rating` input field to support this.
+
+**Why:**
+
+- The ONDC workbench `on_search` validation failed with **ITEMS_RATING** because every item carried `rating: ""` — the rule rejects a present-but-invalid value and only skips when the field is absent. Omitting it makes the rule pass.
+- It also failed with **MONTH_YEAR_OF_MANUFACTURE_PACKING_IMPORT** because the field was `""`; the rule requires `MM/YYYY` or `NA`.
+
+**Changes:**
+
+- `src/ondc/utils/catalog.builders.ts`
+  - Added `rating?: string | number | null` to the `BuildOndcItemInput` interface.
+  - Added `normalizeMonthYear(value)` — returns the value if it matches `MM/YYYY`, otherwise `NA`.
+  - Added `isValidItemRating(value)` — true only for a whole number 1-5 (rounds decimals).
+  - In `buildOndcItem`, replaced the hardcoded `rating: ''` with a conditional spread that emits `rating` only when valid.
+  - In `buildOndcItem`, the `@ondc/org/statutory_reqs_packaged_commodities.month_year_of_manufacture_packing_import` field now uses `normalizeMonthYear(...)` instead of `?? ''`.
+
+## Branch-011
+
+**Date:** 2026-06-25
+
+**Status:** In Progress / Uncommitted
+
+**Area:** ONDC Tracking Flow / Payload Validation
+
+**What:**
+
+- Updated the `/track` controller to return a standard ONDC NACK error (code 30016) when a tracking URL is unavailable, instead of sending a successful payload with `status: 'inactive'`.
+- Ensured transaction logs accurately reflect the NACK status when tracking fails.
+
+**Why:**
+
+- Sending an `on_track` payload with `status: 'inactive'` and no tracking URL can cause contract validation failures or misrepresent the tracking state to the buyer network. The correct ONDC protocol behavior is to return an error (NACK) with code 30016 ("Tracking not available") when the tracking link is absent.
+
+**Changes:**
+
+- `src/ondc/controllers/beckn/track.controller.ts`: Refactored `handleTrack` to conditionally construct a NACK error response (code 30016) if `trackingUrl` is null. Updated callback logging parameters (`ack_status` and `error_message`) to accurately record NACKs in the transaction history.
+
+## Branch-010
+
+**Date:** 2026-06-25
+
+**Status:** In Progress / Uncommitted
+
+**Area:** ONDC RTO Cancellation Flow, Validation, and Fulfillment State Handling
+
+**What:**
+
+- Implemented an RTO (Return to Origin) cancellation service `cancelRto` in flow 3C to push network updates when an RTO is initiated.
+- Added dynamic generic logic to handle cancellation reasons from the admin controller for all standard cancellations.
+- Updated the ONDC validator middleware and cancel controller to construct strict NACK error responses through callbacks when validations fail.
+- Linked new order transitions (e.g., packing, out-for-delivery, agent-assigned) with network update triggers (`flow1AService.pushOnStatus` and `flow3CService.cancelRto`).
+- Created a testing script `test-rto.ts` to simulate database queries for RTO callbacks without state mutations.
+
+**Why:**
+
+- Previous fulfillment states were only mutating the local DB but not correctly pushing `on_status` updates to the ONDC network for events like "Agent-assigned" or "Order-picked-up".
+- Implementing RTO allows sellers to mark orders that fail delivery as returning to origin, triggering an `on_cancel` payload back to the network.
+- Asynchronous validation responses (NACK) required proper payloads to be built and transmitted when requests fail ONDC header rules.
+
+**Changes:**
+
+- `src/ondc/controllers/admin/orders.controller.ts`: Allowed generic cancellation reasons to be correctly passed into standard cancellation flows from the admin interface.
+- `src/ondc/controllers/beckn/cancel.controller.ts`: Refactored callback processing to send explicit NACK errors on validation failure.
+- `src/ondc/flows/flow3C.service.ts`: Added the `cancelRto` method to trigger asynchronous callbacks for RTO flows.
+- `src/ondc/flows/generators/generateFlow3COnCancel.ts`: Implemented a payload generator to shape the ONDC `on_cancel` callback payload specifically for RTO.
+- `src/ondc/middleware/ondcValidator.middleware.ts`: Enhanced validation middleware to properly construct NACK contexts upon request failure.
+- `src/ondc/services/fulfillment.service.ts`: Linked internal state transitions using `orderModel.transitionStatus` and added triggers for `flow1AService.pushOnStatus` on major state updates like `markPacked` and `markAgentAssigned`. Added `markAgentAssigned` action.
+- `src/ondc/test-rto.ts`: (New file) Created a test script to trigger the `cancelRto` mock.
+- `src/ondc/types/order.types.ts`: Added the `Agent-assigned` fulfillment state.
+
 ## Branch-008
 
 **Date:** 2026-06-24

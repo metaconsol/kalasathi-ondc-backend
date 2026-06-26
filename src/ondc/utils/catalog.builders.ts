@@ -353,6 +353,25 @@ export interface BuildOndcItemInput {
   idCode?: string | undefined;
   /** Manual out-of-stock override (products.force_out_of_stock). */
   outOfStock?: boolean | undefined;
+  /** Optional item rating; only emitted when it normalizes to the ONDC enum "1".."5". */
+  rating?: string | number | null | undefined;
+}
+
+/**
+ * ONDC `month_year_of_manufacture_packing_import` must match `MM/YYYY` or be `NA`.
+ * An empty/invalid value fails the workbench MONTH_YEAR_OF_MANUFACTURE_PACKING_IMPORT
+ * rule, so we coerce anything that isn't already `MM/YYYY` to `NA`.
+ */
+function normalizeMonthYear(value: unknown): string {
+  const s = String(value ?? '').trim();
+  return /^\d{2}\/\d{4}$/.test(s) ? s : 'NA';
+}
+
+/** ONDC item.rating must be a whole-number string in "1".."5". */
+function isValidItemRating(value: unknown): boolean {
+  if (value === null || value === undefined || value === '') return false;
+  const n = Math.round(Number(value));
+  return Number.isFinite(n) && n >= 1 && n <= 5;
 }
 
 export function buildOndcItem(inp: BuildOndcItemInput): object {
@@ -366,8 +385,11 @@ export function buildOndcItem(inp: BuildOndcItemInput): object {
   return {
     id: inp.ondcItemId,
     time: { label: 'enable', timestamp: ondcTimestamp() },
-    // SNP-maintained item rating; '' when not yet rated.
-    rating: '',
+    // item.rating is OMITTED unless it's a valid ONDC enum "1".."5".
+    // ONDC ITEMS_RATING validation rejects any present-but-invalid value (e.g. '' or a
+    // decimal); the rule is skipped only when the field is absent. We don't track
+    // per-item ratings yet, so we leave it out.
+    ...(isValidItemRating(inp.rating) ? { rating: String(Math.round(Number(inp.rating))) } : {}),
     descriptor: {
       name: inp.name,
       ...(inp.idCode ? { code: inp.idCode } : {}),
@@ -406,8 +428,9 @@ export function buildOndcItem(inp: BuildOndcItemInput): object {
         inp.attributes?.packagedCommodity?.manufacturerOrPackerAddress ?? '',
       common_or_generic_name_of_commodity:
         inp.attributes?.packagedCommodity?.commonOrGenericNameOfCommodity ?? '',
-      month_year_of_manufacture_packing_import:
-        inp.attributes?.packagedCommodity?.monthYearOfManufacture ?? '',
+      month_year_of_manufacture_packing_import: normalizeMonthYear(
+        inp.attributes?.packagedCommodity?.monthYearOfManufacture,
+      ),
     },
 
     tags: buildItemTags({ domain: inp.domain, ...(inp.attributes ?? {}) }),
