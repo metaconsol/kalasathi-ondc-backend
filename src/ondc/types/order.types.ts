@@ -12,6 +12,7 @@ export type OndcOrderStatus =
 export type OndcFulfillmentState =
   | 'Pending'
   | 'Packed'
+  | 'Agent-assigned'
   | 'Order-picked-up'
   | 'Out-for-delivery'
   | 'Order-delivered'

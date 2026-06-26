@@ -1,6 +1,6 @@
 ## Branch-013
 
-**Date:** 2026-06-25
+**Date:** 2026-06-26
 
 **Status:** In Progress / Uncommitted
 
@@ -109,6 +109,44 @@
 
 - `ONDC_v1.2.5_Workbench.postman_collection.json` (new)
   Single merged Postman collection — 4 folders (network Beckn, admin APIs, health/test, domain search examples), v1.2.5 bodies, collection-level variables (defaults to localhost), and `insecure=1` query param baked into Beckn requests for the localhost signature bypass.
+
+## BRANCH-005
+
+**Date:** 2026-06-22
+
+**Status:** Completed
+
+**Area:** ONDC RTO Cancellation Flow, Dynamic Payload Generation, and Validation Fixes
+
+**What:**
+
+- Fixed the `cancelRto` logic to fetch 100% of payload data dynamically from the database.
+- Removed hardcoded values like item fallback titles ("Atta", "Apparel"), delivery/packing charges, and BPP ID ("lsp.com") in the RTO callback.
+- Fixed ES Module file system errors so that outgoing RTO payloads correctly log to `logs/ondc/RTOcancell.log`.
+- Updated ONDC payload validation to accurately check `domain` headers and trigger NACK error callbacks asynchronously.
+- Repaired broken `fulfillmentService` imports preventing state updates.
+- Wrote and verified a test script to validate RTO payloads purely from database queries without hardcoded data.
+
+**Why:**
+
+- The RTO cancel payload previously included mock data defaults (e.g., "50.00", "lsp.com", "Apparel") when real values were missing, which breaks production accuracy.
+- Outbound logging was failing because `require('fs')` crashed within an ES Module environment (`type: "module"`), masking errors.
+- Network validation middleware wasn't robust enough with NACK asynchronous flows and strict domain checking.
+- Merge conflicts broke `fulfillment.service.ts`, preventing status transitions from invoking downstream flows.
+
+**Changes:**
+
+- `src/ondc/flows/flow3C.service.ts`
+  Removed hardcoded `lsp.com` for `initiated_by` and substituted it with dynamic BPP IDs. Removed default fallback logic that set empty DB delivery/packing charges to `50.00` and `25.00`, strictly defaulting to `0.00` instead. Replaced `require` imports for `fs` and `path` with dynamic imports (`await import('fs')`) to successfully write `logs/ondc/RTOcancell.log`.
+
+- `src/ondc/middleware/ondcValidator.middleware.ts`
+  Added strict checks to respond with `NACK` when an invalid or missing `domain` is passed in requests (allowing RET10, RET12, RET16). Fixed `sendCallback` integration to ensure outbound NACK calls are accurately fired with proper reasons.
+
+- `src/ondc/services/fulfillment.service.ts`
+  Resolved git merge conflicts and reinstated valid imports for `flow1AService` and `flow3CService` to fix fulfillment state transition errors.
+
+- `src/ondc/test-rto.ts`
+  Updated this script using `dotenv/config` and proper imports to smoothly test database queries and securely trigger RTO cancel logging without altering real database state.
 
 ## BRANCH-003
 
