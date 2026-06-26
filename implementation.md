@@ -1,31 +1,3 @@
-## Branch-013
-
-**Date:** 2026-06-26
-
-**Status:** In Progress / Uncommitted
-
-**Area:** ONDC `on_search` catalog item payload — workbench schema validation (ITEMS_RATING and MONTH_YEAR_OF_MANUFACTURE_PACKING_IMPORT).
-
-**What:**
-
-- Item `rating` is no longer sent as an empty string. It is now **omitted entirely** unless a valid ONDC value (whole number "1".."5") is available; a decimal is rounded to the nearest 1-5.
-- `month_year_of_manufacture_packing_import` is now normalized to a valid value — it keeps a real `MM/YYYY` value or falls back to `NA`, instead of sending an empty string.
-- Added two helper functions and an optional `rating` input field to support this.
-
-**Why:**
-
-- The ONDC workbench `on_search` validation failed with **ITEMS_RATING** because every item carried `rating: ""` — the rule rejects a present-but-invalid value and only skips when the field is absent. Omitting it makes the rule pass.
-- It also failed with **MONTH_YEAR_OF_MANUFACTURE_PACKING_IMPORT** because the field was `""`; the rule requires `MM/YYYY` or `NA`.
-
-**Changes:**
-
-- `src/ondc/utils/catalog.builders.ts`
-  - Added `rating?: string | number | null` to the `BuildOndcItemInput` interface.
-  - Added `normalizeMonthYear(value)` — returns the value if it matches `MM/YYYY`, otherwise `NA`.
-  - Added `isValidItemRating(value)` — true only for a whole number 1-5 (rounds decimals).
-  - In `buildOndcItem`, replaced the hardcoded `rating: ''` with a conditional spread that emits `rating` only when valid.
-  - In `buildOndcItem`, the `@ondc/org/statutory_reqs_packaged_commodities.month_year_of_manufacture_packing_import` field now uses `normalizeMonthYear(...)` instead of `?? ''`.
-
 ## Branch-011
 
 **Date:** 2026-06-25
