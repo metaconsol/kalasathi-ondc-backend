@@ -76,4 +76,5 @@ export const SELLER_PROFILE = {
   COUNTRY: process.env['ONDC_SELLER_COUNTRY'] ?? 'IND',
   AREA_CODE: process.env['ONDC_SELLER_AREA_CODE'] ?? '',
   PROVIDER_ID: process.env['ONDC_SELLER_PROVIDER_ID'] ?? '',
+  ONDC_RATING_FEEDBACK_URL: process.env['ONDC_RATING_FEEDBACK_URL'] ?? '',
 } as const;

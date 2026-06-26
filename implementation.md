@@ -1,3 +1,29 @@
+Date: 26-06-2026
+
+Status: Completed
+
+Area: ONDC Network Rating Flow (Backend & UI)
+
+What: Updated the `/rating` and `/on_rating` flow to fully match the ONDC Network Rating API contract (v1.2.x), enabling persistence of multiple buyer-submitted ratings per transaction, and added a dedicated Admin UI page to view them.
+
+Why: The previous implementation was only reading a single rating object instead of the required array of ratings, causing `NULL` values and collapsing multiple component ratings (Order, Provider, Item, Fulfillment, Agent) into improper database rows. Also, the BPP was not responding with the feedback form URL in the `on_rating` payload as required by the ONDC spec.
+
+Changes:
+
+- src/ondc/config/constants.ts: Added `ONDC_RATING_FEEDBACK_URL` to `SELLER_PROFILE` to make the feedback link configurable.
+- src/ondc/utils/payload.builder.ts: Modified `buildOnRating` to include the `feedback_form` URL in the response payload.
+- src/ondc/db/migrations/001_setup_ondc.sql & schema.sql: Altered the `ondc_ratings` table to add an `order_id` column and updated the unique key constraint to `(transaction_id, rating_category, rated_id)` to support multiple item ratings.
+- src/ondc/models/rating.model.ts: Created a new model with `upsertRating` (handles `ON DUPLICATE KEY UPDATE`) and `listRatings` functions.
+- src/ondc/controllers/beckn/rating.controller.ts: Updated `handleRating` to iterate over the `message.ratings` array and save each individual rating component accurately.
+- src/ondc/controllers/admin/ratings.controller.ts: Created a new controller to serve paginated rating data to the admin UI.
+- src/ondc/routes/admin.route.ts: Added the newly created `/ratings` endpoints under the admin routes.
+- odop_ui/src/api/ondc.api.ts: Added `getRatings` and `getOrderRatings` hooks for the React frontend.
+- odop_ui/src/pages/admin/ondc/OndcRatingsPage.tsx: Created the frontend UI page to list and filter buyer ratings.
+- odop_ui/src/route/adminRoutes.tsx: Registered the `/ratings` page route in the admin portal.
+- odop_ui/src/components/ondc/OndcSidebar.tsx: Added a 'Ratings' link to the ONDC admin sidebar navigation.
+
+---
+
 ## Branch-013
 
 **Date:** 2026-06-26
