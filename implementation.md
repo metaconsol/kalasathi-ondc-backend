@@ -1,3 +1,41 @@
+## Branch 015
+
+**Date:** 2026-06-26
+
+**Status:** Done — backend + UI tsc clean, dist/main.js rebuilt. Pending deploy + Pramaan re-run.
+
+**Area:** ONDC order lifecycle — `/on_status` payload + merchant-initiated cancellation (Pramaan Flows 1A, 3A, 3B, 3C).
+
+**What:**
+
+- `/on_status` now returns the COMPLETE order (quote, full billing/payment, fulfillment start/end/agent/tags/provider_name/TAT, documents on delivery) and a valid ONDC `order.state` (was sending raw internal `"CONFIRMED"` with no quote). Both the reactive `/status` poll and the seller-initiated push use one shared builder.
+- Merchant **full cancel** (Flow 3C) now sends `on_cancel` (was wrongly sending `on_status`), with quote/cancellation block, and accepts a reason code.
+- Merchant **RTO** (Flow 3B) now sends `on_cancel` (RTO) **followed by** `on_status`.
+- Merchant **partial cancel** (Flow 3A) implemented: `on_update` (remaining qty + Cancel fulfillment with quote_trail) **followed by** `on_status`.
+- UI: order page now has an **RTO** fulfillment action; the cancel modal passes the reason code on full cancel and has a new **Partial Cancel** item-quantity picker (3A).
+
+**Why:**
+
+- on_status was incomplete (no quote, invalid state) → Pramaan Flow 1A on_status stuck at 83%, and the on_status steps in 3A/3B would fail. Data must be inherited from on_confirm and only the fulfillment state advances per the flow.
+- The merchant cancel button fired the wrong callback (`on_status` instead of `on_cancel`), so Pramaan 3C could not pass; 3A/3B had no UI trigger.
+
+**Changes:**
+
+- `src/ondc/adapters/order.adapter.ts` — new `buildOnStatusOrder(row, liveFulfillments)` (async): full order from `raw_confirm_payload` (quote/items/billing/payment) overlaid with live fulfillment state/agent/tracking; ONDC-enum `order.state`. Builds a CONTRACT-COMPLETE Delivery fulfillment — pickup `start` (location/contact) fetched DYNAMICALLY from the store + its location (`fetchStoreById`/`fetchStoreLocations`), `end` from the buyer order/billing with `person`, `start.time`/`end.time` with `range`, `agent`, `tags` (routing P2P + tracking), `@ondc/org/provider_name`, `@ondc/org/TAT`. Also fills `quote.breakup[].title`, `payment.params`, and `documents` (invoice) — all schema-required. Validated against ONDC `onStatusSchema` (0 errors) even from a thin buyer confirm.
+- `src/ondc/controllers/beckn/status.controller.ts` — reactive `/status` now uses `buildOnStatusOrder` (was a thin inline object).
+- `src/ondc/flows/flow1A.service.ts` — `pushOnStatus` uses `buildOnStatusOrder` + logs the outbound callback.
+- `src/ondc/flows/flow3A.service.ts` — `cancelByseller` (FULL cancel → rich `on_cancel` + cancellation block) and new `partialCancelByseller` (PARTIAL → `on_update` + `on_status`).
+- `src/ondc/services/fulfillment.service.ts` — `initiateRto` now also pushes `on_status` after `on_cancel`.
+- `src/ondc/controllers/admin/orders.controller.ts` — `'cancelled'` action → `flow3AService.cancelByseller` (on_cancel); new `'partial_cancel'` action.
+- `src/ondc/controllers/beckn/cancel.controller.ts` — buyer `on_cancel` order state `"CANCELLED"` → `"Cancelled"`.
+- `odop_ui/src/api/ondc.api.ts` — `updateFulfillment` body accepts `reason_id` + `items`.
+- `odop_ui/src/pages/admin/ondc/OndcOrderDetailPage.tsx` — added RTO fulfillment action.
+- `odop_ui/src/components/ondc/OrderCancelTriggerModal.tsx` — full cancel passes reason; new partial-cancel item picker.
+
+**DB changes:** None required (quote/fulfillment data read from `raw_confirm_payload` + live fulfillment rows). `ondc_order_actions` already exists for partial-cancel records.
+
+## Branch-015
+
 Date: 26-06-2026
 
 Status: Completed

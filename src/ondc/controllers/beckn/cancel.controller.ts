@@ -580,7 +580,7 @@ export async function handleCancel(req: Request, res: Response): Promise<void> {
 
       const cancelledOrder = {
         id: dbOrder.ondc_order_id,
-        state: 'CANCELLED',
+        state: 'Cancelled',
         provider: { id: dbOrder.provider_id },
         items: items.flatMap((i) => {
           const cFulfId = cancelFulfIdMap.get(i.item_id) ?? 'C1';

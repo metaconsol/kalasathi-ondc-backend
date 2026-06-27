@@ -121,7 +121,9 @@ export const fulfillmentService = {
       'RTO initiated',
     );
     ondcLogger.info('RTO initiated', { ondcOrderId });
+    // Flow 3B (RTO): unsolicited on_cancel (RTO) followed by on_status.
     await flow3CService.cancelRto(ondcOrderId);
+    await flow1AService.pushOnStatus(ondcOrderId, 'RTO-Initiated');
   },
 
   /** Handle return initiation from buyer */

@@ -7,10 +7,19 @@
  */
 
 import type { OndcOrder, OndcOrderStatus as BecknOrderStatus } from '~/ondc/types/order.types';
-import type { OndcOrderRow, OndcOrderStatus as DbOrderStatus } from '~/ondc/models/order.model';
+import type {
+  OndcOrderRow,
+  OndcFulfillmentRow,
+  OndcOrderStatus as DbOrderStatus,
+} from '~/ondc/models/order.model';
 import type { BecknContext } from '~/ondc/types/beckn.types';
 import { generateOndcOrderId } from '~/ondc/utils/helpers';
 import { safeJsonParse } from '~/ondc/utils/payload.builder';
+import {
+  fetchStoreById,
+  fetchStoreLocations,
+  fetchSellerProfileByStoreId,
+} from '~/ondc/adapters/seller.adapter';
 
 export interface ConfirmMessage {
   order: OndcOrder;
@@ -173,4 +182,219 @@ export function adaptOrderRowToOndcOrder(row: OndcOrderRow): OndcOrder {
     created_at: row.created_at.toISOString(),
     updated_at: row.updated_at.toISOString(),
   };
+}
+
+const isoZero = (d: Date): string => d.toISOString().replace(/\.\d{3}Z$/, '.000Z');
+
+/**
+ * Build a COMPLETE ONDC /on_status order from the stored order + LIVE fulfillment
+ * rows. Inherits items/billing/payment/quote from the confirm-time order (so values
+ * never drift from on_confirm) and builds a contract-complete Delivery fulfillment:
+ *   - pickup `start` (location/contact) is built DYNAMICALLY from the store + its
+ *     location (the buyer's confirm only carries `end`/the drop address);
+ *   - `end` (drop) comes from the buyer order / billing, with `person`;
+ *   - start.time / end.time carry a `range` (required by the on_status schema);
+ *   - `agent`, `tags` (routing P2P + tracking), `@ondc/org/provider_name`,
+ *     `@ondc/org/TAT`, live `state` (+updated_at) and `tracking` are filled in;
+ *   - the invoice `documents` block is added once delivered.
+ * order.state is mapped to the ONDC enum (never the internal "CONFIRMED").
+ */
+export async function buildOnStatusOrder(
+  row: OndcOrderRow,
+  liveFulfillments: OndcFulfillmentRow[],
+): Promise<Record<string, unknown>> {
+  const base = adaptOrderRowToOndcOrder(row) as unknown as Record<string, any>;
+
+  const raw = row.raw_confirm_payload
+    ? safeJsonParse<{ message?: { order?: any } }>(row.raw_confirm_payload, {})
+    : {};
+  const origOrder = raw?.message?.order ?? {};
+  const origFulfById = new Map<string, any>(
+    (origOrder.fulfillments ?? []).map((f: any) => [String(f.id), f]),
+  );
+  const liveById = new Map(liveFulfillments.map((f) => [f.fulfillment_id, f]));
+
+  // provider_id == String(stores.id), so the store id is directly derivable.
+  const storeId = row.store_id ?? (Number.parseInt(row.provider_id, 10) || null);
+  const [store, storeLocations, sellerProfile] = await Promise.all([
+    storeId ? fetchStoreById(storeId) : Promise.resolve(null),
+    storeId ? fetchStoreLocations(storeId) : Promise.resolve([]),
+    storeId ? fetchSellerProfileByStoreId(storeId) : Promise.resolve(null),
+  ]);
+  const startLoc = storeLocations[0];
+  const providerName = store?.name ?? 'ODOP Provider';
+
+  // ONDC /on_status requires fulfillment start.time and end.time, each with a
+  // `range` ({start,end} rfc3339). Synthesize a window from the order timestamps.
+  const createdIso = isoZero(row.created_at ?? new Date());
+  const updatedIso = isoZero(row.updated_at ?? new Date());
+
+  const billing = (base['billing'] ?? {}) as Record<string, any>;
+  const billingAddr = (billing['address'] ?? {}) as Record<string, any>;
+
+  const sourceFulfs: any[] =
+    Array.isArray(base['fulfillments']) && base['fulfillments'].length
+      ? (base['fulfillments'] as any[])
+      : liveFulfillments.map((f) => ({ id: f.fulfillment_id, type: f.fulfillment_type }));
+
+  const fulfillments = sourceFulfs.map((f: any) => {
+    const live = liveById.get(String(f.id));
+    const orig = origFulfById.get(String(f.id)) ?? {};
+    const code = live?.state ?? f?.state?.descriptor?.code ?? 'Pending';
+    const updatedAt = isoZero(live?.updated_at ?? row.updated_at ?? new Date());
+    const type = String(f.type ?? orig.type ?? live?.fulfillment_type ?? 'Delivery');
+
+    // Non-delivery fulfillments (Cancel / RTO) keep their own structure.
+    if (type === 'Cancel' || type === 'RTO') {
+      return {
+        ...orig,
+        ...f,
+        id: f.id,
+        type,
+        state: { descriptor: { code }, updated_at: updatedAt },
+      };
+    }
+
+    const trackingUrl = live?.tracking_url ?? null;
+    const tracking = !!trackingUrl || !!orig.tracking;
+
+    // Pickup (start): built dynamically from the store location.
+    const start = {
+      location: {
+        id: String(startLoc?.id ?? orig.start?.location?.id ?? 'L1'),
+        descriptor: { name: providerName },
+        gps:
+          orig.start?.location?.gps ??
+          (startLoc?.latitude != null && startLoc?.longitude != null
+            ? `${startLoc.latitude},${startLoc.longitude}`
+            : '12.9716,77.5946'),
+        address: {
+          locality:
+            orig.start?.location?.address?.locality ??
+            startLoc?.address_line2 ??
+            startLoc?.address_line1 ??
+            'NA',
+          city: orig.start?.location?.address?.city ?? startLoc?.city ?? 'Bengaluru',
+          area_code: orig.start?.location?.address?.area_code ?? startLoc?.pincode ?? '560001',
+          state: orig.start?.location?.address?.state ?? startLoc?.state ?? 'KA',
+        },
+      },
+      time: { range: { start: createdIso, end: updatedIso }, timestamp: createdIso },
+      contact: {
+        phone: String(store?.phone ?? '9886098860'),
+        email: String(store?.email ?? 'support@odopmartmp.com'),
+      },
+    };
+
+    // Drop (end): from the buyer order / billing.
+    const endSrc = orig.end ?? {};
+    const end = {
+      location: {
+        gps: endSrc.location?.gps ?? '12.9716,77.5946',
+        address: endSrc.location?.address ?? billingAddr,
+      },
+      time: endSrc.time ?? { range: { start: createdIso, end: updatedIso }, timestamp: updatedIso },
+      person: { name: String(endSrc.person?.name ?? billing['name'] ?? 'Customer') },
+      contact: {
+        phone: String(endSrc.contact?.phone ?? billing['phone'] ?? '9886098860'),
+        ...(endSrc.contact?.email || billing['email']
+          ? { email: String(endSrc.contact?.email ?? billing['email']) }
+          : {}),
+      },
+    };
+
+    const merged: Record<string, any> = {
+      id: f.id,
+      '@ondc/org/provider_name': providerName,
+      type,
+      '@ondc/org/TAT': orig['@ondc/org/TAT'] ?? 'PT60M',
+      tracking,
+      state: { descriptor: { code }, updated_at: updatedAt },
+      start,
+      end,
+      tags: [
+        { code: 'routing', list: [{ code: 'type', value: 'P2P' }] },
+        {
+          code: 'tracking',
+          list: [
+            { code: 'gps_enabled', value: tracking ? 'yes' : 'no' },
+            { code: 'url_enabled', value: trackingUrl ? 'yes' : 'no' },
+            ...(trackingUrl ? [{ code: 'url', value: trackingUrl }] : []),
+          ],
+        },
+      ],
+    };
+
+    const agent = live?.agent_name
+      ? { name: live.agent_name, ...(live.agent_phone ? { phone: live.agent_phone } : {}) }
+      : orig.agent;
+    if (agent) merged['agent'] = agent;
+
+    return merged;
+  });
+
+  const order: Record<string, any> = {
+    ...base,
+    provider: {
+      id: row.provider_id,
+      locations: origOrder.provider?.locations ?? [{ id: String(startLoc?.id ?? 'L1') }],
+    },
+    fulfillments,
+    updated_at: isoZero(new Date()),
+  };
+
+  // quote.breakup entries must each carry a `title` (schema-required).
+  const titleByType: Record<string, string> = {
+    item: 'Item',
+    delivery: 'Delivery charges',
+    tax: 'Tax',
+    packing: 'Packing charges',
+    discount: 'Discount',
+    misc: 'Convenience Fee',
+    refund: 'Refund',
+  };
+  const quote = order['quote'] as Record<string, any> | undefined;
+  if (quote && Array.isArray(quote['breakup'])) {
+    quote['breakup'] = quote['breakup'].map((b: any) => ({
+      ...b,
+      title: b.title ?? titleByType[String(b['@ondc/org/title_type'] ?? '')] ?? 'Charge',
+    }));
+  }
+
+  // payment.params is schema-required; the buyer's confirm often omits it.
+  const payment = (order['payment'] ?? {}) as Record<string, any>;
+  payment['uri'] = payment['uri'] ?? 'https://ondc.transaction.com/payment';
+  payment['tl_method'] = payment['tl_method'] ?? 'http/get';
+  if (!payment['params']) {
+    payment['params'] = {
+      currency: row.currency ?? 'INR',
+      transaction_id: row.payment_transaction_ref ?? row.transaction_id,
+      amount: row.order_total ?? '0.00',
+    };
+  }
+  // Seller settlement details (the buyer's confirm doesn't carry these).
+  if (!payment['@ondc/org/settlement_details']) {
+    payment['@ondc/org/settlement_details'] = [
+      {
+        settlement_counterparty: 'seller-app',
+        settlement_phase: 'sale-amount',
+        settlement_type: 'neft',
+        beneficiary_name: String(sellerProfile?.business_name ?? store?.name ?? ''),
+        upi_address: String(sellerProfile?.upi_id ?? ''),
+        settlement_bank_account_no: String(sellerProfile?.bank_account_no ?? ''),
+        settlement_ifsc_code: String(sellerProfile?.bank_ifsc ?? ''),
+        bank_name: '',
+        branch_name: '',
+      },
+    ];
+  }
+  order['payment'] = payment;
+
+  // documents (invoice) is required on /on_status.
+  const invoiceBase = row.bpp_id ? `https://${row.bpp_id}` : '';
+  order['documents'] = origOrder.documents ?? [
+    { url: `${invoiceBase}/invoice/${row.ondc_order_id}`, label: 'Invoice' },
+  ];
+
+  return order;
 }

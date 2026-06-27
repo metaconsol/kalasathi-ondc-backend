@@ -8,6 +8,7 @@ import { buildAck, buildOnStatus } from '~/ondc/utils/payload.builder';
 import { becknService } from '~/ondc/services/beckn.service';
 import { observabilityService } from '~/ondc/services/observability.service';
 import { orderModel } from '~/ondc/models/order.model';
+import { buildOnStatusOrder } from '~/ondc/adapters/order.adapter';
 import { txnLogModel } from '~/ondc/models/log.model';
 import { overallTxnsModel } from '~/ondc/models/overall_txns.model';
 import { ondcLogger } from '~/ondc/utils/logger.util';
@@ -37,32 +38,11 @@ export async function handleStatus(req: Request, res: Response): Promise<void> {
         return;
       }
 
-      const items = await orderModel.getItems(dbOrder.ondc_order_id);
-      const fulfillments = await orderModel.getFulfillments(dbOrder.ondc_order_id);
+      const liveFulfillments = await orderModel.getFulfillments(dbOrder.ondc_order_id);
 
-      const onStatusOrder = {
-        id: dbOrder.ondc_order_id,
-        state: dbOrder.status,
-        provider: { id: dbOrder.provider_id },
-        items: items.map((i) => ({
-          id: i.item_id,
-          quantity: { count: i.quantity },
-          fulfillment_id: i.fulfillment_id ?? 'F1',
-        })),
-        fulfillments: fulfillments.map((f) => ({
-          id: f.fulfillment_id,
-          type: f.fulfillment_type,
-          state: {
-            descriptor: { code: f.state },
-            updated_at: (f.updated_at ?? new Date()).toISOString(),
-          },
-          tracking: !!f.tracking_url,
-          ...(f.tracking_url ? { '@ondc/org/tracking': true } : {}),
-        })),
-        billing: JSON.parse(dbOrder.billing_json ?? '{}'),
-        payment: JSON.parse(dbOrder.payment_json ?? '{}'),
-        updated_at: (dbOrder.updated_at ?? new Date()).toISOString(),
-      };
+      // Full ONDC order: quote/items/billing/payment inherited from on_confirm,
+      // fulfillment state/agent/tracking overlaid from live DB, order.state mapped.
+      const onStatusOrder = await buildOnStatusOrder(dbOrder, liveFulfillments);
 
       await overallTxnsModel.patch(txnId, { on_status: 1, order_status: dbOrder.status });
 
