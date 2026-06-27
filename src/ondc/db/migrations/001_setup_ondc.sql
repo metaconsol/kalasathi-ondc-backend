@@ -407,6 +407,13 @@ CREATE TABLE IF NOT EXISTS `ondc_ratings` (
   KEY `idx_rating_category` (`rating_category`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+ALTER TABLE `ondc_ratings`
+  ADD COLUMN IF NOT EXISTS `order_id` varchar(128) NOT NULL DEFAULT '' AFTER `transaction_id`;
+ALTER TABLE `ondc_ratings` DROP INDEX IF EXISTS `uq_txn_category`;
+ALTER TABLE `ondc_ratings`
+  ADD UNIQUE KEY IF NOT EXISTS `uq_txn_cat_rated` (`transaction_id`,`rating_category`,`rated_id`);
+ALTER TABLE `ondc_ratings` ADD INDEX IF NOT EXISTS `idx_order_id` (`order_id`);
+
 CREATE TABLE IF NOT EXISTS `ondc_rsf` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `recon_transaction_id` varchar(64) NOT NULL,

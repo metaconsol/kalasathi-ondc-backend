@@ -17,15 +17,16 @@ import { transactionModel } from '~/ondc/models/transaction.model';
 import { txnLogModel } from '~/ondc/models/log.model';
 import { overallTxnsModel } from '~/ondc/models/overall_txns.model';
 import { ondcLogger } from '~/ondc/utils/logger.util';
-import { ondcExec } from '~/lib/ondcSql';
+import { ratingModel } from '~/ondc/models/rating.model';
 import type { BecknContext } from '~/ondc/types/beckn.types';
 
 interface RatingMessage {
-  rating?: {
+  order_id?: string;
+  ratings?: Array<{
     rating_category?: string; // Item | Order | Fulfillment | Provider
     id?: string; // order_id or item_id being rated
     value?: string | number; // 1-5
-  };
+  }>;
 }
 
 export async function handleRating(req: Request, res: Response): Promise<void> {
@@ -39,7 +40,8 @@ export async function handleRating(req: Request, res: Response): Promise<void> {
   setImmediate(async () => {
     const txnId = ctx.transaction_id;
     const bapUri = String(ctx.bap_uri ?? '');
-    const rating = message?.rating ?? {};
+    const orderId = message?.order_id ?? '';
+    const ratingsArray = Array.isArray(message?.ratings) ? message.ratings : [];
 
     try {
       // Inbound request is logged centrally by ondcRequestLogger middleware.
@@ -55,28 +57,21 @@ export async function handleRating(req: Request, res: Response): Promise<void> {
       });
       await overallTxnsModel.upsert(txnId);
 
-      // Persist the rating (best-effort, table may not exist yet)
-      try {
+      // Persist the ratings
+      for (const rating of ratingsArray) {
         const ratingValue = rating.value !== undefined ? parseFloat(String(rating.value)) : null;
-        await ondcExec(
-          `INSERT INTO ondc_ratings
-             (transaction_id, rating_category, rated_id, rating_value, bap_id, domain, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, NOW())
-           ON DUPLICATE KEY UPDATE
-             rating_value = VALUES(rating_value),
-             updated_at   = NOW()`,
-          [
-            txnId,
-            rating.rating_category ?? 'Order',
-            rating.id ?? txnId,
-            ratingValue,
-            ctx.bap_id,
-            ctx.domain,
-          ],
-        );
-      } catch {
-        // Table not created yet — log and continue; protocol flow must not break
-        ondcLogger.warn('ondc_ratings table missing — rating not persisted', { txnId });
+        const isValid =
+          ratingValue !== null && !isNaN(ratingValue) && ratingValue >= 1 && ratingValue <= 5;
+
+        await ratingModel.upsertRating({
+          transaction_id: txnId,
+          order_id: orderId,
+          rating_category: rating.rating_category ?? 'Order',
+          rated_id: rating.id ?? txnId,
+          rating_value: isValid ? ratingValue : null,
+          bap_id: String(ctx.bap_id ?? ''),
+          domain: String(ctx.domain ?? ''),
+        });
       }
 
       const payload = buildOnRating(ctx) as any;

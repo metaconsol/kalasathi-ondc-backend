@@ -8,6 +8,7 @@ import { randomUUID } from 'crypto';
 import type { BecknContext, BecknError } from '~/ondc/types/beckn.types';
 import type { OndcAckResponse } from '~/ondc/types/api.types';
 import { ondcEnv } from '~/config/ondc.config';
+import { SELLER_PROFILE } from '~/ondc/config/constants';
 
 // ─── Context builders ──────────────────────────────────────────────────────
 
@@ -180,9 +181,19 @@ export function buildOnUpdate(incomingCtx: BecknContext, order: object): object 
  * We return an empty message ({}) which is the minimal valid response.
  */
 export function buildOnRating(incomingCtx: BecknContext): object {
+  const bpp_uri = ondcEnv.baseUri;
+  const feedbackUrl = SELLER_PROFILE.ONDC_RATING_FEEDBACK_URL || `${bpp_uri}/rating-feedback`;
+
   return {
     context: buildResponseContext(incomingCtx, 'on_rating'),
-    message: {},
+    message: {
+      feedback_form: {
+        form: {
+          url: feedbackUrl,
+          mime_type: 'text/html',
+        },
+      },
+    },
   };
 }
 

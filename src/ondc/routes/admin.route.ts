@@ -38,6 +38,7 @@ import {
   getPpfReconByOrder,
   triggerPpfRecon,
 } from '~/ondc/controllers/ppf.controller';
+import { getRatings, getOrderRatings } from '~/ondc/controllers/admin/ratings.controller';
 
 const router = express.Router();
 
@@ -82,5 +83,9 @@ router.get('/request-monitor/:transactionId', ...adminGuard, getTimeline);
 
 // ---- IGM ----
 router.get('/issues', ...sellerGuard, listOndcIssues);
+
+// ---- Ratings ----
+router.get('/ratings', ...sellerGuard, getRatings);
+router.get('/ratings/:orderId', ...sellerGuard, getOrderRatings);
 
 export default router;
