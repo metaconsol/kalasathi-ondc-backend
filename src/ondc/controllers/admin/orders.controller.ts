@@ -7,6 +7,7 @@ import { ApiResponse } from '~/lib/response';
 import { orderModel } from '~/ondc/models/order.model';
 import { fulfillmentService } from '~/ondc/services/fulfillment.service';
 import { flow1AService } from '~/ondc/flows/flow1A.service';
+import { flow3AService } from '~/ondc/flows/flow3A.service';
 import { AppError } from '~/lib/response';
 import type { OndcOrderStatus } from '~/ondc/types/order.types';
 
@@ -102,19 +103,16 @@ export async function updateFulfillment(req: Request, res: Response): Promise<vo
       await fulfillmentService.markDelivered(orderId, fulfillment_id);
       break;
     case 'cancelled':
-      {
-        const order = await orderModel.findByOndcOrderId(orderId);
-        await orderModel.transitionStatus(
-          orderId,
-          order?.status ?? null,
-          'CANCELLED',
-          'Cancelled',
-          'seller',
-          'Order cancelled by seller',
-        );
-        await orderModel.updateFulfillmentState(orderId, fulfillment_id || 'F1', 'Cancelled');
-        await flow1AService.pushOnStatus(orderId, 'Cancelled');
-      }
+      // Merchant-initiated FULL cancel (Flow 3C) — sends unsolicited on_cancel.
+      await flow3AService.cancelByseller(orderId, (req.body['reason_id'] as string) || '002');
+      break;
+    case 'partial_cancel':
+      // Merchant-initiated PARTIAL cancel (Flow 3A) — on_update + on_status.
+      await flow3AService.partialCancelByseller(
+        orderId,
+        (req.body['items'] as Array<{ id: string; quantity: number }>) ?? [],
+        (req.body['reason_id'] as string) || '002',
+      );
       break;
     case 'returned':
       await fulfillmentService.initiateReturn(orderId, fulfillment_id);
