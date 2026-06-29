@@ -32,7 +32,14 @@ import {
   getTimeline,
   listBuyerApps,
 } from '~/ondc/controllers/admin/request_monitor.controller';
-import { listOndcIssues } from '~/ondc/controllers/admin/issues.controller';
+import {
+  listOndcIssues,
+  getOndcIssue,
+  addOndcIssueMessage,
+  updateOndcIssueStatus,
+  resolveOndcIssue,
+  closeOndcIssue,
+} from '~/ondc/controllers/admin/issues.controller';
 import { getDashboardStats } from '~/ondc/controllers/admin/stats.controller';
 import {
   listPpfRecon,
@@ -85,8 +92,13 @@ router.get('/request-monitor/:transactionId', ...adminGuard, getTimeline);
 // ---- Buyer Apps (distinct bap_ids that have made requests) ----
 router.get('/buyer-apps', ...adminGuard, listBuyerApps);
 
-// ---- IGM ----
+// ---- IGM (tickets) ----
 router.get('/issues', ...sellerGuard, listOndcIssues);
+router.get('/issues/:id', ...sellerGuard, getOndcIssue);
+router.post('/issues/:id/message', ...sellerGuard, addOndcIssueMessage);
+router.patch('/issues/:id/status', ...sellerGuard, updateOndcIssueStatus);
+router.patch('/issues/:id/resolve', ...sellerGuard, resolveOndcIssue);
+router.patch('/issues/:id/close', ...sellerGuard, closeOndcIssue);
 
 // ---- Ratings ----
 router.get('/ratings', ...sellerGuard, getRatings);
