@@ -1,3 +1,46 @@
+### Branch 019
+
+**Date:** 2026-06-29
+
+**Status:** Completed — backend + UI tsc clean, dist/main.js rebuilt. Pending deploy + Pramaan IGM run.
+
+**Area:** ONDC IGM — `/issue`, `/issue_status`, `/on_issue`, `/on_issue_status` + admin Tickets (customer ticket page).
+
+**What:**
+
+Implemented the full IGM flow end to end. The Tickets UI existed but the backend was a stub (wrote a thin `ondc_issues` row, replied `on_issue` with empty actions, and the 5 endpoints the UI calls did not exist). Now:
+
+- Inbound `/issue` creates/updates a ticket in `ondc_customer_ticket`, stores the buyer complaint (with images) and every subsequent complainant action (INFO_PROVIDED + attachment, RESOLUTION_ACCEPTED, CLOSE), auto-acks **PROCESSING**, and pushes `on_issue` to the buyer NP.
+- Inbound `/issue_status` pushes `on_issue_status` with the current respondent actions + resolution.
+- Seller-initiated actions from the Tickets UI (message / info request / resolution options / processing / resolve / close) append to the transcript and push `on_issue` to the buyer NP.
+- The whole transcript is stored in `ondc_customer_ticket.actions_json` and shown in the chat.
+
+**Why:**
+
+The customer ticket page had no working backend — `getIssue`, `addMessage`, `status`, `resolve`, `close` all 404'd, there was no messages store, and `on_issue` carried no respondent actions, so the Pramaan IGM flow could not progress and nothing was persisted.
+
+**Changes:** file name and description of file change:
+
+`src/ondc/models/customer_ticket.model.ts` (new)
+Model over `ondc_customer_ticket`; stores the chat in `actions_json`; `list`, `getById`, `findByTicketId`, `create`, `appendMessage`, `setStatus`, `setSelectedResolution`, `parseMessages`.
+
+`src/ondc/services/igm.service.ts` (rewritten)
+`handleIssue` (inbound, all complainant actions + PROCESSING ack), `handleIssueStatus` (→ on_issue_status), and `sellerAction(ticketId, kind, body)` for seller-initiated `on_issue`. Builds `respondent_actions` from stored seller messages; resolution + resolution_provider on resolve. ONDC respondent_action codes isolated in a `RESPONDENT_ACTION` map (CONFIRM vs Pramaan IGM 2.0.0 — no IGM schema ships in the 1.2.5 validator).
+
+`src/ondc/controllers/admin/issues.controller.ts` (rewritten)
+`listOndcIssues` (from tickets), `getOndcIssue` (ticket + `messages[]`), `addOndcIssueMessage`, `updateOndcIssueStatus`, `resolveOndcIssue`, `closeOndcIssue`.
+
+`src/ondc/routes/admin.route.ts`
+Registered the 5 IGM endpoints: `GET /issues/:id`, `POST /issues/:id/message`, `PATCH /issues/:id/status|resolve|close`.
+
+`src/ondc/flows/flow3B.service.ts`
+Fixed 2 pre-existing tsc errors (removed reads of non-existent `sellerProfile.bank_name`/`bank_branch`).
+
+`seed-igm-ticket.ts` (new, dev tool)
+Seeds one sample ticket with the full transcript (OPEN → PROCESSING → GET_INFO → INFO_PROVIDED → RESOLUTION_PROPOSED → RESOLUTION_ACCEPTED → RESOLVED → ISSUE_STATUS → RESOLVED → CLOSE) incl. images, PDF attachment, and resolution options. Run: `npx tsx seed-igm-ticket.ts`.
+
+**DB changes:** None — `ondc_customer_ticket` already exists; the chat lives in its `actions_json`.
+
 ### Branch 018
 
 **Date:** 2026-06-29
@@ -78,6 +121,7 @@ agent phone
 `src/ondc/services/fulfillment.service.ts`
 Saved agent details for agent_assigned and out_for_delivery.
 Ensured fulfillment state updates carry correct live data before callback is triggered.
+
 ## Fetch Product Images for Order Items
 
 **Date:** 2026-06-29
