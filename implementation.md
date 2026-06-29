@@ -1,3 +1,83 @@
+### Branch 018
+
+**Date:** 2026-06-29
+
+**Status:** Completed
+
+**Area:** ONDC Request Monitor — search by BAP ID + distinct buyer-apps (BAP) directory endpoint
+
+**What:**
+
+Added a `bap_id` filter to the Request Monitor list endpoint, and a new endpoint that returns the distinct buyer apps (BAP IDs) that have ever sent us a request, with per-app request counts, first/last seen, and the domains they used.
+
+**Why:**
+
+The Request Monitor list could only be searched by transaction_id (`q`); `bap_id` was returned as a column but was not filterable, and there was no way to know how many distinct buyer apps have hit our BPP. The admin UI needed a server-side count and list so the totals reflect the whole `ondc_txn_logs` table instead of just the current page.
+
+**Changes:** file name and description of file change:
+
+`src/ondc/controllers/admin/request_monitor.controller.ts`
+`listByAction` now reads a `bap_id` query param and adds `AND bap_id LIKE ?` to the WHERE clause (substring match; the exact bap_id from the UI's "View requests" still matches).
+Added `listBuyerApps` handler — `SELECT bap_id, COUNT(*) AS request_count, MIN/MAX(created_at) AS first_seen/last_seen, GROUP_CONCAT(DISTINCT domain) AS domains FROM ondc_txn_logs WHERE direction='inbound' AND bap_id IS NOT NULL GROUP BY bap_id ORDER BY last_seen DESC`. Supports `days` (0 = all time) and `q` (bap_id substring); returns `meta.total`.
+
+`src/ondc/routes/admin.route.ts`
+Registered `GET /buyer-apps` (admin-guarded) → `/api/v1/ondc/admin/buyer-apps`, wired to `listBuyerApps`.
+
+## Branch 017
+
+**Date:** 2026-06-29
+
+**Status:** Completed
+
+**Area:** ONDC Pramaan fulfillment update flow, on_status callback flow, partial cancel flow, in-transit cancel Flow 3B
+
+**What:**
+
+Fixed the ONDC fulfillment update and cancel callback flow so Pramaan ring should move correctly when fulfillment is updated from UI. Also implemented Flow 3B for in-transit cancellation and made the payload structure dynamic and DB-driven.
+
+**Why:**
+
+Earlier, fulfillment updates were getting saved in DB but Pramaan could still get stuck because unsolicited callbacks were not fully aligned with expected flow behavior. The main issues were missing callback message_id, missing persisted agent details, incomplete partial-cancel status sync, and Flow 3B being only a TODO.
+
+**Changes:** file name and description of file change:
+
+`src/ondc/controllers/admin/orders.controller.ts`
+Passed agent_name and agent_phone during fulfillment update.
+Routed merchant cancel action dynamically:pre-pickup cancel → Flow 3A
+in-transit cancel → Flow 3B
+
+`src/ondc/flows/flow1A.service.ts`
+Added generated message_id for unsolicited on_status callbacks.
+This helps Pramaan correlate the callback correctly.
+
+`src/ondc/flows/flow3A.service.ts`
+Added generated message_id support.
+Fixed partial cancel flow so on_update and on_status send the same updated order state.
+Recomputed quote using remaining quantities so payload stays consistent for Pramaan.
+
+`src/ondc/flows/flow3B.service.ts`
+Implemented full in-transit cancel flow.
+
+Added dynamic on_cancel payload structure with:delivery fulfillment cancellation
+RTO fulfillment leg
+split item quantities
+cancel_request, precancel_state, and quote_trail tags
+
+Removed hardcoded sample values and made data DB/raw-payload driven.
+
+`src/ondc/flows/flow7.service.ts`
+Added generated message_id for on_cancel callback context.
+
+`src/ondc/models/fulfillment.model.ts`
+Extended fulfillment update support to save:tracking url
+awb
+courier
+agent name
+agent phone
+
+`src/ondc/services/fulfillment.service.ts`
+Saved agent details for agent_assigned and out_for_delivery.
+Ensured fulfillment state updates carry correct live data before callback is triggered.
 ## Fetch Product Images for Order Items
 
 **Date:** 2026-06-29

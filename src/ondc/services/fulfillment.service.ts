@@ -30,8 +30,16 @@ export const fulfillmentService = {
   },
 
   /** Mark order as agent assigned */
-  async markAgentAssigned(ondcOrderId: string, fulfillmentId = 'F1'): Promise<void> {
-    await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'Agent-assigned');
+  async markAgentAssigned(
+    ondcOrderId: string,
+    fulfillmentId = 'F1',
+    agentName?: string,
+    agentPhone?: string,
+  ): Promise<void> {
+    await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'Agent-assigned', {
+      ...(agentName ? { agent_name: agentName } : {}),
+      ...(agentPhone ? { agent_phone: agentPhone } : {}),
+    });
     const order = await orderModel.findByOndcOrderId(ondcOrderId);
     await orderModel.transitionStatus(
       ondcOrderId,
@@ -78,7 +86,10 @@ export const fulfillmentService = {
     agentName?: string,
     agentPhone?: string,
   ): Promise<void> {
-    await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'Out-for-delivery');
+    await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'Out-for-delivery', {
+      ...(agentName ? { agent_name: agentName } : {}),
+      ...(agentPhone ? { agent_phone: agentPhone } : {}),
+    });
     const order = await orderModel.findByOndcOrderId(ondcOrderId);
     await orderModel.transitionStatus(
       ondcOrderId,
