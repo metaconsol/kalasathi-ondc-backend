@@ -53,6 +53,7 @@ export async function getOrder(req: Request, res: Response): Promise<void> {
     orderModel.getItems(order.ondc_order_id),
     orderModel.getFulfillments(order.ondc_order_id),
   ]);
+
   ApiResponse.success(res, 'Order details', {
     order: { ...order, history, items, fulfillments },
   });

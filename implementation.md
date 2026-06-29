@@ -1,3 +1,26 @@
+## Fetch Product Images for Order Items
+
+**Date:** 2026-06-29
+
+**Status:** Done
+
+**Area:** ONDC Order Models
+
+**What:**
+
+- Updated the `getItems` database query to fetch product and variant images (`db_product_image_url`) along with the order items.
+
+**Why:**
+
+- To provide image URLs for the order items directly from the database (via `variant_images` and `product_images` tables) so they can be displayed correctly on the frontend.
+
+**Changes:**
+
+- `src/ondc/models/order.model.ts` — Modified `getItems` SQL query to include a `COALESCE` subquery that attempts to fetch `image_url` from `variant_images` first, and falls back to `product_images` if a variant image is not found.
+- `src/ondc/controllers/admin/orders.controller.ts` — Minor code cleanup (removed debug log).
+
+---
+
 ## Branch 015
 
 **Date:** 2026-06-26
