@@ -1,4 +1,29 @@
-### Branch 017
+### Branch 018
+
+**Date:** 2026-06-29
+
+**Status:** Completed
+
+**Area:** ONDC Request Monitor — search by BAP ID + distinct buyer-apps (BAP) directory endpoint
+
+**What:**
+
+Added a `bap_id` filter to the Request Monitor list endpoint, and a new endpoint that returns the distinct buyer apps (BAP IDs) that have ever sent us a request, with per-app request counts, first/last seen, and the domains they used.
+
+**Why:**
+
+The Request Monitor list could only be searched by transaction_id (`q`); `bap_id` was returned as a column but was not filterable, and there was no way to know how many distinct buyer apps have hit our BPP. The admin UI needed a server-side count and list so the totals reflect the whole `ondc_txn_logs` table instead of just the current page.
+
+**Changes:** file name and description of file change:
+
+`src/ondc/controllers/admin/request_monitor.controller.ts`
+`listByAction` now reads a `bap_id` query param and adds `AND bap_id LIKE ?` to the WHERE clause (substring match; the exact bap_id from the UI's "View requests" still matches).
+Added `listBuyerApps` handler — `SELECT bap_id, COUNT(*) AS request_count, MIN/MAX(created_at) AS first_seen/last_seen, GROUP_CONCAT(DISTINCT domain) AS domains FROM ondc_txn_logs WHERE direction='inbound' AND bap_id IS NOT NULL GROUP BY bap_id ORDER BY last_seen DESC`. Supports `days` (0 = all time) and `q` (bap_id substring); returns `meta.total`.
+
+`src/ondc/routes/admin.route.ts`
+Registered `GET /buyer-apps` (admin-guarded) → `/api/v1/ondc/admin/buyer-apps`, wired to `listBuyerApps`.
+
+## Branch 017
 
 **Date:** 2026-06-29
 

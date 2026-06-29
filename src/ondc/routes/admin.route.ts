@@ -30,6 +30,7 @@ import {
   getActionCounts,
   listByAction,
   getTimeline,
+  listBuyerApps,
 } from '~/ondc/controllers/admin/request_monitor.controller';
 import { listOndcIssues } from '~/ondc/controllers/admin/issues.controller';
 import { getDashboardStats } from '~/ondc/controllers/admin/stats.controller';
@@ -80,6 +81,9 @@ router.delete('/transactions', ...adminGuard, deleteTransactions);
 router.get('/request-monitor/counts', ...adminGuard, getActionCounts);
 router.get('/request-monitor', ...adminGuard, listByAction);
 router.get('/request-monitor/:transactionId', ...adminGuard, getTimeline);
+
+// ---- Buyer Apps (distinct bap_ids that have made requests) ----
+router.get('/buyer-apps', ...adminGuard, listBuyerApps);
 
 // ---- IGM ----
 router.get('/issues', ...sellerGuard, listOndcIssues);

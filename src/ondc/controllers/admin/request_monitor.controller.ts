@@ -58,6 +58,7 @@ export async function getActionCounts(req: Request, res: Response): Promise<void
  *    action   — one of the ACTIONS list (default: select)
  *    days     — 0=all, default 7
  *    q        — transaction_id substring search
+ *    bap_id   — bap_id substring search (buyer app filter)
  *    ack      — '' | 'ACK' | 'NACK'  (buyer response filter)
  *    page     — default 1
  *    limit    — default 25, max 100
@@ -69,6 +70,7 @@ export async function listByAction(req: Request, res: Response): Promise<void> {
 
   const days = Math.min(365, Math.max(0, parseInt(String(req.query['days'] ?? '7'), 10) || 7));
   const q = String(req.query['q'] ?? '').trim();
+  const bapId = String(req.query['bap_id'] ?? '').trim();
   const domain = String(req.query['domain'] ?? '').trim();
   const ack = String(req.query['ack'] ?? '').toUpperCase();
   const page = Math.max(1, parseInt(String(req.query['page'] ?? '1'), 10) || 1);
@@ -82,6 +84,10 @@ export async function listByAction(req: Request, res: Response): Promise<void> {
   if (q) {
     where += ' AND transaction_id LIKE ?';
     whereParams.push(`%${q}%`);
+  }
+  if (bapId) {
+    where += ' AND bap_id LIKE ?';
+    whereParams.push(`%${bapId}%`);
   }
   if (domain) {
     where += ' AND domain = ?';
@@ -205,4 +211,51 @@ export async function getTimeline(req: Request, res: Response): Promise<void> {
     transaction: txn[0] ?? null,
     logs,
   });
+}
+
+/** GET /api/v1/ondc/admin/buyer-apps
+ *  Distinct buyer apps (bap_id) that have ever sent us an inbound request,
+ *  with per-app request count, first/last seen, and the domains they used.
+ *
+ *  Query params:
+ *    days — 0=all (default), else last N days
+ *    q    — bap_id substring search
+ */
+export async function listBuyerApps(req: Request, res: Response): Promise<void> {
+  const days = Math.min(365, Math.max(0, parseInt(String(req.query['days'] ?? '0'), 10) || 0));
+  const q = String(req.query['q'] ?? '').trim();
+
+  const params: (string | number)[] = [];
+  let where = `direction = 'inbound' AND bap_id IS NOT NULL AND bap_id <> ''`;
+  if (days > 0) where += ` AND created_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY)`;
+  if (q) {
+    where += ' AND bap_id LIKE ?';
+    params.push(`%${q}%`);
+  }
+
+  const rows = await ondcQuery<{
+    bap_id: string;
+    request_count: number;
+    first_seen: string | null;
+    last_seen: string | null;
+    domains: string | null;
+  }>(
+    `SELECT bap_id,
+            COUNT(*)                          AS request_count,
+            MIN(created_at)                   AS first_seen,
+            MAX(created_at)                   AS last_seen,
+            GROUP_CONCAT(DISTINCT domain ORDER BY domain SEPARATOR ', ') AS domains
+     FROM ondc_txn_logs
+     WHERE ${where}
+     GROUP BY bap_id
+     ORDER BY last_seen DESC`,
+    params,
+  );
+
+  ApiResponse.success(
+    res,
+    'Buyer apps',
+    rows.map((r) => ({ ...r, request_count: Number(r.request_count) })),
+    { total: rows.length },
+  );
 }
