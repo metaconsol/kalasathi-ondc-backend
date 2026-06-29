@@ -1,3 +1,59 @@
+### Branch 017
+
+**Date:** 2026-06-29
+
+**Status:** Completed
+
+**Area:** ONDC Pramaan fulfillment update flow, on_status callback flow, partial cancel flow, in-transit cancel Flow 3B
+
+**What:**
+
+Fixed the ONDC fulfillment update and cancel callback flow so Pramaan ring should move correctly when fulfillment is updated from UI. Also implemented Flow 3B for in-transit cancellation and made the payload structure dynamic and DB-driven.
+
+**Why:**
+
+Earlier, fulfillment updates were getting saved in DB but Pramaan could still get stuck because unsolicited callbacks were not fully aligned with expected flow behavior. The main issues were missing callback message_id, missing persisted agent details, incomplete partial-cancel status sync, and Flow 3B being only a TODO.
+
+**Changes:** file name and description of file change:
+
+`src/ondc/controllers/admin/orders.controller.ts`
+Passed agent_name and agent_phone during fulfillment update.
+Routed merchant cancel action dynamically:pre-pickup cancel → Flow 3A
+in-transit cancel → Flow 3B
+
+`src/ondc/flows/flow1A.service.ts`
+Added generated message_id for unsolicited on_status callbacks.
+This helps Pramaan correlate the callback correctly.
+
+`src/ondc/flows/flow3A.service.ts`
+Added generated message_id support.
+Fixed partial cancel flow so on_update and on_status send the same updated order state.
+Recomputed quote using remaining quantities so payload stays consistent for Pramaan.
+
+`src/ondc/flows/flow3B.service.ts`
+Implemented full in-transit cancel flow.
+
+Added dynamic on_cancel payload structure with:delivery fulfillment cancellation
+RTO fulfillment leg
+split item quantities
+cancel_request, precancel_state, and quote_trail tags
+
+Removed hardcoded sample values and made data DB/raw-payload driven.
+
+`src/ondc/flows/flow7.service.ts`
+Added generated message_id for on_cancel callback context.
+
+`src/ondc/models/fulfillment.model.ts`
+Extended fulfillment update support to save:tracking url
+awb
+courier
+agent name
+agent phone
+
+`src/ondc/services/fulfillment.service.ts`
+Saved agent details for agent_assigned and out_for_delivery.
+Ensured fulfillment state updates carry correct live data before callback is triggered.
+
 ## Branch 015
 
 **Date:** 2026-06-26

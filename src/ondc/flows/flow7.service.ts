@@ -6,7 +6,7 @@
 
 import { orderModel } from '~/ondc/models/order.model';
 import { becknService } from '~/ondc/services/beckn.service';
-import { buildResponseContext } from '~/ondc/utils/payload.builder';
+import { buildResponseContext, newMessageId } from '~/ondc/utils/payload.builder';
 import { adaptOrderRowToOndcOrder } from '~/ondc/adapters/order.adapter';
 import { OndcError } from '~/ondc/utils/error.handler';
 import { ondcLogger } from '~/ondc/utils/logger.util';
@@ -38,7 +38,7 @@ export const flow7Service = {
       bpp_id: '',
       bpp_uri: '',
       transaction_id: order.transaction_id,
-      message_id: '',
+      message_id: newMessageId(),
       timestamp: '',
     };
 

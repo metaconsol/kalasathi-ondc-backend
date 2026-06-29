@@ -15,6 +15,7 @@ import { ondcLogger } from '~/ondc/utils/logger.util';
 import { buildOnStatusOrder } from '~/ondc/adapters/order.adapter';
 import { OndcError } from '~/ondc/utils/error.handler';
 import type { OndcFulfillmentState } from '~/ondc/types/order.types';
+import { newMessageId } from '~/ondc/utils/payload.builder';
 
 export const flow1AService = {
   /**
@@ -41,7 +42,7 @@ export const flow1AService = {
       bpp_id: '',
       bpp_uri: '',
       transaction_id: order.transaction_id,
-      message_id: '',
+      message_id: newMessageId(),
       timestamp: new Date().toISOString(),
     };
     const responseContext = buildResponseContext(callbackContext, 'on_status');

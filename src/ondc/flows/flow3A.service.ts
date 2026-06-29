@@ -8,10 +8,14 @@
 import { orderModel } from '~/ondc/models/order.model';
 import { becknService } from '~/ondc/services/beckn.service';
 import { observabilityService } from '~/ondc/services/observability.service';
-import { buildResponseContext, buildOnUpdate, nowIso } from '~/ondc/utils/payload.builder';
+import {
+  buildResponseContext,
+  buildOnUpdate,
+  nowIso,
+  newMessageId,
+} from '~/ondc/utils/payload.builder';
 import { txnLogModel } from '~/ondc/models/log.model';
 import { buildOnStatusOrder } from '~/ondc/adapters/order.adapter';
-import { flow1AService } from '~/ondc/flows/flow1A.service';
 import { ondcExec } from '~/lib/ondcSql';
 import { ondcEnv } from '~/config/ondc.config';
 import { OndcError } from '~/ondc/utils/error.handler';
@@ -41,8 +45,50 @@ function sellerContext(order: {
     bpp_id: '',
     bpp_uri: '',
     transaction_id: order.transaction_id,
-    message_id: '',
+    message_id: newMessageId(),
     timestamp: '',
+  };
+}
+
+/**
+ * Recompute an ONDC quote after a partial cancellation: reduce each item's
+ * breakup line to its remaining quantity (value = unit_price * remaining) and
+ * recompute the grand total from every breakup line. Non-item lines (delivery,
+ * tax, packing, …) are preserved so the order stays internally consistent — the
+ * quote in /on_update + /on_status MUST match the reduced item quantities or
+ * Pramaan rejects the callback.
+ */
+function recomputeQuoteForRemaining(
+  quote: Record<string, any> | undefined,
+  remainingById: Map<string, number>,
+): Record<string, any> | undefined {
+  if (!quote || !Array.isArray(quote['breakup'])) return quote;
+  const currency = quote['price']?.currency ?? 'INR';
+  const breakup = quote['breakup'].map((b: any) => {
+    const itemId = b['@ondc/org/item_id'];
+    if (b['@ondc/org/title_type'] === 'item' && itemId && remainingById.has(itemId)) {
+      const remaining = remainingById.get(itemId) ?? 0;
+      const origCount = Number(b['@ondc/org/item_quantity']?.count ?? 1) || 1;
+      const unit =
+        parseFloat(b['item']?.price?.value ?? '') ||
+        parseFloat(b['price']?.value ?? '0') / origCount;
+      const lineValue = (unit * remaining).toFixed(2);
+      return {
+        ...b,
+        '@ondc/org/item_quantity': { ...(b['@ondc/org/item_quantity'] ?? {}), count: remaining },
+        price: { ...(b['price'] ?? {}), currency, value: lineValue },
+      };
+    }
+    return b;
+  });
+  const total = breakup.reduce(
+    (sum: number, b: any) => sum + (parseFloat(b['price']?.value ?? '0') || 0),
+    0,
+  );
+  return {
+    ...quote,
+    breakup,
+    price: { ...(quote['price'] ?? {}), currency, value: total.toFixed(2) },
   };
 }
 
@@ -130,46 +176,68 @@ export const flow3AService = {
     const items = await orderModel.getItems(ondcOrderId);
     const liveFulfillments = await orderModel.getFulfillments(ondcOrderId);
     const base = (await buildOnStatusOrder(order, liveFulfillments)) as Record<string, any>;
+    const baseItems = (base['items'] as any[]) ?? [];
 
     const cancelMap = new Map(cancelItems.map((c) => [c.id, Math.max(0, c.quantity)]));
+    const unitById = new Map(items.map((it) => [it.item_id, parseFloat(it.unit_price || '0')]));
+    const currencyById = new Map(items.map((it) => [it.item_id, it.currency || 'INR']));
+    const orderedQtyById = new Map<string, number>();
+    for (const it of items) orderedQtyById.set(it.item_id, it.quantity);
+    for (const bi of baseItems) {
+      if (!orderedQtyById.has(bi.id)) orderedQtyById.set(bi.id, Number(bi.quantity?.count ?? 0));
+    }
+
     const cancelFulfId = 'C1';
     const itemsPayload: any[] = [];
     const quoteTrail: any[] = [];
+    const remainingById = new Map<string, number>();
 
-    for (const it of items) {
-      const cancelQty = Math.min(cancelMap.get(it.item_id) ?? 0, it.quantity);
-      const remaining = it.quantity - cancelQty;
-      itemsPayload.push({
-        id: it.item_id,
-        fulfillment_id: it.fulfillment_id || 'F1',
-        quantity: { count: remaining },
-      });
+    // Walk the confirm-time items (full structure: id, descriptor, price, …) so the
+    // updated order keeps a valid item shape; only the quantities change.
+    for (const bi of baseItems) {
+      const itemId = bi.id;
+      const ordered = orderedQtyById.get(itemId) ?? Number(bi.quantity?.count ?? 0);
+      const cancelQty = Math.min(cancelMap.get(itemId) ?? 0, ordered);
+      const remaining = ordered - cancelQty;
+      remainingById.set(itemId, remaining);
+
+      // Remaining quantity stays on the delivery fulfillment.
+      itemsPayload.push({ ...bi, quantity: { ...(bi.quantity ?? {}), count: remaining } });
+
       if (cancelQty > 0) {
+        // Cancelled quantity moves to the Cancel fulfillment.
         itemsPayload.push({
-          id: it.item_id,
+          ...bi,
           fulfillment_id: cancelFulfId,
-          quantity: { count: cancelQty },
+          quantity: { ...(bi.quantity ?? {}), count: cancelQty },
         });
-        const unit = parseFloat(it.unit_price || '0');
+        const unit = unitById.get(itemId) ?? 0;
         quoteTrail.push(
           { code: 'type', value: 'item' },
-          { code: 'id', value: it.item_id },
-          { code: 'currency', value: it.currency || 'INR' },
+          { code: 'id', value: itemId },
+          { code: 'currency', value: currencyById.get(itemId) ?? 'INR' },
           { code: 'value', value: (-1 * cancelQty * unit).toFixed(2) },
         );
       }
     }
 
+    // Quote MUST reflect the reduced quantities, or Pramaan rejects the callback.
+    const newQuote = recomputeQuoteForRemaining(
+      base['quote'] as Record<string, any>,
+      remainingById,
+    );
+
     const cancelFulfillment = {
       id: cancelFulfId,
       type: 'Cancel',
-      state: { descriptor: { code: 'Cancelled' } },
+      state: { descriptor: { code: 'Cancelled' }, updated_at: nowIso() },
       tags: [{ code: 'quote_trail', list: quoteTrail }],
     };
 
     const updatedOrder = {
       ...base,
       items: itemsPayload,
+      ...(newQuote ? { quote: newQuote } : {}),
       fulfillments: [...((base['fulfillments'] as any[]) ?? []), cancelFulfillment],
       updated_at: nowIso(),
     };
@@ -197,10 +265,12 @@ export const flow3AService = {
       );
     }
 
+    // 1) on_update — remaining qty on delivery + cancelled qty on the Cancel
+    //    fulfillment, with the quote recomputed to the new (reduced) total.
     // buildOnUpdate wraps { context: buildResponseContext(ctx,'on_update'), message:{ order } }
     const onUpdatePayload = buildOnUpdate(sellerContext(order) as any, updatedOrder) as any;
 
-    const { statusCode, error: cbErr } = await becknService.sendCallback(
+    const upRes = await becknService.sendCallback(
       becknService.buildCallbackUrl(order.bap_uri, 'on_update'),
       'on_update',
       onUpdatePayload,
@@ -215,17 +285,47 @@ export const flow3AService = {
       bap_id: order.bap_id,
       bpp_id: onUpdatePayload.context.bpp_id ?? null,
       domain: order.domain,
-      http_status: statusCode ?? null,
-      ack_status: statusCode && statusCode < 300 ? 'ACK' : 'NACK',
+      http_status: upRes.statusCode ?? null,
+      ack_status: upRes.statusCode && upRes.statusCode < 300 ? 'ACK' : 'NACK',
       payload_json: JSON.stringify(onUpdatePayload),
-      error_message: cbErr ?? null,
+      error_message: upRes.error ?? null,
     });
 
     observabilityService.push('on_update', onUpdatePayload);
     ondcLogger.info('Flow3A: seller PARTIAL cancel (on_update)', { ondcOrderId, reasonId });
 
-    // Follow up with on_status so the buyer NP sees the updated order state.
-    const currentState = (liveFulfillments[0]?.state as any) ?? 'Pending';
-    await flow1AService.pushOnStatus(ondcOrderId, currentState);
+    // 2) on_status — the SAME updated order so the buyer NP sees a state that is
+    //    consistent with the on_update (reduced quote + Cancel fulfillment).
+    //    Rebuilding from raw_confirm here (the old flow1A path) would resurrect the
+    //    pre-cancel quantities/quote and contradict the on_update we just sent.
+    const statusContext = buildResponseContext(sellerContext(order), 'on_status');
+    const onStatusPayload = {
+      context: statusContext,
+      message: { order: { ...updatedOrder, updated_at: nowIso() } },
+    };
+
+    const stRes = await becknService.sendCallback(
+      becknService.buildCallbackUrl(order.bap_uri, 'on_status'),
+      'on_status',
+      onStatusPayload as any,
+      order.transaction_id,
+    );
+
+    await txnLogModel.insert({
+      transaction_id: order.transaction_id,
+      message_id: (statusContext as any).message_id,
+      action: 'on_status',
+      direction: 'outbound',
+      bap_id: order.bap_id,
+      bpp_id: (statusContext as any).bpp_id ?? null,
+      domain: order.domain,
+      http_status: stRes.statusCode ?? null,
+      ack_status: stRes.statusCode && stRes.statusCode < 300 ? 'ACK' : 'NACK',
+      payload_json: JSON.stringify(onStatusPayload),
+      error_message: stRes.error ?? null,
+    });
+
+    observabilityService.push('on_status', onStatusPayload);
+    ondcLogger.info('Flow3A: seller PARTIAL cancel (on_status)', { ondcOrderId, reasonId });
   },
 };
