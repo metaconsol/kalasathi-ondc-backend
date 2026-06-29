@@ -250,7 +250,23 @@ export const orderModel = {
 
   async getItems(ondcOrderId: string): Promise<OndcOrderItemRow[]> {
     return ondcQuery<OndcOrderItemRow>(
-      `SELECT * FROM ondc_order_items WHERE ondc_order_id = ? ORDER BY id ASC`,
+      `SELECT oi.*, 
+        COALESCE(
+          (SELECT image_url 
+           FROM variant_images 
+           WHERE variant_id = CAST(SUBSTRING_INDEX(oi.item_id, 'var_', -1) AS UNSIGNED) 
+           ORDER BY sort_order ASC 
+           LIMIT 1),
+          (SELECT image_url 
+           FROM product_images 
+           WHERE product_id = oi.product_id 
+              OR product_id = CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(oi.item_id, '_', 2), '_', -1) AS UNSIGNED)
+           ORDER BY sort_order ASC 
+           LIMIT 1)
+        ) as db_product_image_url
+       FROM ondc_order_items oi 
+       WHERE oi.ondc_order_id = ? 
+       ORDER BY oi.id ASC`,
       [ondcOrderId],
     );
   },
