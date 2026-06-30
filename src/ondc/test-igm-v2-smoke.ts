@@ -4,6 +4,13 @@ import { becknService } from '~/ondc/services/beckn.service';
 import { customerTicketModel } from '~/ondc/models/customer_ticket.model';
 import { ondcQuery } from '~/lib/ondcSql';
 
+function latestCodes(row: { payload_json: string | null }): string[] {
+  const payload = JSON.parse(row.payload_json ?? '{}');
+  return ((payload.actions ?? []) as Array<{ descriptor?: { code?: string } }>)
+    .map((a) => a.descriptor?.code ?? '')
+    .filter(Boolean);
+}
+
 async function main() {
   becknService.sendCallback = async () => ({ statusCode: 200, error: undefined });
 
@@ -78,9 +85,64 @@ async function main() {
   if (!row) throw new Error('ticket not created');
 
   await igmService.sellerAction(row.id, 'info_request', { message: 'Please share photos' });
-  const afterInfo = JSON.parse((await customerTicketModel.getById(row.id))!.payload_json!);
-  console.log('after info_request:', afterInfo.actions.at(-1)?.descriptor?.code);
+  let fresh = (await customerTicketModel.getById(row.id))!;
+  console.log('after first info_request:', latestCodes(fresh).at(-1));
 
+  await igmService.handleIssue(
+    { ...ctx, message_id: 'm2', timestamp: new Date().toISOString() } as any,
+    {
+      issue: {
+        id: issueId,
+        actions: [
+          {
+            id: 'A2',
+            descriptor: { code: 'INFO_PROVIDED', short_desc: 'Shared images' },
+            updated_at: new Date().toISOString(),
+            action_by: 'NP1',
+            actor_details: { name: 'Buyer' },
+          },
+        ],
+      },
+    },
+  );
+  fresh = (await customerTicketModel.getById(row.id))!;
+  console.log(
+    'after first info_provided, open_info_request_count:',
+    (fresh as any).open_info_request_count,
+  );
+
+  await igmService.sellerAction(row.id, 'processing', { note: 'Reviewing shared images' });
+  await igmService.sellerAction(row.id, 'info_request', {
+    message: 'Please share invoice copy as well',
+  });
+  fresh = (await customerTicketModel.getById(row.id))!;
+  console.log('after second info_request:', latestCodes(fresh).slice(-2).join(', '));
+  console.log('open_info_request_count:', (fresh as any).open_info_request_count);
+
+  await igmService.handleIssue(
+    { ...ctx, message_id: 'm3', timestamp: new Date().toISOString() } as any,
+    {
+      issue: {
+        id: issueId,
+        actions: [
+          {
+            id: 'A3',
+            descriptor: { code: 'INFO_PROVIDED', short_desc: 'Shared invoice copy' },
+            updated_at: new Date().toISOString(),
+            action_by: 'NP1',
+            actor_details: { name: 'Buyer' },
+          },
+        ],
+      },
+    },
+  );
+  fresh = (await customerTicketModel.getById(row.id))!;
+  console.log(
+    'after second info_provided, open_info_request_count:',
+    (fresh as any).open_info_request_count,
+  );
+
+  await igmService.sellerAction(row.id, 'processing', { note: 'All requested info received' });
   await igmService.sellerAction(row.id, 'resolution_options', { message: 'Choose refund' });
   const afterRes = JSON.parse((await customerTicketModel.getById(row.id))!.payload_json!);
   console.log(
@@ -88,7 +150,12 @@ async function main() {
     afterRes.resolutions?.length,
     afterRes.resolutions?.[1]?.descriptor?.code,
   );
-  console.log('last action:', afterRes.actions.at(-1)?.descriptor?.code);
+  console.log(
+    'last actions:',
+    latestCodes((await customerTicketModel.getById(row.id))!)
+      .slice(-4)
+      .join(' -> '),
+  );
 
   await ondcQuery('DELETE FROM ondc_customer_ticket WHERE ticket_id = ?', [issueId]);
 }

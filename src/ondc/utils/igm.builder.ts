@@ -342,12 +342,19 @@ export function extractTicketMirrorFields(
   }
 
   const resolutions = (issue['resolutions'] as unknown[]) ?? [];
-  const infoRequested = v2
+  const infoRequestedTotal = v2
     ? ((issue['actions'] as any[]) ?? []).filter((a) => a.descriptor?.code === 'INFO_REQUESTED')
         .length
     : ((issue['issue_actions'] as any)?.['respondent_actions'] ?? []).filter(
         (r: any) => r.respondent_action === 'NEED-MORE-INFO' || r.respondent_action === 'GET_INFO',
       ).length;
+  const infoProvidedTotal = v2
+    ? ((issue['actions'] as any[]) ?? []).filter((a) => a.descriptor?.code === 'INFO_PROVIDED')
+        .length
+    : ((issue['issue_actions'] as any)?.['complainant_actions'] ?? []).filter(
+        (r: any) => r.complainant_action === 'INFO_PROVIDED',
+      ).length;
+  const openInfoRequestCount = Math.max(0, infoRequestedTotal - infoProvidedTotal);
 
   const resolutionPick = v2
     ? resolutionPickFromAcceptedAction(issue)
@@ -392,7 +399,7 @@ export function extractTicketMirrorFields(
     last_action_by: clipStr(lastAction?.action_by, 120),
     last_actor_name: clipStr(lastAction?.actor_details?.name, 255),
     resolutions_count: resolutions.length,
-    open_info_request_count: infoRequested,
+    open_info_request_count: openInfoRequestCount,
     selected_resolution_id: resolutionPick.id,
     selected_resolution_code: resolutionPick.code,
     selected_resolution_label: resolutionPick.label,
