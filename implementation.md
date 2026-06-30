@@ -1,3 +1,40 @@
+### Branch 023
+
+**Date:** 2026-06-30
+
+**Status:** Completed
+
+**Area:** ONDC IGM repeated information-request flow
+
+**What:**
+
+Updated the IGM complaint flow so the seller can ask for information more than once in the same issue flow. If the buyer provides the first requested info and the seller still needs more details, the seller can send another info request in the same complaint journey, the buyer can respond again, and only after that the seller can continue to resolution options and resolution completion.
+
+**Why:**
+
+The flow was already working for the normal path:
+issue raised -> info requested -> info provided -> resolution options -> resolved.
+
+But the expected Pramaan-style journey also needs the repeated-info scenario:
+issue raised -> info requested -> info provided -> info requested again -> info provided again -> resolution options -> resolved.
+
+To support that properly, the system needed to track only currently open info requests instead of total historical info requests.
+
+**Changes:** file name and description of file change:
+
+- `src/ondc/utils/igm.builder.ts`
+  Updated IGM mirror/state extraction logic for `open_info_request_count`. It now calculates outstanding open info requests as:
+  total `INFO_REQUESTED` minus total `INFO_PROVIDED`,
+  instead of counting only how many info requests happened historically. This keeps the same complaint flow open when seller asks for info again and clears it once buyer provides the requested information.
+
+- `src/ondc/test-igm-v2-smoke.ts`
+  Extended the IGM V2 smoke test to cover the repeated-info path:
+  first info request -> first buyer info -> second info request -> second buyer info -> resolution options.
+  Added verification logs to confirm that:
+  `open_info_request_count` becomes `0` after buyer response,
+  becomes `1` again after seller asks for more info,
+  and returns to `0` after the second buyer response.
+
 ### Branch 022
 
 **Date:** 2026-06-30
