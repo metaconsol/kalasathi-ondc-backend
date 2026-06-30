@@ -51,6 +51,7 @@ export interface CustomerTicketRow {
   country: string | null;
   city: string | null;
   core_version: string | null;
+  ttl: string | null;
   descriptor_attachments_json: string | null;
   actions_json: string | null;
   resolutions_json: string | null;
