@@ -13,7 +13,7 @@ import { randomUUID } from 'crypto';
 import { customerTicketModel, type TicketMessage } from '~/ondc/models/customer_ticket.model';
 import { becknService } from './beckn.service';
 import { observabilityService } from './observability.service';
-import { buildResponseContext } from '~/ondc/utils/payload.builder';
+import { buildResponseContext, newMessageId } from '~/ondc/utils/payload.builder';
 import { txnLogModel } from '~/ondc/models/log.model';
 import { SELLER_PROFILE } from '~/ondc/config/constants';
 import { ondcEnv } from '~/config/ondc.config';
@@ -116,8 +116,9 @@ async function pushOnIssue(
     bpp_id: '',
     bpp_uri: '',
     transaction_id: row.txn_id,
-    message_id: '',
+    message_id: newMessageId(),
     timestamp: '',
+    ttl: row.ttl || 'PT30S',
   };
   const responseContext = buildResponseContext(ctxBase, 'on_issue');
 
