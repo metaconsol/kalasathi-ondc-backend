@@ -153,6 +153,70 @@ export const fulfillmentService = {
     await flow1AService.pushOnStatus(ondcOrderId, 'Return_Initiated');
   },
 
+  /** Mark return initiated */
+  async markReturnInitiated(ondcOrderId: string, fulfillmentId = 'F1'): Promise<void> {
+    await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'Return_Initiated');
+    const order = await orderModel.findByOndcOrderId(ondcOrderId);
+    await orderModel.transitionStatus(
+      ondcOrderId,
+      order?.status ?? null,
+      'RETURNED',
+      'Return_Initiated',
+      'seller',
+      'Return initiated',
+    );
+    ondcLogger.info('Return initiated', { ondcOrderId });
+    await flow1AService.pushOnStatus(ondcOrderId, 'Return_Initiated');
+  },
+
+  /** Mark return approved */
+  async markReturnApproved(ondcOrderId: string, fulfillmentId = 'F1'): Promise<void> {
+    await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'Return_Approved');
+    const order = await orderModel.findByOndcOrderId(ondcOrderId);
+    await orderModel.transitionStatus(
+      ondcOrderId,
+      order?.status ?? null,
+      'RETURNED',
+      'Return_Approved',
+      'seller',
+      'Return approved',
+    );
+    ondcLogger.info('Return approved', { ondcOrderId });
+    await flow1AService.pushOnStatus(ondcOrderId, 'Return_Approved');
+  },
+
+  /** Mark return picked */
+  async markReturnPicked(ondcOrderId: string, fulfillmentId = 'F1'): Promise<void> {
+    await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'Return_Picked');
+    const order = await orderModel.findByOndcOrderId(ondcOrderId);
+    await orderModel.transitionStatus(
+      ondcOrderId,
+      order?.status ?? null,
+      'RETURNED',
+      'Return_Picked',
+      'seller',
+      'Return picked',
+    );
+    ondcLogger.info('Return picked', { ondcOrderId });
+    await flow1AService.pushOnStatus(ondcOrderId, 'Return_Picked');
+  },
+
+  /** Mark return delivered */
+  async markReturnDelivered(ondcOrderId: string, fulfillmentId = 'F1'): Promise<void> {
+    await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'Return_Delivered');
+    const order = await orderModel.findByOndcOrderId(ondcOrderId);
+    await orderModel.transitionStatus(
+      ondcOrderId,
+      order?.status ?? null,
+      'RETURNED',
+      'Return_Delivered',
+      'seller',
+      'Return delivered',
+    );
+    ondcLogger.info('Return delivered', { ondcOrderId });
+    await flow1AService.pushOnStatus(ondcOrderId, 'Return_Delivered');
+  },
+
   /** Get current fulfillment state for an order */
   async getState(ondcOrderId: string, fulfillmentId = 'F1'): Promise<OndcFulfillmentState | null> {
     const fulfillments = (await fulfillmentModel.findByOrderId(ondcOrderId)) ?? [];
