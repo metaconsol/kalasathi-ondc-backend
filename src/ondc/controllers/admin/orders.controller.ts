@@ -130,6 +130,18 @@ export async function updateFulfillment(req: Request, res: Response): Promise<vo
     case 'returned':
       await fulfillmentService.initiateReturn(orderId, fulfillment_id);
       break;
+    case 'return_initiated':
+      await fulfillmentService.markReturnInitiated(orderId, fulfillment_id);
+      break;
+    case 'return_approved':
+      await fulfillmentService.markReturnApproved(orderId, fulfillment_id);
+      break;
+    case 'return_picked':
+      await fulfillmentService.markReturnPicked(orderId, fulfillment_id);
+      break;
+    case 'return_delivered':
+      await fulfillmentService.markReturnDelivered(orderId, fulfillment_id);
+      break;
     case 'rto':
       await fulfillmentService.initiateRto(orderId, fulfillment_id);
       break;

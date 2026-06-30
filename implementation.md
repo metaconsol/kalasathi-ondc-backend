@@ -1,3 +1,27 @@
+### Branch 022
+
+**Date:** 2026-06-30
+
+**Status:** In Progress
+
+**Area:** ONDC Return Fulfillment Flow
+
+**What:**
+
+Implemented granular return status handlers (`return_initiated`, `return_approved`, `return_picked`, `return_delivered`) in the fulfillment service and wired them to the admin orders controller.
+
+**Why:**
+
+To handle precise fulfillment return states, update ONDC order states dynamically, and ensure network updates (callbacks) are pushed correctly for each step of the return journey.
+
+**Changes:**
+
+- `src/ondc/controllers/admin/orders.controller.ts`
+  Added switch cases for `return_initiated`, `return_approved`, `return_picked`, and `return_delivered` in the `updateFulfillment` handler to invoke corresponding fulfillment service methods.
+
+- `src/ondc/services/fulfillment.service.ts`
+  Created new state transition methods (`markReturnInitiated`, `markReturnApproved`, `markReturnPicked`, `markReturnDelivered`) to update database fulfillment state, transition the order status, and trigger network push.
+
 ### Branch 021
 
 Fix IGM Issue
