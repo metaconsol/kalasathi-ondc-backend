@@ -1,0 +1,303 @@
+{
+  "meta": {
+    "description": "ONDC IGM 2.0.0 end-to-end test flow (Branch 019). Covers OPEN → PROCESSING → GET_INFO → INFO_PROVIDED → RESOLUTION_PROPOSED → RESOLUTION_ACCEPTED → RESOLVED → issue_status → CLOSE.",
+    "usage": [
+      "In-process (no server): npx tsx src/ondc/test-igm.ts",
+      "Against running server: npx tsx src/ondc/test-igm.ts --http",
+      "Postman/curl: copy each step body; replace {{TXN_ID}}, {{ISSUE_ID}}, {{ORDER_ID}}, {{TIMESTAMP}}",
+      "Requires .env with ONDC_DB_URL (+ BPP_* vars for signing if not using ?insecure=1)"
+    ]
+  },
+  "variables": {
+    "DOMAIN": "ONDC:RET12",
+    "CITY": "std:080",
+    "CORE_VERSION": "1.2.0",
+    "BAP_ID": "pramaan.ondc.org/beta/preprod/mock/buyer",
+    "BAP_URI": "https://pramaan.ondc.org/beta/preprod/mock/buyer",
+    "BPP_ID": "{{BPP_SUBSCRIBER_ID}}",
+    "BPP_URI": "{{BPP_BASE_URI}}",
+    "TXN_ID": "igm-test-txn-001",
+    "ISSUE_ID": "IGM-TEST-001",
+    "ORDER_ID": "{{ORDER_ID}}",
+    "PROVIDER_ID": "{{PROVIDER_ID}}",
+    "ITEM_ID": "prod_1"
+  },
+  "steps": [
+    {
+      "step": 1,
+      "name": "Raise issue (OPEN)",
+      "type": "inbound_issue",
+      "action": "issue",
+      "endpoint": "/api/v1/ondc/issue?insecure=1",
+      "expects": {
+        "ack": true,
+        "ticket_display_status": "PROCESSING",
+        "outbound_callbacks": ["on_issue"]
+      },
+      "body": {
+        "context": {
+          "domain": "{{DOMAIN}}",
+          "action": "issue",
+          "country": "IND",
+          "city": "{{CITY}}",
+          "core_version": "{{CORE_VERSION}}",
+          "bap_id": "{{BAP_ID}}",
+          "bap_uri": "{{BAP_URI}}",
+          "bpp_id": "{{BPP_ID}}",
+          "bpp_uri": "{{BPP_URI}}",
+          "transaction_id": "{{TXN_ID}}",
+          "message_id": "igm-msg-001",
+          "timestamp": "{{TIMESTAMP}}",
+          "ttl": "PT30S"
+        },
+        "message": {
+          "issue": {
+            "id": "{{ISSUE_ID}}",
+            "category": "ITEM",
+            "sub_category": "ITM02",
+            "complainant_info": {
+              "person": { "name": "Test Buyer" },
+              "contact": { "phone": "9886098860", "email": "buyer@example.com" }
+            },
+            "order_details": {
+              "id": "{{ORDER_ID}}",
+              "state": "Completed",
+              "items": [{ "id": "{{ITEM_ID}}", "quantity": 1 }],
+              "fulfillments": [{ "id": "F1", "state": "Order-delivered" }],
+              "provider_id": "{{PROVIDER_ID}}"
+            },
+            "description": {
+              "short_desc": "Item damaged on delivery",
+              "long_desc": "Received a damaged product. Requesting refund or replacement.",
+              "images": ["https://buyerapp.com/evidence/damage-1.jpg"]
+            },
+            "source": {
+              "network_participant_id": "{{BAP_ID}}",
+              "type": "CONSUMER"
+            },
+            "expected_response_time": { "duration": "PT2H" },
+            "expected_resolution_time": { "duration": "P1D" },
+            "status": "OPEN",
+            "issue_type": "ISSUE",
+            "issue_actions": {
+              "complainant_actions": [
+                {
+                  "complainant_action": "OPEN",
+                  "short_desc": "Opened issue",
+                  "updated_at": "{{TIMESTAMP}}",
+                  "updated_by": {
+                    "org": { "name": "Test Buyer App" },
+                    "contact": { "phone": "9886098860", "email": "buyer@example.com" },
+                    "person": { "name": "Test Buyer" }
+                  }
+                }
+              ]
+            },
+            "created_at": "{{TIMESTAMP}}",
+            "updated_at": "{{TIMESTAMP}}"
+          }
+        }
+      }
+    },
+    {
+      "step": 2,
+      "name": "Seller requests more info (GET_INFO)",
+      "type": "seller_action",
+      "kind": "info_request",
+      "message": "Please share clear photos of the damaged item and the packaging.",
+      "expects": {
+        "ticket_display_status": "PROCESSING",
+        "last_seller_action": "INFO_REQUESTED",
+        "outbound_callbacks": ["on_issue"]
+      }
+    },
+    {
+      "step": 3,
+      "name": "Buyer provides info (INFO_PROVIDED)",
+      "type": "inbound_issue",
+      "action": "issue",
+      "endpoint": "/api/v1/ondc/issue?insecure=1",
+      "expects": {
+        "outbound_callbacks": ["on_issue"]
+      },
+      "body": {
+        "context": {
+          "domain": "{{DOMAIN}}",
+          "action": "issue",
+          "country": "IND",
+          "city": "{{CITY}}",
+          "core_version": "{{CORE_VERSION}}",
+          "bap_id": "{{BAP_ID}}",
+          "bap_uri": "{{BAP_URI}}",
+          "bpp_id": "{{BPP_ID}}",
+          "bpp_uri": "{{BPP_URI}}",
+          "transaction_id": "{{TXN_ID}}",
+          "message_id": "igm-msg-002",
+          "timestamp": "{{TIMESTAMP}}",
+          "ttl": "PT30S"
+        },
+        "message": {
+          "issue": {
+            "id": "{{ISSUE_ID}}",
+            "complainant_info": {
+              "person": { "name": "Test Buyer" },
+              "contact": { "phone": "9886098860", "email": "buyer@example.com" }
+            },
+            "issue_actions": {
+              "complainant_actions": [
+                {
+                  "complainant_action": "INFO_PROVIDED",
+                  "short_desc": "Attached damage photos",
+                  "updated_at": "{{TIMESTAMP}}",
+                  "images": ["https://buyerapp.com/evidence/damage-2.jpg"],
+                  "additional_desc": {
+                    "url": "https://buyerapp.com/evidence/packaging.pdf",
+                    "content_type": "application/pdf"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": 4,
+      "name": "Seller proposes resolution (RESOLUTION_PROPOSED)",
+      "type": "seller_action",
+      "kind": "resolution_options",
+      "message": "We can offer a full refund or replacement. Please choose.",
+      "expects": {
+        "last_seller_action": "RESOLUTION_PROPOSED",
+        "outbound_callbacks": ["on_issue"]
+      }
+    },
+    {
+      "step": 5,
+      "name": "Buyer accepts resolution (RESOLUTION_ACCEPTED)",
+      "type": "inbound_issue",
+      "action": "issue",
+      "endpoint": "/api/v1/ondc/issue?insecure=1",
+      "body": {
+        "context": {
+          "domain": "{{DOMAIN}}",
+          "action": "issue",
+          "country": "IND",
+          "city": "{{CITY}}",
+          "core_version": "{{CORE_VERSION}}",
+          "bap_id": "{{BAP_ID}}",
+          "bap_uri": "{{BAP_URI}}",
+          "bpp_id": "{{BPP_ID}}",
+          "bpp_uri": "{{BPP_URI}}",
+          "transaction_id": "{{TXN_ID}}",
+          "message_id": "igm-msg-003",
+          "timestamp": "{{TIMESTAMP}}",
+          "ttl": "PT30S"
+        },
+        "message": {
+          "issue": {
+            "id": "{{ISSUE_ID}}",
+            "complainant_info": {
+              "person": { "name": "Test Buyer" }
+            },
+            "issue_actions": {
+              "complainant_actions": [
+                {
+                  "complainant_action": "RESOLUTION_ACCEPTED",
+                  "short_desc": "Accepted refund option",
+                  "updated_at": "{{TIMESTAMP}}"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": 6,
+      "name": "Seller resolves issue (RESOLVED)",
+      "type": "seller_action",
+      "kind": "resolve",
+      "resolution_note": "Refund of INR 500 initiated. Issue resolved.",
+      "expects": {
+        "ticket_display_status": "RESOLVED",
+        "last_seller_action": "RESOLVED",
+        "outbound_callbacks": ["on_issue"]
+      }
+    },
+    {
+      "step": 7,
+      "name": "Buyer polls status (issue_status)",
+      "type": "inbound_issue_status",
+      "action": "issue_status",
+      "endpoint": "/api/v1/ondc/issue_status?insecure=1",
+      "expects": {
+        "outbound_callbacks": ["on_issue_status"]
+      },
+      "body": {
+        "context": {
+          "domain": "{{DOMAIN}}",
+          "action": "issue_status",
+          "country": "IND",
+          "city": "{{CITY}}",
+          "core_version": "{{CORE_VERSION}}",
+          "bap_id": "{{BAP_ID}}",
+          "bap_uri": "{{BAP_URI}}",
+          "bpp_id": "{{BPP_ID}}",
+          "bpp_uri": "{{BPP_URI}}",
+          "transaction_id": "{{TXN_ID}}",
+          "message_id": "igm-msg-004",
+          "timestamp": "{{TIMESTAMP}}",
+          "ttl": "PT30S"
+        },
+        "message": {
+          "issue_id": "{{ISSUE_ID}}"
+        }
+      }
+    },
+    {
+      "step": 8,
+      "name": "Buyer closes issue (CLOSE)",
+      "type": "inbound_issue",
+      "action": "issue",
+      "endpoint": "/api/v1/ondc/issue?insecure=1",
+      "expects": {
+        "ticket_display_status": "CLOSED"
+      },
+      "body": {
+        "context": {
+          "domain": "{{DOMAIN}}",
+          "action": "issue",
+          "country": "IND",
+          "city": "{{CITY}}",
+          "core_version": "{{CORE_VERSION}}",
+          "bap_id": "{{BAP_ID}}",
+          "bap_uri": "{{BAP_URI}}",
+          "bpp_id": "{{BPP_ID}}",
+          "bpp_uri": "{{BPP_URI}}",
+          "transaction_id": "{{TXN_ID}}",
+          "message_id": "igm-msg-005",
+          "timestamp": "{{TIMESTAMP}}",
+          "ttl": "PT30S"
+        },
+        "message": {
+          "issue": {
+            "id": "{{ISSUE_ID}}",
+            "complainant_info": {
+              "person": { "name": "Test Buyer" }
+            },
+            "issue_actions": {
+              "complainant_actions": [
+                {
+                  "complainant_action": "CLOSE",
+                  "short_desc": "Closing issue — satisfied with resolution",
+                  "updated_at": "{{TIMESTAMP}}"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
+}

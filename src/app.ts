@@ -109,6 +109,7 @@ export function createApp(): Application {
     'track',
     'rating',
     'issue',
+    'issue_status',
     'on_search',
     'on_select',
     'on_init',
@@ -119,6 +120,7 @@ export function createApp(): Application {
     'on_track',
     'on_rating',
     'on_issue',
+    'on_issue_status',
   ]);
   app.use((req, _res, next) => {
     const action = req.path.replace(/^\//, '').split('/')[0] ?? '';
