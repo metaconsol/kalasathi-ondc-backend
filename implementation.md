@@ -1,3 +1,30 @@
+### Branch 024
+
+**Date:** 2026-07-01
+
+**Status:** Completed
+
+**Area:** ONDC Flow 4A & 4B (Buyer Initiated Returns)
+
+**What:**
+
+Updated the fulfillment return actions (Return Approved, Picked, Delivered) to send an unsolicited `/on_update` payload with Order State "Completed" instead of sending an `/on_status` payload.
+
+**Why:**
+
+The Pramaan BAP expects return lifecycle updates to be sent as `/on_update` requests and requires the main order state to remain "Completed". Previously, the system was sending `/on_status` and mapping the order state to "Returned", which caused the Pramaan test progress ring to stop at 25%.
+
+**Changes:** file name and description of file change:
+
+- `src/ondc/flows/flow4A.service.ts`
+  Added a new `pushOnUpdate` method to properly build and send unsolicited `/on_update` payloads containing the updated fulfillment states.
+
+- `src/ondc/services/fulfillment.service.ts`
+  Changed the return lifecycle methods (`markReturnInitiated`, `markReturnApproved`, `markReturnPicked`, and `markReturnDelivered`) to use the new `flow4AService.pushOnUpdate` method instead of the generic `flow1AService.pushOnStatus`.
+
+- `src/ondc/adapters/order.adapter.ts`
+  Updated the `mapDbStatusToBeckn` function so that a `RETURNED` database status maps to the `"Completed"` Order State in the ONDC payload, adhering to the Flow 4A/4B spec.
+
 ### Branch 023
 
 **Date:** 2026-06-30

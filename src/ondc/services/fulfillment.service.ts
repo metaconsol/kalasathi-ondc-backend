@@ -11,6 +11,7 @@ import { ondcLogger } from '~/ondc/utils/logger.util';
 import type { OndcFulfillmentState } from '~/ondc/types/order.types';
 import { flow1AService } from '~/ondc/flows/flow1A.service';
 import { flow3CService } from '~/ondc/flows/flow3C.service';
+import { flow4AService } from '~/ondc/flows/flow4A.service';
 
 export const fulfillmentService = {
   /** Mark an order as packed */
@@ -150,7 +151,7 @@ export const fulfillmentService = {
       'Return initiated',
     );
     ondcLogger.info('Return initiated', { ondcOrderId });
-    await flow1AService.pushOnStatus(ondcOrderId, 'Return_Initiated');
+    await flow4AService.pushOnUpdate(ondcOrderId, 'Return_Initiated');
   },
 
   /** Mark return initiated */
@@ -166,7 +167,7 @@ export const fulfillmentService = {
       'Return initiated',
     );
     ondcLogger.info('Return initiated', { ondcOrderId });
-    await flow1AService.pushOnStatus(ondcOrderId, 'Return_Initiated');
+    await flow4AService.pushOnUpdate(ondcOrderId, 'Return_Initiated');
   },
 
   /** Mark return approved */
@@ -182,7 +183,7 @@ export const fulfillmentService = {
       'Return approved',
     );
     ondcLogger.info('Return approved', { ondcOrderId });
-    await flow1AService.pushOnStatus(ondcOrderId, 'Return_Approved');
+    await flow4AService.pushOnUpdate(ondcOrderId, 'Return_Approved');
   },
 
   /** Mark return picked */
@@ -198,7 +199,7 @@ export const fulfillmentService = {
       'Return picked',
     );
     ondcLogger.info('Return picked', { ondcOrderId });
-    await flow1AService.pushOnStatus(ondcOrderId, 'Return_Picked');
+    await flow4AService.pushOnUpdate(ondcOrderId, 'Return_Picked');
   },
 
   /** Mark return delivered */
@@ -214,7 +215,7 @@ export const fulfillmentService = {
       'Return delivered',
     );
     ondcLogger.info('Return delivered', { ondcOrderId });
-    await flow1AService.pushOnStatus(ondcOrderId, 'Return_Delivered');
+    await flow4AService.pushOnUpdate(ondcOrderId, 'Return_Delivered');
   },
 
   /** Get current fulfillment state for an order */

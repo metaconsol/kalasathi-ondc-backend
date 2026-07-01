@@ -38,7 +38,7 @@ function mapDbStatusToBeckn(status: DbOrderStatus): BecknOrderStatus {
     ORDER_PICKED_UP: 'In-progress',
     OUT_FOR_DELIVERY: 'In-progress',
     DELIVERED: 'Completed',
-    RETURNED: 'Returned',
+    RETURNED: 'Completed', // ONDC Flow 4A expects Order State 'Completed' during return lifecycle
     CANCELLED: 'Cancelled',
   };
   return map[status] ?? 'In-progress';
