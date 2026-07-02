@@ -1,3 +1,34 @@
+### Branch 028
+
+Date:
+2 July 2026
+
+Status:
+Completed
+
+Area:
+ONDC Backend - BAP Terms
+
+What:
+Added backend support for a BAP Terms admin listing flow. The backend now exposes a dedicated admin API to read stored BAP terms from the database with filters for `bap_id`, `bap_uri`, and `transaction_id`. The BAP term extraction logic was also improved so `/search` payload tags are stored correctly even when tag codes come in alternate Beckn formats.
+
+Why:
+The ONDC admin dashboard needed backend support to verify whether BAP terms are actually being extracted from incoming `/search` payloads, saved in the database, and made available for monitoring. This was required so the UI could show only database-backed BAP term data without disturbing any existing ONDC order, ticket, or settlement flows.
+
+Changes:
+
+- `src/ondc/models/bap_terms.model.ts`:
+  Added filtered list support for BAP terms using `bap_id`, `bap_uri`, and `transaction_id`. Improved the extraction helper so it can read term fields from both `tag.code` and `tag.descriptor.code` payload formats. Kept finder-fee extraction from both `intent.tags` and `intent.payment`.
+
+- `src/ondc/controllers/admin/bap_terms.controller.ts`:
+  Added a new admin controller to fetch BAP terms from the `bap_terms` table and shape the response for dashboard consumption. The API returns `transaction_id` from the stored `unique_uid` column along with term fields and timestamps.
+
+- `src/ondc/routes/admin.route.ts`:
+  Added the new admin route for BAP terms listing so the ONDC admin dashboard can fetch the stored records from the backend.
+
+- `src/ondc/controllers/beckn/search.controller.ts`:
+  Continued using the existing `/search` processing path to upsert BAP terms into the database from incoming Beckn payloads. This remains the main backend source for storing BAP terms.
+
 ### Branch 027
 
 **Date:** 2026-07-02

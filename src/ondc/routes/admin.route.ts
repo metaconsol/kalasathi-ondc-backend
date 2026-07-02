@@ -17,6 +17,7 @@ import {
   getProvider,
   toggleProvider,
 } from '~/ondc/controllers/admin/providers.controller';
+import { listBapTerms } from '~/ondc/controllers/admin/bap_terms.controller';
 import {
   listLogs,
   getLogsByTransaction,
@@ -69,6 +70,7 @@ router.post('/orders/:orderId/fulfillment', ...sellerGuard, updateFulfillment);
 router.get('/providers', ...adminGuard, listProviders);
 router.get('/providers/:providerId', ...adminGuard, getProvider);
 router.patch('/providers/:providerId/toggle', ...adminGuard, toggleProvider);
+router.get('/bap-terms', ...adminGuard, listBapTerms);
 
 // ---- PPF (Payment Protection Framework) ----
 router.get('/ppf', ...sellerGuard, listPpfRecon);
