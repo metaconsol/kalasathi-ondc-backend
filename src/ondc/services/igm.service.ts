@@ -108,9 +108,9 @@ async function pushOnIssue(
   const ctxBase = {
     domain: row.domain || 'ONDC:RET12',
     country: row.country || 'IND',
-    city: row.city || '*',
+    city: row.city || 'std:0755',
     action: 'on_issue' as const,
-    core_version: row.core_version || '1.2.0',
+    core_version: row.core_version || '1.2.5',
     bap_id: row.bap_id || '',
     bap_uri: row.bap_uri || '',
     bpp_id: '',
@@ -193,12 +193,7 @@ async function handleIgmV2Issue(
     if (!issueState['updated_at']) issueState['updated_at'] = issueState['created_at'];
     if (!issueState['level']) issueState['level'] = 'ISSUE';
 
-    const sellerActorId = ensureSellerActor(issueState, domain);
-    appendIgmV2Action(issueState, {
-      code: 'PROCESSING',
-      short_desc: 'Complaint is being processed',
-      action_by: sellerActorId,
-    });
+    ensureSellerActor(issueState, domain);
 
     const openMsg: TicketMessage = {
       id: randomUUID(),
@@ -219,7 +214,7 @@ async function handleIgmV2Issue(
       order_id: orderIdFromRefs(issueState) ?? issue['order_details']?.['id'] ?? null,
       provider_id: providerIdFromRefs(issueState),
       domain,
-      display_status: 'PROCESSING',
+      display_status: 'OPEN',
       customer_name: complainant?.person?.name ?? null,
       customer_phone: complainant?.contact?.phone ?? null,
       customer_email: complainant?.contact?.email ?? null,
@@ -228,8 +223,8 @@ async function handleIgmV2Issue(
       bpp_id: context.bpp_id ?? ondcEnv.subscriberId,
       bpp_uri: context.bpp_uri ?? null,
       country: context.country ?? 'IND',
-      city: context.city ?? null,
-      core_version: context.core_version ?? '2.0.0',
+      city: context.city ?? 'std:0755',
+      core_version: context.core_version ?? '1.2.5',
       ttl: context.ttl ?? null,
       descriptor_json: JSON.stringify(descriptor),
       descriptor_attachments_json: JSON.stringify({ images, attachments }),
@@ -241,15 +236,9 @@ async function handleIgmV2Issue(
     });
     row = await customerTicketModel.findByTicketId(issueId);
     if (row) {
-      const procAction = (issueState['actions'] as any[]).at(-1);
-      await customerTicketModel.appendMessage(
-        { id: row.id },
-        chatFromIgmAction(procAction, 'SELLER', SELLER_PROFILE.BRAND_NAME || 'Support'),
-        { displayStatus: 'PROCESSING', igmStatusRaw: 'PROCESSING' },
-      );
       await customerTicketModel.saveIgmIssueState(row.id, issueState, {
-        displayStatus: 'PROCESSING',
-        igmStatusRaw: 'PROCESSING',
+        displayStatus: 'OPEN',
+        igmStatusRaw: 'OPEN',
       });
     }
   } else {
@@ -259,6 +248,9 @@ async function handleIgmV2Issue(
     const sellerActorId = ensureSellerActor(merged, domain);
     const prevLen = (stored['actions'] as any[])?.length ?? 0;
     const newActions = (merged['actions'] as any[]).slice(prevLen);
+    // Flow 6F only: the escalation branch is entered only when the buyer app
+    // explicitly appends an ESCALATED action to the issue timeline.
+    const escalationReceived = newActions.some((action) => action.descriptor?.code === 'ESCALATED');
 
     for (const action of newActions) {
       const isSeller = action.action_by === sellerActorId;
@@ -271,11 +263,37 @@ async function handleIgmV2Issue(
       );
     }
 
-    const lastCode = newActions.at(-1)?.descriptor?.code;
+    let autoProcessingAction: any | null = null;
+    if (escalationReceived) {
+      const resolverIds = new Set<string>(merged['resolver_ids'] ?? []);
+      resolverIds.add(sellerActorId);
+      merged['resolver_ids'] = [...resolverIds];
+      const actorName = SELLER_PROFILE.SUPPORT_NAME || SELLER_PROFILE.BRAND_NAME || 'Support';
+      appendIgmV2Action(merged, {
+        code: 'PROCESSING',
+        short_desc: 'Escalation received and being reviewed by GRO',
+        action_by: sellerActorId,
+        actor_name: actorName,
+      });
+      autoProcessingAction = (merged['actions'] as any[]).at(-1) ?? null;
+      if (autoProcessingAction) {
+        await customerTicketModel.appendMessage(
+          { id: row.id },
+          chatFromIgmAction(autoProcessingAction, 'SELLER', actorName),
+        );
+      }
+    }
+
+    const lastCode = autoProcessingAction?.descriptor?.code ?? newActions.at(-1)?.descriptor?.code;
     let status = row.display_status;
     if (lastCode === 'CLOSED') status = 'CLOSED';
     else if (lastCode === 'RESOLVED') status = 'RESOLVED';
-    else if (lastCode === 'INFO_PROVIDED' || lastCode === 'RESOLUTION_ACCEPTED')
+    else if (
+      lastCode === 'INFO_PROVIDED' ||
+      lastCode === 'RESOLUTION_ACCEPTED' ||
+      lastCode === 'PROCESSING' ||
+      lastCode === 'ESCALATED'
+    )
       status = 'PROCESSING';
 
     const acceptedCode = resolutionCodeFromAcceptedAction(merged);
@@ -335,8 +353,8 @@ async function handleIgmV1Issue(
       bpp_id: context.bpp_id ?? null,
       bpp_uri: context.bpp_uri ?? null,
       country: context.country ?? 'IND',
-      city: context.city ?? null,
-      core_version: context.core_version ?? null,
+      city: context.city ?? 'std:0755',
+      core_version: context.core_version ?? '1.2.5',
       ttl: context.ttl ?? null,
       descriptor_json: JSON.stringify(desc),
       descriptor_attachments_json: JSON.stringify({ images, attachments }),
