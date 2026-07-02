@@ -14,6 +14,12 @@ export interface BapTermsRow {
   updated_at: Date;
 }
 
+export interface BapTermsListFilters {
+  bap_id?: string;
+  bap_uri?: string;
+  transaction_id?: string;
+}
+
 export const bapTermsModel = {
   async upsert(data: Omit<BapTermsRow, 'id' | 'created_at' | 'updated_at'>): Promise<void> {
     await ondcExec(
@@ -44,8 +50,28 @@ export const bapTermsModel = {
     return rows[0] ?? null;
   },
 
-  async list(): Promise<BapTermsRow[]> {
-    return ondcQuery<BapTermsRow>(`SELECT * FROM bap_terms ORDER BY updated_at DESC`);
+  async list(filters: BapTermsListFilters = {}): Promise<BapTermsRow[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+
+    if (filters.bap_id?.trim()) {
+      where.push('bap_id LIKE ?');
+      params.push(`%${filters.bap_id.trim()}%`);
+    }
+    if (filters.bap_uri?.trim()) {
+      where.push('bap_uri LIKE ?');
+      params.push(`%${filters.bap_uri.trim()}%`);
+    }
+    if (filters.transaction_id?.trim()) {
+      where.push('unique_uid LIKE ?');
+      params.push(`%${filters.transaction_id.trim()}%`);
+    }
+
+    const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    return ondcQuery<BapTermsRow>(
+      `SELECT * FROM bap_terms ${clause} ORDER BY updated_at DESC, id DESC`,
+      params,
+    );
   },
 };
 
@@ -65,7 +91,7 @@ export function extractBapTerms(
   for (const tagGroup of tags) {
     const list: any[] = Array.isArray(tagGroup?.list) ? tagGroup.list : [];
     for (const tag of list) {
-      const code = String(tag?.code ?? '');
+      const code = String(tag?.code ?? tag?.descriptor?.code ?? '');
       const value = String(tag?.value ?? '');
       if (code === 'static_terms' && value) staticTerms = value;
       if (code === 'static_terms_new' && value) staticTermsNew = value;
