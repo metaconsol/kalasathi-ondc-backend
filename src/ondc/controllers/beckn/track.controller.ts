@@ -19,76 +19,90 @@ export async function handleTrack(req: Request, res: Response): Promise<void> {
     message: { order_id: string };
   };
 
-  res.status(200).json(buildAck(ctx));
+  // context.* fields are already validated globally in ondcValidator.middleware.ts
+  // We only need to validate the endpoint-specific mandatory fields here
+  if (!message?.order_id) {
+    return res.status(200).json(
+      buildAck(ctx || ({} as BecknContext), {
+        type: 'CONTEXT-ERROR', // or JSON-SCHEMA-ERROR
+        code: '20000',
+        path: 'message.order_id',
+        message: 'Missing required field: message.order_id',
+      }),
+    );
+  }
 
-  setImmediate(async () => {
-    const txnId = ctx.transaction_id;
-    const bapUri = String(ctx.bap_uri ?? '');
-    const orderId = String(message?.order_id ?? '');
+  const txnId = ctx.transaction_id;
+  const bapUri = String(ctx.bap_uri ?? '');
+  const orderId = String(message.order_id);
 
-    try {
-      // Inbound request is logged centrally by ondcRequestLogger middleware.
-      const dbOrder =
-        (await orderModel.findByOndcOrderId(orderId)) ??
-        (await orderModel.findByTransactionId(txnId));
+  try {
+    // Inbound request is logged centrally by ondcRequestLogger middleware.
+    const dbOrder =
+      (await orderModel.findByOndcOrderId(orderId)) ??
+      (await orderModel.findByTransactionId(txnId));
 
-      const fulfillments = dbOrder ? await orderModel.getFulfillments(dbOrder.ondc_order_id) : [];
-      const primaryFulfillment = fulfillments[0];
-      const trackingUrl = primaryFulfillment?.tracking_url ?? null;
+    const fulfillments = dbOrder ? await orderModel.getFulfillments(dbOrder.ondc_order_id) : [];
+    const primaryFulfillment = fulfillments[0];
+    const trackingUrl = primaryFulfillment?.tracking_url ?? null;
 
-      let payload: any;
-      let actionName = 'on_track';
-      let isNack = false;
+    if (!trackingUrl) {
+      // If tracking is disabled/not available, send NACK synchronously
+      return res.status(200).json(
+        buildAck(ctx, {
+          type: 'CONTEXT-ERROR',
+          code: '40003',
+          message: 'Tracking is not available for this order',
+        }),
+      );
+    }
 
-      if (!trackingUrl) {
-        isNack = true;
-        actionName = 'on_track'; // Still sent to /on_track endpoint, but structured with context action on_track + error object
-        payload = {
-          context: buildResponseContext(ctx, 'on_track'),
-          error: {
-            type: 'CONTEXT-ERROR',
-            code: '30016', // ONDC standard code for tracking details not available
-            message: 'Tracking not available',
-          },
-        };
-      } else {
+    // Tracking is available, send sync ACK
+    res.status(200).json(buildAck(ctx));
+
+    // Process the async /on_track callback
+    setImmediate(async () => {
+      try {
         const tracking = {
           id: `TRK-${orderId}`,
           url: trackingUrl,
           status: 'active',
         };
-        payload = buildOnTrack(ctx, tracking);
+        const payload = buildOnTrack(ctx, tracking);
+
+        await overallTxnsModel.patch(txnId, {
+          on_track: 1,
+          track_link: trackingUrl,
+        });
+
+        const { statusCode, error: cbErr } = await becknService.sendCallback(
+          becknService.buildCallbackUrl(bapUri, 'on_track'),
+          'on_track',
+          payload,
+          txnId,
+        );
+
+        await txnLogModel.insert({
+          transaction_id: txnId,
+          message_id: payload.context.message_id,
+          action: 'on_track',
+          direction: 'outbound',
+          bap_id: ctx.bap_id,
+          bpp_id: payload.context.bpp_id ?? null,
+          domain: ctx.domain,
+          http_status: statusCode ?? null,
+          ack_status: statusCode && statusCode < 300 ? 'ACK' : 'NACK',
+          payload_json: JSON.stringify(payload),
+          error_message: cbErr ?? null,
+        });
+
+        observabilityService.push('on_track', payload);
+      } catch (err) {
+        ondcLogger.error('track async error', { txnId, err });
       }
-
-      await overallTxnsModel.patch(txnId, {
-        on_track: 1,
-        track_link: trackingUrl ?? null,
-      });
-
-      const { statusCode, error: cbErr } = await becknService.sendCallback(
-        becknService.buildCallbackUrl(bapUri, 'on_track'),
-        'on_track',
-        payload,
-        txnId,
-      );
-
-      await txnLogModel.insert({
-        transaction_id: txnId,
-        message_id: payload.context.message_id,
-        action: 'on_track',
-        direction: 'outbound',
-        bap_id: ctx.bap_id,
-        bpp_id: payload.context.bpp_id ?? null,
-        domain: ctx.domain,
-        http_status: statusCode ?? null,
-        ack_status: isNack ? 'NACK' : statusCode && statusCode < 300 ? 'ACK' : 'NACK',
-        payload_json: JSON.stringify(payload),
-        error_message: isNack ? 'Tracking not available' : (cbErr ?? null),
-      });
-
-      observabilityService.push('on_track', payload);
-    } catch (err) {
-      ondcLogger.error('track async error', { txnId, err });
-    }
-  });
+    });
+  } catch (err) {
+    ondcLogger.error('track sync error', { txnId, err });
+    res.status(500).json(buildAck(ctx, { type: 'SYSERR', code: '500', message: 'Internal error' }));
+  }
 }

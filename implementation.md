@@ -1,3 +1,45 @@
+### Branch 027
+
+**Date:** 2026-07-02
+
+**Status:** Completed
+
+**Area:** ONDC Mandatory Field Validation (Track API)
+
+**What:**
+
+Added endpoint-specific mandatory field validation for `message.order_id` in the `/track` API, while confirming that global ONDC `context` fields are already validated across all APIs via existing middleware.
+
+**Why:**
+
+If a BAP sends a request missing a mandatory payload field, the ONDC protocol expects an immediate synchronous `NACK` response detailing exactly which field is missing. Since `context` fields (like `domain`, `bap_id`, etc.) are covered globally by `ondcValidator.middleware.ts` for all APIs, we only needed to add validation for `message.order_id` in the track controller to return a specific `CONTEXT-ERROR` (Code `20000`) with the exact `path`.
+
+**Changes:** file name and description of file change:
+
+- `src/ondc/controllers/beckn/track.controller.ts`
+  Added validation at the beginning of `handleTrack` to check if `message.order_id` is present. If missing, it synchronously returns a `NACK` response containing an error object with `type: 'CONTEXT-ERROR'`, `code: '20000'`, `path: 'message.order_id'`, and a descriptive message.
+
+### Branch 025
+
+**Date:** 2026-07-02
+
+**Status:** Completed
+
+**Area:** ONDC Flow 1A (Tracking API Sync Response)
+
+**What:**
+
+Updated the `/track` API to return a synchronous NACK when tracking is disabled or not available (`tracking=false`), instead of sending an async `/on_track` with an error.
+
+**Why:**
+
+When `tracking=false`, the Pramaan test platform expects an immediate NACK in the synchronous response to `/track` to properly mark the step as completed without waiting for an `on_track` callback. The previous implementation sent a sync ACK and then an async `/on_track` error, which caused testing logs to fail to capture the NACK properly.
+
+**Changes:** file name and description of file change:
+
+- `src/ondc/controllers/beckn/track.controller.ts`
+  Modified `handleTrack` to immediately fetch the order and check `trackingUrl`. If `trackingUrl` is absent, it synchronously responds with `status: "NACK"` and the standard `CONTEXT-ERROR` payload (`40003: Tracking is not available for this order`). It also stops execution so no async `/on_track` webhook is fired.
+
 ### Branch 024
 
 **Date:** 2026-07-01
