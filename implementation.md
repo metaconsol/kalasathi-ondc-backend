@@ -1,3 +1,88 @@
+### Branch 027
+
+**Date:** 2026-07-02
+
+**Status:** Completed
+
+**Area:** ONDC Mandatory Field Validation (Track API)
+
+**What:**
+
+Added endpoint-specific mandatory field validation for `message.order_id` in the `/track` API, while confirming that global ONDC `context` fields are already validated across all APIs via existing middleware.
+
+**Why:**
+
+If a BAP sends a request missing a mandatory payload field, the ONDC protocol expects an immediate synchronous `NACK` response detailing exactly which field is missing. Since `context` fields (like `domain`, `bap_id`, etc.) are covered globally by `ondcValidator.middleware.ts` for all APIs, we only needed to add validation for `message.order_id` in the track controller to return a specific `CONTEXT-ERROR` (Code `20000`) with the exact `path`.
+
+**Changes:** file name and description of file change:
+
+- `src/ondc/controllers/beckn/track.controller.ts`
+  Added validation at the beginning of `handleTrack` to check if `message.order_id` is present. If missing, it synchronously returns a `NACK` response containing an error object with `type: 'CONTEXT-ERROR'`, `code: '20000'`, `path: 'message.order_id'`, and a descriptive message.
+
+## BRANCH-026
+
+**Date:** 2026-07-02
+
+**Status:** Completed
+
+**Area:** ONDC IGM flow correction for normal issue flow and Flow 6F escalation flow
+
+**What:**
+
+- Corrected the IGM action order so the first buyer `/issue` starts as `OPEN` instead of auto-injecting seller `PROCESSING`.
+- Added explicit Flow `6F` escalation handling so the escalation branch starts only when buyer sends `ESCALATED`.
+- Updated merged IGM issue state handling so escalation clears stale accepted-resolution state and allows a fresh second resolution proposal.
+- Added fixture-path support in the local IGM runner so different IGM sample flows can be tested from separate fixture files.
+- Added ONDC action routing support for `on_receiver_recon` in the top-level app path rewriter.
+
+**Why:**
+
+- The existing IGM sequence was not matching the intended business flow because seller `PROCESSING` was being added too early on the very first buyer action.
+- Flow `6F` escalation needs a separate branch from the normal refund/replacement flow: buyer raises issue, seller processes, seller proposes resolution, buyer escalates, seller/GRO processes, seller proposes resolution again, buyer accepts, seller resolves, buyer closes.
+- Once buyer escalates after an earlier proposal/acceptance cycle, the old selected-resolution state should not continue to drive the next proposal cycle.
+- Local testing needed a cleaner way to switch between normal IGM and escalation-specific transaction fixtures without editing the runner every time.
+
+**Changes:**
+
+- `src/ondc/services/igm.service.ts`
+  - Removed automatic seller `PROCESSING` action insertion on the first inbound IGM v2 issue.
+  - Changed first ticket persistence from `PROCESSING` to `OPEN` so buyer `OPEN` is the true starting state.
+  - Added Flow `6F` escalation handling when inbound buyer actions contain `ESCALATED`.
+  - Auto-appended seller/GRO `PROCESSING` only inside the escalation branch.
+  - Updated IGM defaults for `city` and `core_version` fallback values used in callbacks and stored rows.
+
+- `src/ondc/utils/igm.builder.ts`
+  - Updated merged issue-status derivation for `ESCALATED`, `RESOLUTION_ACCEPTED`, `RESOLVED`, and `CLOSED`.
+  - Added logic to ignore an older accepted resolution once a later `ESCALATED` action exists.
+  - Prevented stale accepted resolution id/code/label from leaking into the second escalation-side resolution cycle.
+
+- `src/ondc/test-igm.ts`
+  - Added `--fixture` and `IGM_TEST_FIXTURE` support so local IGM test runs can load different sample transaction files.
+
+- `src/app.ts`
+  - Added `on_receiver_recon` to the Beckn action routing set so that direct action-path requests are rewritten under `/api/v1/ondc`.
+
+### Branch 025
+
+**Date:** 2026-07-02
+
+**Status:** Completed
+
+**Area:** ONDC Flow 1A (Tracking API Sync Response)
+
+**What:**
+
+Updated the `/track` API to return a synchronous NACK when tracking is disabled or not available (`tracking=false`), instead of sending an async `/on_track` with an error.
+
+**Why:**
+
+When `tracking=false`, the Pramaan test platform expects an immediate NACK in the synchronous response to `/track` to properly mark the step as completed without waiting for an `on_track` callback. The previous implementation sent a sync ACK and then an async `/on_track` error, which caused testing logs to fail to capture the NACK properly.
+
+**Changes:** file name and description of file change:
+
+- `src/ondc/controllers/beckn/track.controller.ts`
+  Modified `handleTrack` to immediately fetch the order and check `trackingUrl`. If `trackingUrl` is absent, it synchronously responds with `status: "NACK"` and the standard `CONTEXT-ERROR` payload (`40003: Tracking is not available for this order`). It also stops execution so no async `/on_track` webhook is fired.
+
 ### Branch 024
 
 **Date:** 2026-07-01

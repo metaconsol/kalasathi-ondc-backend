@@ -110,6 +110,7 @@ export function createApp(): Application {
     'rating',
     'issue',
     'issue_status',
+    'on_receiver_recon',
     'on_search',
     'on_select',
     'on_init',

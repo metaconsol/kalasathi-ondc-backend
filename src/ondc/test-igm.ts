@@ -2,9 +2,10 @@
  * IGM flow test — runs the full txn sequence from fixtures/igm-txn-flow.json.
  *
  * Usage:
- *   npx tsx src/ondc/test-igm.ts              # in-process (mocks outbound callbacks)
- *   npx tsx src/ondc/test-igm.ts --http       # POST to running server (npm run dev)
- *   npx tsx src/ondc/test-igm.ts --cleanup      # delete test ticket after run
+ *   npx tsx src/ondc/test-igm.ts                              # in-process (default fixture)
+ *   npx tsx src/ondc/test-igm.ts --http                       # POST to running server
+ *   npx tsx src/ondc/test-igm.ts --fixture src/ondc/fixtures/igm-6f-escalation-flow.json
+ *   npx tsx src/ondc/test-igm.ts --cleanup
  *
  * Env: ONDC_DB_URL required. Optional ORDER_ID / PROVIDER_ID override DB lookup.
  * Outbound payloads logged to logs/ondc/igm-test.log
@@ -22,7 +23,6 @@ import { becknService } from '~/ondc/services/beckn.service';
 import type { BecknContext } from '~/ondc/types/beckn.types';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const FIXTURE_PATH = path.join(__dirname, 'fixtures', 'igm-txn-flow.json');
 const LOG_PATH = path.join(process.cwd(), 'logs', 'ondc', 'igm-test.log');
 
 type FlowStep =
@@ -66,8 +66,17 @@ function deepReplace(value: unknown, vars: Record<string, string>): unknown {
   return value;
 }
 
+function resolveFixturePath(): string {
+  const argv = process.argv.slice(2);
+  const fixtureArgIndex = argv.findIndex((arg) => arg === '--fixture');
+  const fixtureArg = fixtureArgIndex >= 0 ? argv[fixtureArgIndex + 1] : undefined;
+  const fromEnv = process.env['IGM_TEST_FIXTURE'];
+  const chosen = fixtureArg ?? fromEnv ?? path.join('src', 'ondc', 'fixtures', 'igm-txn-flow.json');
+  return path.isAbsolute(chosen) ? chosen : path.join(process.cwd(), chosen);
+}
+
 async function loadFixture(): Promise<FlowFixture> {
-  const raw = await readFile(FIXTURE_PATH, 'utf8');
+  const raw = await readFile(resolveFixturePath(), 'utf8');
   return JSON.parse(raw) as FlowFixture;
 }
 

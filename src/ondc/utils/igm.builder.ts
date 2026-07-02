@@ -142,15 +142,46 @@ export function mergeInboundIgmIssue(stored: IgmIssue, inbound: IgmIssue): IgmIs
   if (inbound['last_action_id']) merged['last_action_id'] = inbound['last_action_id'];
   if (inbound['status']) merged['status'] = inbound['status'];
   if (inbound['resolutions']) merged['resolutions'] = inbound['resolutions'];
+  const latestInboundCode = newActions.at(-1)?.descriptor?.code;
+  if (latestInboundCode === 'RESOLVED') merged['status'] = 'RESOLVED';
+  else if (latestInboundCode === 'CLOSED' || latestInboundCode === 'CLOSE')
+    merged['status'] = 'CLOSED';
+  else if (
+    latestInboundCode === 'ESCALATED' ||
+    latestInboundCode === 'RESOLUTION_ACCEPTED' ||
+    latestInboundCode === 'INFO_PROVIDED'
+  ) {
+    merged['status'] = 'PROCESSING';
+    if (latestInboundCode === 'ESCALATED') delete merged['resolution'];
+  }
   merged['updated_at'] = inbound['updated_at'] ?? nowIso();
   return merged;
 }
 
+function lastAcceptedAction(issue: IgmIssue): any | null {
+  const actions = (issue['actions'] as any[]) ?? [];
+  for (let i = actions.length - 1; i >= 0; i--) {
+    if (actions[i]?.descriptor?.code === 'RESOLUTION_ACCEPTED') return actions[i];
+  }
+  return null;
+}
+
+function hasEscalationAfterAccepted(
+  issue: IgmIssue,
+  acceptedId: string | null | undefined,
+): boolean {
+  if (!acceptedId) return false;
+  const actions = (issue['actions'] as any[]) ?? [];
+  const acceptedIndex = actions.findIndex((a) => a?.id === acceptedId);
+  if (acceptedIndex < 0) return false;
+  return actions.slice(acceptedIndex + 1).some((a) => a?.descriptor?.code === 'ESCALATED');
+}
+
 /** Find resolution code accepted by buyer (RESOLUTION_ACCEPTED action → resolutions[]). */
 export function resolutionCodeFromAcceptedAction(issue: IgmIssue): string | null {
-  const actions = (issue['actions'] as any[]) ?? [];
-  const accepted = [...actions].reverse().find((a) => a.descriptor?.code === 'RESOLUTION_ACCEPTED');
+  const accepted = lastAcceptedAction(issue);
   if (!accepted?.ref_id) return null;
+  if (hasEscalationAfterAccepted(issue, accepted.id)) return null;
   const resolutions = (issue['resolutions'] as any[]) ?? [];
   const picked = resolutions.find((r) => r.id === accepted.ref_id);
   return picked?.descriptor?.code ?? null;
@@ -162,9 +193,9 @@ export function resolutionPickFromAcceptedAction(issue: IgmIssue): {
   code: string | null;
   label: string | null;
 } {
-  const actions = (issue['actions'] as any[]) ?? [];
-  const accepted = [...actions].reverse().find((a) => a.descriptor?.code === 'RESOLUTION_ACCEPTED');
+  const accepted = lastAcceptedAction(issue);
   if (!accepted) return { id: null, code: null, label: null };
+  if (hasEscalationAfterAccepted(issue, accepted.id)) return { id: null, code: null, label: null };
   const resolutions = (issue['resolutions'] as any[]) ?? [];
   const picked = accepted.ref_id ? resolutions.find((r) => r.id === accepted.ref_id) : null;
   return {
