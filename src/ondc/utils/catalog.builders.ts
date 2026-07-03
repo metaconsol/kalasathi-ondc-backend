@@ -353,6 +353,8 @@ export interface BuildOndcItemInput {
   idCode?: string | undefined;
   /** Manual out-of-stock override (products.force_out_of_stock). */
   outOfStock?: boolean | undefined;
+  /** Item rating on ONDC's 1-5 integer scale. */
+  rating?: string | undefined;
 }
 
 export function buildOndcItem(inp: BuildOndcItemInput): object {
@@ -366,8 +368,7 @@ export function buildOndcItem(inp: BuildOndcItemInput): object {
   return {
     id: inp.ondcItemId,
     time: { label: 'enable', timestamp: ondcTimestamp() },
-    // SNP-maintained item rating; '' when not yet rated.
-    rating: '',
+    rating: inp.rating ?? '4',
     descriptor: {
       name: inp.name,
       ...(inp.idCode ? { code: inp.idCode } : {}),

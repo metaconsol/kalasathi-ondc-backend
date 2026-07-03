@@ -91,6 +91,8 @@ export interface OndcCatalogRow {
   images: string[];
   /** true if this product has any variants in product_variants. Used by item id resolver. */
   has_variants: boolean;
+  /** Persisted item rating normalized to ONDC's 1-5 integer scale. */
+  item_rating: string;
 }
 
 interface ProductBaseRow {
@@ -148,6 +150,11 @@ interface OndcAttrRow {
   attribute_key: string;
   attribute_value: string | null;
   color_name: string | null;
+}
+
+interface ItemRatingRow {
+  rated_id: string;
+  rating_value: number | null;
 }
 
 const PRODUCT_SELECT = `
@@ -237,7 +244,8 @@ export async function fetchOndcCatalogRows(storeId: number): Promise<OndcCatalog
         )
       : [];
 
-  return assembleRows(products, variantRows, attrRows, productImages, variantImages);
+  const rows = assembleRows(products, variantRows, attrRows, productImages, variantImages);
+  return attachItemRatings(rows);
 }
 
 /** Resolve a single ONDC item id to the row that produced it (or null). */
@@ -290,7 +298,41 @@ export async function resolveOndcCatalogRow(itemId: string): Promise<OndcCatalog
     : [];
 
   const allRows = assembleRows(products, variantRows, attrRows, productImages, variantImages);
-  return allRows.find((r) => r.variant_id === parts.variantId) ?? null;
+  const ratedRows = await attachItemRatings(allRows);
+  return ratedRows.find((r) => r.variant_id === parts.variantId) ?? null;
+}
+
+async function attachItemRatings(rows: OndcCatalogRow[]): Promise<OndcCatalogRow[]> {
+  if (rows.length === 0) return rows;
+
+  const itemIds = rows.map((row) => buildOndcItemId(row.product_id, row.variant_id));
+  const defaults = rows.map((row) => ({ ...row, item_rating: '4' }));
+  const placeholders = itemIds.map(() => '?').join(',');
+
+  try {
+    const ratingRows = await ondcQuery<ItemRatingRow>(
+      `SELECT rated_id, AVG(rating_value) AS rating_value
+       FROM ondc_ratings
+       WHERE rating_category = 'Item'
+         AND rating_value IS NOT NULL
+         AND rated_id IN (${placeholders})
+       GROUP BY rated_id`,
+      itemIds,
+    );
+
+    const ratingsByItemId = new Map<string, string>();
+    for (const ratingRow of ratingRows) {
+      const normalized = normalizeItemRating(ratingRow.rating_value);
+      if (normalized) ratingsByItemId.set(ratingRow.rated_id, normalized);
+    }
+
+    return defaults.map((row) => ({
+      ...row,
+      item_rating: ratingsByItemId.get(buildOndcItemId(row.product_id, row.variant_id)) ?? '4',
+    }));
+  } catch {
+    return defaults;
+  }
 }
 
 // ─── Row assembly (variant expansion + attr/image merging) ─────────────────
@@ -452,6 +494,7 @@ function buildRowForProduct(
     ondc_attrs: attrs,
     images,
     has_variants: hasVariants,
+    item_rating: '4',
   };
 }
 
@@ -531,6 +574,7 @@ function buildRowForVariant(
     ondc_attrs: attrs,
     images,
     has_variants: hasVariants,
+    item_rating: '4',
   };
 }
 
@@ -653,6 +697,35 @@ function attrValue(attrs: OndcCatalogRow['ondc_attrs'], key: string): string | u
   return a.value || undefined;
 }
 
+function normalizeItemRating(raw?: number | string | null): string | undefined {
+  if (raw === null || raw === undefined || raw === '') return undefined;
+  const parsed = typeof raw === 'number' ? raw : parseFloat(String(raw));
+  if (!Number.isFinite(parsed)) return undefined;
+  const rounded = Math.round(parsed);
+  if (rounded < 1 || rounded > 5) return undefined;
+  return String(rounded);
+}
+
+function formatManufacturingMonth(raw?: string | null): string {
+  const value = raw?.trim();
+  if (!value) {
+    const now = new Date();
+    return `${String(now.getUTCMonth() + 1).padStart(2, '0')}/${now.getUTCFullYear()}`;
+  }
+  if (/^NA$/i.test(value)) return 'NA';
+
+  const mmYyyy = /^(\d{2})\/(\d{4})$/.exec(value);
+  if (mmYyyy) return `${mmYyyy[1]}/${mmYyyy[2]}`;
+
+  const yyyyMm = /^(\d{4})-(\d{2})$/.exec(value);
+  if (yyyyMm) return `${yyyyMm[2]}/${yyyyMm[1]}`;
+
+  const yyyyMmDd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (yyyyMmDd) return `${yyyyMmDd[2]}/${yyyyMmDd[1]}`;
+
+  return value;
+}
+
 export async function buildOndcItemFromRow(
   row: OndcCatalogRow,
   ctx: {
@@ -693,10 +766,9 @@ export async function buildOndcItemFromRow(
     row.manufacturer_address ??
     attrValue(row.ondc_attrs, 'manufacturer_address') ??
     `${SELLER_PROFILE.STREET}, ${SELLER_PROFILE.CITY}, ${SELLER_PROFILE.STATE} ${SELLER_PROFILE.AREA_CODE}`;
-  const mfgMonth =
-    row.manufacturing_month ??
-    attrValue(row.ondc_attrs, 'month_year_of_mfg') ??
-    new Date().toISOString().slice(0, 7);
+  const mfgMonth = formatManufacturingMonth(
+    row.manufacturing_month ?? attrValue(row.ondc_attrs, 'month_year_of_mfg'),
+  );
   const origin = row.country_of_origin ?? attrValue(row.ondc_attrs, 'origin_country') ?? 'IND';
 
   // Colour resolution: structured ondc attribute → variant color_code → fallback.
@@ -781,6 +853,7 @@ export async function buildOndcItemFromRow(
       ctx.storeEmail ?? SELLER_PROFILE.SUPPORT_EMAIL,
       ctx.storePhone ?? SELLER_PROFILE.SUPPORT_PHONE,
     ].join(','),
+    rating: row.item_rating,
     attributes: attrs,
     unit,
     idCode,
