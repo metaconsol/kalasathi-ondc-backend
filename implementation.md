@@ -1,3 +1,26 @@
+<<<<<<< Updated upstream
+
+### Branch 030
+
+**Date:** 2026-07-03
+
+**Status:** Completed
+
+**Area:** ONDC Flow 4A/4B (Update Settlement Refactoring)
+
+**What:**
+
+Refactored the `/update` API logic into a clean `if/else` block based on `update_target` and updated codebase comments to professional English.
+
+**Why:**
+
+The previous logic used an early `return` to prevent `on_update` callbacks for settlement updates (`target === 'payment'`). While functionally correct, using an explicit `if/else if/else` block improves code readability and safely segregates logic for `item`/`fulfillment` updates from `payment` updates. This ensures standard backend best practices where "do nothing" paths (like suppressing the webhook for payments) are explicitly defined and logged, leaving no ambiguity for future developers. Additionally, all Hindi instructional comments were translated to standard English.
+
+**Changes:** file name and description of file change:
+
+- `src/ondc/controllers/beckn/update.controller.ts`
+  Replaced the early return mechanism with a structured `if/else` pipeline. The first block handles `item` and `fulfillment` updates (initiating the `on_update` callback), while the `else if (target === 'payment')` block cleanly logs the intentional suppression of the callback as per ONDC Flow 4A/4B guidelines. Replaced Hindi comments with English.
+
 ### Branch 028
 
 Date:
@@ -50,6 +73,8 @@ If a BAP sends a request missing a mandatory payload field, the ONDC protocol ex
 - `src/ondc/controllers/beckn/track.controller.ts`
   Added validation at the beginning of `handleTrack` to check if `message.order_id` is present. If missing, it synchronously returns a `NACK` response containing an error object with `type: 'CONTEXT-ERROR'`, `code: '20000'`, `path: 'message.order_id'`, and a descriptive message.
 
+<<<<<<< Updated upstream
+
 ## BRANCH-026
 
 **Date:** 2026-07-02
@@ -92,6 +117,10 @@ If a BAP sends a request missing a mandatory payload field, the ONDC protocol ex
 
 - `src/app.ts`
   - Added `on_receiver_recon` to the Beckn action routing set so that direct action-path requests are rewritten under `/api/v1/ondc`.
+
+=======
+
+> > > > > > > Stashed changes
 
 ### Branch 025
 
