@@ -86,29 +86,42 @@ export async function handleUpdate(req: Request, res: Response): Promise<void> {
         updated_at: nowIso(),
       };
 
-      const payload = buildOnUpdate(ctx, updatedOrder) as any;
-      const { statusCode, error: cbErr } = await becknService.sendCallback(
-        becknService.buildCallbackUrl(bapUri, 'on_update'),
-        'on_update',
-        payload,
-        txnId,
-      );
+      // Check the intent of the /update request
+      if (target === 'item' || target === 'fulfillment') {
+        // 1. If it's an item or fulfillment update (like Partial Cancel), send the on_update callback
+        const payload = buildOnUpdate(ctx, updatedOrder) as any;
+        const { statusCode, error: cbErr } = await becknService.sendCallback(
+          becknService.buildCallbackUrl(bapUri, 'on_update'),
+          'on_update',
+          payload,
+          txnId,
+        );
 
-      await txnLogModel.insert({
-        transaction_id: txnId,
-        message_id: payload.context.message_id,
-        action: 'on_update',
-        direction: 'outbound',
-        bap_id: ctx.bap_id,
-        bpp_id: payload.context.bpp_id ?? null,
-        domain: ctx.domain,
-        http_status: statusCode ?? null,
-        ack_status: statusCode && statusCode < 300 ? 'ACK' : 'NACK',
-        payload_json: JSON.stringify(payload),
-        error_message: cbErr ?? null,
-      });
+        // Log outbound webhook into Database
+        await txnLogModel.insert({
+          transaction_id: txnId,
+          message_id: payload.context.message_id,
+          action: 'on_update',
+          direction: 'outbound',
+          bap_id: ctx.bap_id,
+          bpp_id: payload.context.bpp_id ?? null,
+          domain: ctx.domain,
+          http_status: statusCode ?? null,
+          ack_status: statusCode && statusCode < 300 ? 'ACK' : 'NACK',
+          payload_json: JSON.stringify(payload),
+          error_message: cbErr ?? null,
+        });
 
-      observabilityService.push('on_update', payload);
+        observabilityService.push('on_update', payload);
+      } else if (target === 'payment') {
+        // 2. If it's a settlement (payment) update, as per protocol do not send the on_update callback
+        ondcLogger.info('Payment settlement recorded. No on_update is required for this action.', {
+          txnId,
+        });
+      } else {
+        // 3. Any other unhandled target
+        ondcLogger.warn(`Unhandled update_target: ${target}`, { txnId });
+      }
     } catch (err) {
       ondcLogger.error('update async error', { txnId, err });
     }
