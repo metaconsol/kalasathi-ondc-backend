@@ -1,3 +1,40 @@
+### Branch 031
+
+**Date:** 2026-07-03
+
+**Status:** Completed
+
+**Area:** ONDC Catalog Schema Validation (Manufacturing Month and Item Rating)
+
+**What:**
+
+Fixed two ONDC catalog item schema validation issues in the catalog payload:
+
+1. `@ondc/org/statutory_reqs_packaged_commodities.month_year_of_manufacture_packing_import` was being emitted in `YYYY-MM` format and is now normalized to `MM/YYYY`.
+2. `items[].rating` was being emitted as an empty string and is now always populated with a valid ONDC-safe rating, using stored item ratings when available.
+
+**Why:**
+
+ONDC Workbench schema validation was failing for two reasons:
+
+1. `month_year_of_manufacture_packing_import` must match the ONDC validator format (`MM/YYYY` or `NA`), but the code fallback was generating values like `2026-07`.
+2. `items[].rating` must be present and must be one of `"1"`, `"2"`, `"3"`, `"4"`, or `"5"`, but the payload was sending an empty value.
+
+**Changes:** file name and description of file change:
+
+- `src/ondc/adapters/product.adapter.ts`
+  Added manufacturing month normalization so direct DB values, ONDC attribute fallback values, and generated fallback values are all converted into Workbench-safe `MM/YYYY` format. Added item rating lookup from `ondc_ratings` using the generated ONDC item id (`prod_<productId>` / `prod_<productId>_var_<variantId>`), normalized stored rating values into ONDC-valid `1` to `5` strings, and passed the final item rating into the ONDC item builder.
+
+- `src/ondc/utils/catalog.builders.ts`
+  Updated the item payload builder to accept a `rating` input and stopped hardcoding the item rating as an empty string. Added a valid fallback rating so every emitted item remains schema compliant even when no persisted item rating exists yet.
+
+**Verification:**
+
+- Confirmed the manufacturing month field no longer falls back to `YYYY-MM`.
+- Confirmed `items[].rating` is always present in the payload.
+- Verified item ratings are sourced from `ondc_ratings` when available and otherwise fall back to a valid ONDC-safe value.
+- Ran `npm run build` successfully.
+
 <<<<<<< Updated upstream
 
 ### Branch 030
