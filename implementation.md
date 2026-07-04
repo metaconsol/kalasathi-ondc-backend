@@ -1,3 +1,68 @@
+### Branch 032
+
+**Date:** 2026-07-04
+
+**Status:** Completed
+
+**Area:** ONDC PPF (ONDC:NTS10 v2.0.0 — `recon` and `on_recon`)
+
+**What:**
+
+Implemented the full bidirectional PPF reconciliation flow using only the two NTS10 APIs (`recon` and `on_recon`):
+
+1. **Outbound (BPP → BAP):** Admin trigger builds a signed NTS10 `recon` payload from a persisted order and POSTs it to `{bap_uri}/recon`; inbound `on_recon` updates `recon_accord` in `ondc_ppf_recon`.
+2. **Inbound (BAP → BPP):** Pramaan/mock buyer `POST /recon` is ACKed synchronously, settlements are compared, and the BPP auto-replies with signed `on_recon` (`ACCORD` or `DISPUTE`).
+3. **Schema compliance:** Recon payloads now include required `orders[].amount` and omit empty `settlements[].type` so ONDC Workbench validation passes.
+4. **DB resilience:** Fixed invalid `INBOUND_RECEIVED` status enum; added legacy INSERT fallback when extended PPF columns are not yet migrated.
+5. **Admin + Postman:** JWT admin APIs (`GET /ppf`, `GET /ppf/order/:id`, `POST /ppf/trigger`) and Beckn collection requests for local/preprod testing.
+
+**Why:**
+
+- ONDC settlement (PPF/RSF 2.0) runs on domain `ONDC:NTS10`, separate from retail (`RET10`/`RET12`/`RET16`), and links to orders by `ondc_order_id`.
+- Pramaan NTS testcase sends inbound `/recon` to the BPP; the BPP must ACK and respond with `/on_recon` without UI involvement.
+- Inbound recon was failing with `Data truncated for column 'status'` because `INBOUND_RECEIVED` was not in the DB ENUM.
+- Workbench schema validation failed on missing `message.orders[].amount` and empty `settlements[].type`.
+- Admin/operators need a manual trigger path and visibility into recon history without relying only on Pramaan.
+
+**Changes:** file name and description of file change:
+
+- `src/ondc/services/ppf.service.ts`
+  Core PPF service: `sendRecon()` (outbound), `handleInboundRecon()` (compare settlements + post `on_recon`), `processOnRecon()` (persist BAP reply). Logs all steps to `ondc_transaction_logs`.
+
+- `src/ondc/controllers/ppf.controller.ts`
+  Beckn handlers for `POST /recon`, `POST /on_recon`, `POST /on_receiver_recon` (legacy alias). Admin list/detail APIs and `POST /ppf/trigger`; trigger accepts both `ondc_order_id` and `order_id`.
+
+- `src/ondc/utils/ppf.builder.ts`
+  NTS10 v2.0.0 payload builders: context, quote, settlements, `buildReconOrderPayload`, `reconcileSettlements`, `buildOnReconMessage`. Added order-level `amount`, removed empty settlement `type`, settlement total matches sum of settlement amounts.
+
+- `src/ondc/models/ppf.model.ts`
+  Extended `ondc_ppf_recon` INSERT/UPDATE for `order_status`, `quote_json`, `direction`, `inbound_recon_payload`, `outbound_on_recon_payload`. Legacy fallback INSERT when migration columns missing.
+
+- `src/ondc/routes/beckn.route.ts`
+  Mounted `POST /recon`, `POST /on_recon`, `POST /on_receiver_recon` with ONDC auth middleware.
+
+- `src/ondc/routes/admin.route.ts`
+  Mounted `GET /ppf`, `GET /ppf/order/:orderId`, `POST /ppf/trigger` under admin guard.
+
+- `src/app.ts`
+  Short-path aliases for `recon`, `on_recon`, `on_receiver_recon`, and `/ppf/*` → `/api/v1/ondc/admin/ppf/*` for Postman/admin UI.
+
+- `src/ondc/db/migrations/001_setup_ondc.sql`
+  Step 3: idempotent `ALTER TABLE` for PPF extended columns on `ondc_ppf_recon`.
+
+- `ONDC_v1.2.5_Workbench.postman_collection.json`
+  Added login, `POST /recon`, `POST /on_recon`, admin PPF endpoints; schema-compliant example bodies; Postman UUID ids on all requests; fixed trigger body to use `ondc_order_id`.
+
+**Verification:**
+
+- Local inbound `POST /recon?insecure=1` ACKs and async-sends `on_recon` without DB status truncation error.
+- `POST /admin/ppf/trigger` returns `ppf_recon_id` when order exists.
+- `GET /admin/ppf/order/:orderId` returns parsed `quote`, `settlements`, `inbound_recon`, `on_recon_sent`.
+- ONDC Workbench schema validation passes after `amount` and `type` fixes.
+- Pramaan ring: inbound recon works without UI; optional manual trigger via admin/Postman for outbound direction.
+
+**Note:** Seller bank details (`seller_profiles.bank_account_no`, `bank_ifsc`, `upi_id`, `business_name`) are required at `on_init`/`on_confirm` for payout, not in the NTS10 recon payload. No new PPF admin UI page required for Pramaan — existing Logs / PPF Settlements pages are sufficient for monitoring.
+
 ### Branch 031
 
 **Date:** 2026-07-03
@@ -34,8 +99,6 @@ ONDC Workbench schema validation was failing for two reasons:
 - Confirmed `items[].rating` is always present in the payload.
 - Verified item ratings are sourced from `ondc_ratings` when available and otherwise fall back to a valid ONDC-safe value.
 - Ran `npm run build` successfully.
-
-<<<<<<< Updated upstream
 
 ### Branch 030
 

@@ -20,7 +20,11 @@ import { handleCancel } from '~/ondc/controllers/beckn/cancel.controller';
 import { handleUpdate } from '~/ondc/controllers/beckn/update.controller';
 import { handleRating } from '~/ondc/controllers/beckn/rating.controller';
 import { handleIssue, handleIssueStatus } from '~/ondc/controllers/issue.controller';
-import { handleOnReceiverRecon } from '~/ondc/controllers/ppf.controller';
+import {
+  handleOnRecon,
+  handleOnReceiverRecon,
+  handleRecon,
+} from '~/ondc/controllers/ppf.controller';
 
 const router = express.Router();
 
@@ -94,9 +98,21 @@ router.post('/issue', ...becknMiddleware, handleIssue);
 router.post('/issue_status', ...becknMiddleware, handleIssueStatus);
 
 /**
- * @route POST /api/v1/ondc/on_receiver_recon
- * @desc PPF settlement callback from BAP (ONDC:NTS10)
+ * @route POST /api/v1/ondc/recon
+ * @desc PPF/RSF reconciliation request (ONDC:NTS10 v2.0.0)
  */
-router.post('/on_receiver_recon', ondcRequestLogger, handleOnReceiverRecon);
+router.post('/recon', ondcRequestLogger, ondcAuthMiddleware, handleRecon);
+
+/**
+ * @route POST /api/v1/ondc/on_recon
+ * @desc PPF/RSF reconciliation response (ONDC:NTS10 v2.0.0)
+ */
+router.post('/on_recon', ondcRequestLogger, ondcAuthMiddleware, handleOnRecon);
+
+/**
+ * @route POST /api/v1/ondc/on_receiver_recon
+ * @desc Legacy PPF callback alias → on_recon
+ */
+router.post('/on_receiver_recon', ondcRequestLogger, ondcAuthMiddleware, handleOnReceiverRecon);
 
 export default router;

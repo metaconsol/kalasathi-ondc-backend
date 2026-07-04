@@ -1,129 +1,104 @@
 /**
- * PPF (Payment Protection Framework) Service.
- * Replaces RSF. Domain: ONDC:NTS10, version: 2.0.0.
+ * PPF (Payment Protection Framework) / RSF Service.
+ * Domain: ONDC:NTS10, version: 2.0.0.
  *
- * Flow:
- *  BPP calls sendRecon(orderId) → POST {bap_uri}/recon  (signed)
- *  BAP calls back → POST {bpp_uri}/on_receiver_recon
+ * Bidirectional recon flow (per ONDC NTS spec):
+ *  A) BPP initiates: sendRecon() → POST {bap_uri}/recon → BAP responds POST {bpp_uri}/on_recon
+ *  B) BAP initiates: POST {bpp_uri}/recon → handleInboundRecon() → POST {bap_uri}/on_recon
  */
 
-import { ppfModel, type PpfSettlementItem } from '~/ondc/models/ppf.model';
+import { randomUUID } from 'crypto';
+import { ppfModel } from '~/ondc/models/ppf.model';
 import { orderModel } from '~/ondc/models/order.model';
 import { becknService } from '~/ondc/services/beckn.service';
+import { txnLogModel } from '~/ondc/models/log.model';
 import { ondcEnv } from '~/config/ondc.config';
 import { ondcLogger } from '~/ondc/utils/logger.util';
-import { safeJsonParse } from '~/ondc/utils/payload.builder';
-import type { BecknPayment } from '~/ondc/types/beckn.types';
-
-function nowIso(): string {
-  return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-}
+import {
+  buildNtsContext,
+  buildOnReconError,
+  buildOnReconMessage,
+  buildQuoteFromOrder,
+  buildReconOrderPayload,
+  buildSettlementsFromOrder,
+  mapOrderStatusForRecon,
+  reconcileSettlements,
+  type NtsContext,
+} from '~/ondc/utils/ppf.builder';
 
 function money(v: number | string): string {
   return Number(v).toFixed(2);
 }
 
-function ppfContext(bapId: string, bapUri: string, txnId: string, msgId: string) {
+function ntsContextFromBody(body: Record<string, any>): NtsContext {
+  const ctx = body.context ?? {};
   return {
-    domain: 'ONDC:NTS10',
-    location: { country: { code: 'IND' }, city: { code: '*' } },
-    version: '2.0.0',
-    action: 'recon',
-    bap_id: bapId,
-    bap_uri: bapUri,
-    bpp_id: ondcEnv.subscriberId,
-    bpp_uri: ondcEnv.baseUri,
-    transaction_id: txnId,
-    message_id: msgId,
-    timestamp: nowIso(),
-    ttl: 'P1D',
+    domain: ctx.domain ?? 'ONDC:NTS10',
+    location: ctx.location ?? { country: { code: 'IND' }, city: { code: 'std:080' } },
+    version: ctx.version ?? '2.0.0',
+    action: ctx.action ?? 'recon',
+    bap_id: ctx.bap_id ?? '',
+    bap_uri: ctx.bap_uri ?? '',
+    bpp_id: ctx.bpp_id ?? ondcEnv.subscriberId,
+    bpp_uri: ctx.bpp_uri ?? ondcEnv.baseUri,
+    transaction_id: ctx.transaction_id ?? '',
+    message_id: ctx.message_id ?? '',
+    timestamp: ctx.timestamp ?? '',
+    ttl: ctx.ttl ?? 'P1D',
   };
+}
+
+async function postOnRecon(
+  targetUri: string,
+  payload: Record<string, unknown>,
+  txnId: string,
+): Promise<{ statusCode: number | undefined; error: string | undefined }> {
+  const url = `${targetUri.replace(/\/$/, '')}/on_recon`;
+  return becknService.sendCallback(url, 'on_recon', payload as any, txnId);
+}
+
+async function loadOrderBundle(ondcOrderId: string) {
+  const order = await orderModel.findByOndcOrderId(ondcOrderId);
+  if (!order) return null;
+  const items = await orderModel.getItems(ondcOrderId);
+  const settlements = buildSettlementsFromOrder(order, order.bap_id);
+  const quote = buildQuoteFromOrder(order, items);
+  const orderPayload = buildReconOrderPayload(order, items, settlements);
+  return { order, items, settlements, quote, orderPayload };
 }
 
 export const ppfService = {
   /**
-   * Build and POST a `recon` request to the BAP for a completed ONDC order.
-   * Returns the ppf_recon row id.
+   * BPP → BAP: build and POST `recon` for a completed ONDC order.
    */
   async sendRecon(ondcOrderId: string): Promise<number | null> {
-    const order = await orderModel.findByOndcOrderId(ondcOrderId);
-    if (!order) {
+    const bundle = await loadOrderBundle(ondcOrderId);
+    if (!bundle) {
       ondcLogger.warn('PPF sendRecon: order not found', { ondcOrderId });
       return null;
     }
 
-    const payment: BecknPayment = safeJsonParse(order.payment_json ?? '{}', {});
-    const total = parseFloat(String(order.order_total ?? payment.params?.amount ?? '0'));
-    const currency = 'INR';
-    const finderFeePercent = parseFloat(
-      payment['@ondc/org/buyer_app_finder_fee_amount'] ?? String(ondcEnv.buyerFinderFeeDefault),
-    );
-    const commission = money((total * finderFeePercent) / 100);
-    const settleAmount = money(total - parseFloat(commission));
-    const updatedAt = nowIso();
-
-    const settlementDetails: BecknPayment['@ondc/org/settlement_details'] =
-      payment['@ondc/org/settlement_details'] ?? [];
-
-    // Build PPF settlement entries from payment settlement_details (or synthetic)
-    const settlements: PpfSettlementItem[] = [];
-    if (settlementDetails && settlementDetails.length > 0) {
-      let idx = 1;
-      for (const d of settlementDetails) {
-        const amt = d.settlement_amount ?? settleAmount;
-        if (parseFloat(String(amt)) === 0) continue;
-        settlements.push({
-          id: d.settlement_id ?? `settlement-${ondcOrderId}-${idx}`,
-          payment_id: `payment-${ondcOrderId}-${idx}`,
-          status: d.settlement_status === 'SETTLED' ? 'SETTLED' : 'TO_BE_INITIATED',
-          amount: { currency, value: money(amt) },
-          commission: { currency, value: commission },
-          withholding_amount: {
-            currency,
-            value: money(payment['@ondc/org/withholding_amount'] ?? 0),
-          },
-          tcs: { currency, value: '0.00' },
-          tds: { currency, value: '0.00' },
-          updated_at: d.settlement_timestamp ?? updatedAt,
-        });
-        const lastEntry = settlements[settlements.length - 1];
-        if (d.settlement_reference && lastEntry) {
-          lastEntry.settlement_ref_no = d.settlement_reference;
-        }
-        idx++;
-      }
-    }
-
-    if (settlements.length === 0) {
-      settlements.push({
-        id: `settlement-${ondcOrderId}-1`,
-        payment_id: `payment-${ondcOrderId}-1`,
-        status: 'TO_BE_INITIATED',
-        amount: { currency, value: settleAmount },
-        commission: { currency, value: commission },
-        withholding_amount: { currency, value: '0.00' },
-        tcs: { currency, value: '0.00' },
-        tds: { currency, value: '0.00' },
-        updated_at: updatedAt,
-      });
-    }
-
+    const { order, settlements, quote, orderPayload } = bundle;
     const txnId = order.transaction_id;
-    const msgId = crypto.randomUUID();
+    const msgId = randomUUID();
     const bapId = order.bap_id ?? '';
     const bapUri = order.bap_uri ?? '';
 
-    const payload = {
-      context: ppfContext(bapId, bapUri, txnId, msgId),
-      message: {
-        orders: [
-          {
-            id: ondcOrderId,
-            amount: { currency, value: money(total) },
-            settlements,
-          },
-        ],
+    const ctx = buildNtsContext(
+      {
+        bap_id: bapId,
+        bap_uri: bapUri,
+        bpp_id: ondcEnv.subscriberId,
+        bpp_uri: ondcEnv.baseUri,
+        transaction_id: txnId,
       },
+      'recon',
+      msgId,
+    );
+
+    const payload = {
+      context: ctx,
+      message: { orders: [orderPayload] },
     };
 
     const callbackUrl = `${bapUri.replace(/\/$/, '')}/recon`;
@@ -136,15 +111,32 @@ export const ppfService = {
 
     const rowId = await ppfModel.create({
       ondc_order_id: ondcOrderId,
+      order_status: mapOrderStatusForRecon(order.status),
       transaction_id: txnId,
       bap_id: bapId,
       bap_uri: bapUri,
       message_id: msgId,
-      currency,
-      total_amount: money(total),
+      currency: order.currency || 'INR',
+      total_amount: money(order.order_total),
+      quote_json: JSON.stringify(quote),
       settlements_json: JSON.stringify(settlements),
+      direction: 'OUTBOUND',
       http_status: statusCode ?? null,
       status: statusCode && statusCode < 300 ? 'ACKED' : 'FAILED',
+    });
+
+    await txnLogModel.insert({
+      transaction_id: txnId,
+      message_id: msgId,
+      action: 'recon',
+      direction: 'outbound',
+      bap_id: bapId,
+      bpp_id: ondcEnv.subscriberId,
+      domain: 'ONDC:NTS10',
+      http_status: statusCode ?? null,
+      ack_status: statusCode && statusCode < 300 ? 'ACK' : 'NACK',
+      payload_json: JSON.stringify(payload),
+      error_message: error ?? null,
     });
 
     ondcLogger.info('PPF recon sent', { ondcOrderId, txnId, statusCode, error });
@@ -152,13 +144,136 @@ export const ppfService = {
   },
 
   /**
-   * Process incoming /on_receiver_recon from BAP.
+   * BAP → BPP: inbound /recon — compare settlements and respond with /on_recon.
+   */
+  async handleInboundRecon(body: Record<string, unknown>): Promise<void> {
+    const raw = body as Record<string, any>;
+    const ctx = ntsContextFromBody(raw);
+    const orders: any[] = raw.message?.orders ?? [];
+
+    for (const inboundOrder of orders) {
+      const orderId = String(inboundOrder?.id ?? '');
+      if (!orderId) continue;
+
+      const bundle = await loadOrderBundle(orderId);
+      const inboundJson = JSON.stringify(inboundOrder);
+
+      if (!bundle) {
+        const errPayload = buildOnReconError(ctx);
+        const { statusCode, error } = await postOnRecon(
+          ctx.bap_uri,
+          errPayload,
+          ctx.transaction_id,
+        );
+        await txnLogModel.insert({
+          transaction_id: ctx.transaction_id,
+          message_id: (errPayload.context as NtsContext).message_id,
+          action: 'on_recon',
+          direction: 'outbound',
+          bap_id: ctx.bap_id,
+          bpp_id: ctx.bpp_id,
+          domain: 'ONDC:NTS10',
+          http_status: statusCode ?? null,
+          ack_status: statusCode && statusCode < 300 ? 'ACK' : 'NACK',
+          payload_json: JSON.stringify(errPayload),
+          error_message: error ?? 'Invalid Order Id',
+        });
+        ondcLogger.warn('PPF inbound recon: invalid order', { orderId, txnId: ctx.transaction_id });
+        continue;
+      }
+
+      const { order, settlements, orderPayload } = bundle;
+      const theirs = (inboundOrder.settlements ?? []) as Array<Record<string, unknown>>;
+
+      const prior = await ppfModel.findLatestByOrderAndTxn(orderId, ctx.transaction_id);
+      let priorSettlements: Array<Record<string, unknown>> | undefined;
+      if (prior?.outbound_on_recon_payload) {
+        try {
+          const parsed = JSON.parse(prior.outbound_on_recon_payload);
+          priorSettlements = parsed?.message?.orders?.[0]?.settlements;
+        } catch {
+          priorSettlements = undefined;
+        }
+      }
+
+      const { accord, settlements: reconciled } = reconcileSettlements(
+        settlements,
+        theirs,
+        priorSettlements,
+      );
+
+      const onReconPayload = buildOnReconMessage(ctx, orderPayload, accord, reconciled);
+      const rowId = await ppfModel.create({
+        ondc_order_id: orderId,
+        order_status: mapOrderStatusForRecon(order.status),
+        transaction_id: ctx.transaction_id,
+        bap_id: ctx.bap_id,
+        bap_uri: ctx.bap_uri,
+        message_id: ctx.message_id,
+        currency: order.currency || 'INR',
+        total_amount: money(order.order_total),
+        quote_json: JSON.stringify(orderPayload.quote),
+        settlements_json: JSON.stringify(settlements),
+        direction: 'INBOUND',
+        inbound_recon_payload: inboundJson,
+        http_status: null,
+        status: 'INITIATED',
+      });
+
+      const { statusCode, error } = await postOnRecon(
+        ctx.bap_uri,
+        onReconPayload,
+        ctx.transaction_id,
+      );
+
+      await ppfModel.updateInboundResponse(rowId, {
+        recon_accord: accord,
+        outbound_on_recon_payload: JSON.stringify(onReconPayload),
+        on_recon_http_status: statusCode ?? null,
+        status: accord ? 'ACCORD' : 'DISPUTE',
+      });
+
+      await txnLogModel.insert({
+        transaction_id: ctx.transaction_id,
+        message_id: (onReconPayload.context as NtsContext).message_id,
+        action: 'on_recon',
+        direction: 'outbound',
+        bap_id: ctx.bap_id,
+        bpp_id: ctx.bpp_id,
+        domain: 'ONDC:NTS10',
+        http_status: statusCode ?? null,
+        ack_status: statusCode && statusCode < 300 ? 'ACK' : 'NACK',
+        payload_json: JSON.stringify(onReconPayload),
+        error_message: error ?? null,
+      });
+
+      ondcLogger.info('PPF inbound recon → on_recon sent', {
+        orderId,
+        accord,
+        txnId: ctx.transaction_id,
+        statusCode,
+      });
+    }
+  },
+
+  /**
+   * BAP → BPP: inbound /on_recon (response to our outbound recon).
+   * Also handles legacy /on_receiver_recon.
    */
   async processOnRecon(payload: unknown): Promise<void> {
     const body = payload as Record<string, any>;
     const ctx = body?.context ?? {};
-    const orders: any[] = body?.message?.orders ?? [];
 
+    if (body?.error) {
+      ondcLogger.warn('PPF on_recon error from counterparty', {
+        code: body.error.code,
+        message: body.error.message,
+        txnId: ctx.transaction_id,
+      });
+      return;
+    }
+
+    const orders: any[] = body?.message?.orders ?? [];
     for (const order of orders) {
       const orderId = String(order?.id ?? '');
       const recon_accord = Boolean(order?.recon_accord ?? false);

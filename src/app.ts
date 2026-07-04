@@ -110,6 +110,8 @@ export function createApp(): Application {
     'rating',
     'issue',
     'issue_status',
+    'recon',
+    'on_recon',
     'on_receiver_recon',
     'on_search',
     'on_select',
@@ -127,6 +129,9 @@ export function createApp(): Application {
     const action = req.path.replace(/^\//, '').split('/')[0] ?? '';
     if (BECKN_ACTIONS.has(action)) {
       req.url = `/api/v1/ondc${req.url}`;
+    } else if (action === 'ppf') {
+      // Admin UI / Postman sometimes call /ppf/* without /api/v1/ondc/admin prefix
+      req.url = `/api/v1/ondc/admin${req.url}`;
     }
     next();
   });
