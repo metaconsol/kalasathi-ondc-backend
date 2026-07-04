@@ -9,13 +9,17 @@ export type PpfSettlementStatus = 'TO_BE_INITIATED' | 'PENDING' | 'SETTLED' | 'R
 
 export interface PpfSettlementItem {
   id: string;
+  counterparty_id?: string;
   payment_id: string;
   status: PpfSettlementStatus;
-  amount: { currency: string; value: string };
-  commission: { currency: string; value: string };
-  withholding_amount: { currency: string; value: string };
-  tcs: { currency: string; value: string };
-  tds: { currency: string; value: string };
+  type?: string;
+  amount: { currency: string; value: string; diff_value?: string };
+  commission: { currency: string; value: string; diff_value?: string };
+  withholding_amount: { currency: string; value: string; diff_value?: string };
+  tcs: { currency: string; value: string; diff_value?: string };
+  tds: { currency: string; value: string; diff_value?: string };
+  delay_amount?: { currency: string; value: string; diff_value?: string };
+  due_date?: string;
   updated_at: string;
   settlement_ref_no?: string;
 }
@@ -23,15 +27,20 @@ export interface PpfSettlementItem {
 export interface PpfReconRow {
   id: number;
   ondc_order_id: string;
+  order_status?: string | null;
   transaction_id: string;
   bap_id: string;
   bap_uri: string;
   message_id: string;
   currency: string;
   total_amount: string;
+  quote_json?: string | null;
   settlements_json: string;
+  direction?: 'OUTBOUND' | 'INBOUND';
+  inbound_recon_payload?: string | null;
   recon_accord: number | null;
   on_recon_payload: string | null;
+  outbound_on_recon_payload?: string | null;
   http_status: number | null;
   status: 'INITIATED' | 'ACKED' | 'ACCORD' | 'DISPUTE' | 'FAILED';
   created_at: Date;
@@ -41,35 +50,113 @@ export interface PpfReconRow {
 export const ppfModel = {
   async create(data: {
     ondc_order_id: string;
+    order_status?: string | null;
     transaction_id: string;
     bap_id: string;
     bap_uri: string;
     message_id: string;
     currency: string;
     total_amount: string;
+    quote_json?: string | null;
     settlements_json: string;
+    direction?: 'OUTBOUND' | 'INBOUND';
+    inbound_recon_payload?: string | null;
     http_status: number | null;
     status: PpfReconRow['status'];
   }): Promise<number> {
-    const result = await ondcExec(
-      `INSERT INTO ondc_ppf_recon
-         (ondc_order_id, transaction_id, bap_id, bap_uri, message_id,
-          currency, total_amount, settlements_json, http_status, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        data.ondc_order_id,
-        data.transaction_id,
-        data.bap_id,
-        data.bap_uri,
-        data.message_id,
-        data.currency,
-        data.total_amount,
-        data.settlements_json,
-        data.http_status,
-        data.status,
-      ],
-    );
-    return result.insertId;
+    const params = [
+      data.ondc_order_id,
+      data.order_status ?? null,
+      data.transaction_id,
+      data.bap_id,
+      data.bap_uri,
+      data.message_id,
+      data.currency,
+      data.total_amount,
+      data.quote_json ?? null,
+      data.settlements_json,
+      data.direction ?? 'OUTBOUND',
+      data.inbound_recon_payload ?? null,
+      data.http_status,
+      data.status,
+    ];
+    try {
+      const result = await ondcExec(
+        `INSERT INTO ondc_ppf_recon
+           (ondc_order_id, order_status, transaction_id, bap_id, bap_uri, message_id,
+            currency, total_amount, quote_json, settlements_json, direction,
+            inbound_recon_payload, http_status, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        params,
+      );
+      return result.insertId;
+    } catch (err: unknown) {
+      const mysqlErr = err as { errno?: number; code?: string };
+      if (mysqlErr.errno !== 1054 && mysqlErr.code !== 'ER_BAD_FIELD_ERROR') throw err;
+      const legacy = await ondcExec(
+        `INSERT INTO ondc_ppf_recon
+           (ondc_order_id, transaction_id, bap_id, bap_uri, message_id,
+            currency, total_amount, settlements_json, http_status, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          data.ondc_order_id,
+          data.transaction_id,
+          data.bap_id,
+          data.bap_uri,
+          data.message_id,
+          data.currency,
+          data.total_amount,
+          data.settlements_json,
+          data.http_status,
+          data.status,
+        ],
+      );
+      return legacy.insertId;
+    }
+  },
+
+  async updateInboundResponse(
+    id: number,
+    data: {
+      recon_accord: boolean;
+      outbound_on_recon_payload: string;
+      on_recon_http_status: number | null;
+      status: PpfReconRow['status'];
+    },
+  ): Promise<void> {
+    const params = [
+      data.recon_accord ? 1 : 0,
+      data.outbound_on_recon_payload,
+      data.outbound_on_recon_payload,
+      data.on_recon_http_status,
+      data.status,
+      id,
+    ];
+    try {
+      await ondcExec(
+        `UPDATE ondc_ppf_recon
+         SET recon_accord = ?, outbound_on_recon_payload = ?, on_recon_payload = ?,
+             http_status = COALESCE(?, http_status), status = ?, updated_at = NOW()
+         WHERE id = ?`,
+        params,
+      );
+    } catch (err: unknown) {
+      const mysqlErr = err as { errno?: number; code?: string };
+      if (mysqlErr.errno !== 1054 && mysqlErr.code !== 'ER_BAD_FIELD_ERROR') throw err;
+      await ondcExec(
+        `UPDATE ondc_ppf_recon
+         SET recon_accord = ?, on_recon_payload = ?,
+             http_status = COALESCE(?, http_status), status = ?, updated_at = NOW()
+         WHERE id = ?`,
+        [
+          data.recon_accord ? 1 : 0,
+          data.outbound_on_recon_payload,
+          data.on_recon_http_status,
+          data.status,
+          id,
+        ],
+      );
+    }
   },
 
   async updateOnRecon(
@@ -85,6 +172,16 @@ export const ppfModel = {
        ORDER BY id DESC LIMIT 1`,
       [recon_accord ? 1 : 0, on_recon_payload, recon_accord ? 'ACCORD' : 'DISPUTE', ondcOrderId],
     );
+  },
+
+  async findLatestByOrderAndTxn(ondcOrderId: string, txnId: string): Promise<PpfReconRow | null> {
+    const rows = await ondcQuery<PpfReconRow>(
+      `SELECT * FROM ondc_ppf_recon
+       WHERE ondc_order_id = ? AND transaction_id = ?
+       ORDER BY id DESC LIMIT 1`,
+      [ondcOrderId, txnId],
+    );
+    return rows[0] ?? null;
   },
 
   async list(

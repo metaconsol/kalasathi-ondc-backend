@@ -2,7 +2,8 @@
   "info": {
     "name": "ONDC ODOP BPP — v1.2.5 Workbench",
     "description": "Full endpoint collection for the ODOP ONDC BPP, aligned to API contract v1.2.5. Use with the 'ONDC ODOP — v1.2.5 (preprod)' environment. Folder 1 = network-facing Beckn endpoints (the workbench/Pramaan calls these). Folder 2 = JWT-protected admin APIs. See implementationplan.md for endpoint status.",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "2df1fd7a-ebe3-4f7d-994d-ac67c198bc03"
   },
   "item": [
     {
@@ -42,7 +43,8 @@
             },
             "description": "Buyer search intent → on_search catalog."
           },
-          "response": []
+          "response": [],
+          "id": "26d18d6e-5132-4508-8499-21f7696c5cc4"
         },
         {
           "name": "POST /select",
@@ -77,7 +79,8 @@
             },
             "description": "Select items → on_select with quote/breakup."
           },
-          "response": []
+          "response": [],
+          "id": "0b0cb4eb-4677-4ece-8939-d0177d7c8c21"
         },
         {
           "name": "POST /init",
@@ -112,7 +115,8 @@
             },
             "description": "Init order (billing+delivery) → on_init with quote + settlement + bpp_terms."
           },
-          "response": []
+          "response": [],
+          "id": "d4c726b7-c935-4da6-bf67-ec2afd63b4de"
         },
         {
           "name": "POST /confirm",
@@ -147,7 +151,8 @@
             },
             "description": "Confirm order → on_confirm. Capture order.id into ORDER_ID env var."
           },
-          "response": []
+          "response": [],
+          "id": "8c9d44db-a461-4dcb-82de-3b4951b1e673"
         },
         {
           "name": "POST /status",
@@ -182,7 +187,8 @@
             },
             "description": "Order status → on_status."
           },
-          "response": []
+          "response": [],
+          "id": "57d57f60-b5c9-4697-b1a2-1f325365f33b"
         },
         {
           "name": "POST /track",
@@ -217,7 +223,8 @@
             },
             "description": "Track shipment → on_track."
           },
-          "response": []
+          "response": [],
+          "id": "a0fe5623-4411-4dc2-91ae-6c3930d1640b"
         },
         {
           "name": "POST /cancel",
@@ -252,7 +259,8 @@
             },
             "description": "Cancel order → on_cancel with quote_trail + refund."
           },
-          "response": []
+          "response": [],
+          "id": "44a4fd42-3266-4505-884d-fa0a92540c42"
         },
         {
           "name": "POST /update",
@@ -287,7 +295,8 @@
             },
             "description": "Partial cancel / return → on_update."
           },
-          "response": []
+          "response": [],
+          "id": "2c2b51fe-634f-47a7-890d-e954a1c0b6db"
         },
         {
           "name": "POST /rating",
@@ -322,7 +331,8 @@
             },
             "description": "Rating → on_rating (v1.2.5)."
           },
-          "response": []
+          "response": [],
+          "id": "eb11ba76-5b2e-4f1f-b11b-7f835cf63fcf"
         },
         {
           "name": "POST /issue (IGM 2.0.0)",
@@ -357,7 +367,8 @@
             },
             "description": "Raise grievance → on_issue."
           },
-          "response": []
+          "response": [],
+          "id": "f903fced-5594-423e-8ec3-b806b3ec028d"
         },
         {
           "name": "POST /issue_status (IGM 2.0.0)",
@@ -392,10 +403,71 @@
             },
             "description": "Issue status → on_issue_status."
           },
-          "response": []
+          "response": [],
+          "id": "abfe7872-751d-465a-96fb-7d11a54c30bc"
         },
         {
-          "name": "POST /on_receiver_recon (PPF settlement callback)",
+          "name": "POST /recon (NTS10 — collector → receiver)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"ONDC:NTS10\",\n    \"location\": { \"country\": { \"code\": \"IND\" }, \"city\": { \"code\": \"*\" } },\n    \"version\": \"2.0.0\",\n    \"action\": \"recon\",\n    \"bap_id\": \"{{BAP_ID}}\",\n    \"bap_uri\": \"{{BAP_URI}}\",\n    \"bpp_id\": \"{{BPP_ID}}\",\n    \"bpp_uri\": \"{{BPP_URI}}\",\n    \"transaction_id\": \"{{TXN_ID}}\",\n    \"message_id\": \"{{MSG_ID}}\",\n    \"timestamp\": \"{{$isoTimestamp}}\",\n    \"ttl\": \"P1D\"\n  },\n  \"message\": {\n    \"orders\": [\n      {\n        \"id\": \"{{ORDER_ID}}\",\n        \"amount\": { \"currency\": \"INR\", \"value\": \"242.50\" },\n        \"settlements\": [\n          {\n            \"id\": \"settlement-{{ORDER_ID}}-1\",\n            \"payment_id\": \"pymnt-1\",\n            \"status\": \"PENDING\",\n            \"amount\": { \"currency\": \"INR\", \"value\": \"242.50\" },\n            \"commission\": { \"currency\": \"INR\", \"value\": \"7.50\" },\n            \"withholding_amount\": { \"currency\": \"INR\", \"value\": \"0.00\" },\n            \"tcs\": { \"currency\": \"INR\", \"value\": \"0.00\" },\n            \"tds\": { \"currency\": \"INR\", \"value\": \"0.00\" },\n            \"updated_at\": \"{{$isoTimestamp}}\"\n          }\n        ]\n      }\n    ]\n  }\n}"
+            },
+            "url": {
+              "raw": "{{ONDC_BASE}}/recon?insecure=1",
+              "host": ["{{ONDC_BASE}}"],
+              "path": ["recon"],
+              "query": [
+                {
+                  "key": "insecure",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Inbound recon (BAP/collector → BPP). BPP ACKs then async sends on_recon with diff_value / recon_accord."
+          },
+          "response": [],
+          "id": "5b411c4e-a9e1-4cf9-8202-f6584f4fb9c7"
+        },
+        {
+          "name": "POST /on_recon (NTS10 — response to outbound recon)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"context\": {\n    \"domain\": \"ONDC:NTS10\",\n    \"location\": { \"country\": { \"code\": \"IND\" }, \"city\": { \"code\": \"*\" } },\n    \"version\": \"2.0.0\",\n    \"action\": \"on_recon\",\n    \"bap_id\": \"{{BAP_ID}}\",\n    \"bap_uri\": \"{{BAP_URI}}\",\n    \"bpp_id\": \"{{BPP_ID}}\",\n    \"bpp_uri\": \"{{BPP_URI}}\",\n    \"transaction_id\": \"{{TXN_ID}}\",\n    \"message_id\": \"{{MSG_ID}}\",\n    \"timestamp\": \"{{$isoTimestamp}}\",\n    \"ttl\": \"P1D\"\n  },\n  \"message\": {\n    \"orders\": [\n      {\n        \"id\": \"{{ORDER_ID}}\",\n        \"amount\": { \"currency\": \"INR\", \"value\": \"242.50\" },\n        \"recon_accord\": true,\n        \"settlements\": [\n          {\n            \"id\": \"settlement-{{ORDER_ID}}-1\",\n            \"payment_id\": \"pymnt-1\",\n            \"status\": \"PENDING\",\n            \"amount\": { \"currency\": \"INR\", \"value\": \"242.50\" },\n            \"commission\": { \"currency\": \"INR\", \"value\": \"7.50\" },\n            \"withholding_amount\": { \"currency\": \"INR\", \"value\": \"0.00\" },\n            \"tcs\": { \"currency\": \"INR\", \"value\": \"0.00\" },\n            \"tds\": { \"currency\": \"INR\", \"value\": \"0.00\" },\n            \"updated_at\": \"{{$isoTimestamp}}\"\n          }\n        ]\n      }\n    ]\n  }\n}"
+            },
+            "url": {
+              "raw": "{{ONDC_BASE}}/on_recon?insecure=1",
+              "host": ["{{ONDC_BASE}}"],
+              "path": ["on_recon"],
+              "query": [
+                {
+                  "key": "insecure",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "BAP responds after BPP sent recon. Updates ondc_ppf_recon with recon_accord."
+          },
+          "response": [],
+          "id": "daad63ce-176e-43eb-a8d7-439c2517ce8c"
+        },
+        {
+          "name": "POST /on_receiver_recon (PPF legacy alias)",
           "request": {
             "method": "POST",
             "header": [
@@ -426,14 +498,61 @@
             },
             "description": "ONDC:NTS10 settlement reconciliation callback from BAP. NOTE: currently mounted WITHOUT signature verification."
           },
-          "response": []
+          "response": [],
+          "id": "ecc46952-4761-49bd-bf93-59d89c66f934"
         }
-      ]
+      ],
+      "id": "c16b687c-c6d2-4884-8fbc-c4600be85661"
     },
     {
       "name": "2. Admin APIs (JWT-protected — internal dashboard)",
-      "description": "Internal management APIs consumed by the React admin UI. Require a valid admin/seller JWT in {{ADMIN_TOKEN}}.",
+      "description": "Internal management APIs consumed by the React admin UI. Require a valid admin/seller JWT in {{ADMIN_TOKEN}}.\n\n**First:** run `POST /auth/login (set ADMIN_TOKEN)` and set {{ADMIN_PHONE}} / {{ADMIN_PASSWORD}} collection variables.",
       "item": [
+        {
+          "name": "POST /auth/login (set ADMIN_TOKEN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "const header = pm.response.headers.get('Authorization');",
+                  "const token = json?.data?.accessToken;",
+                  "if (header) {",
+                  "  pm.collectionVariables.set('ADMIN_TOKEN', header);",
+                  "} else if (token) {",
+                  "  pm.collectionVariables.set('ADMIN_TOKEN', `Bearer ${token}`);",
+                  "}",
+                  "pm.test('Login OK', () => pm.response.to.have.status(200));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneNumber\": \"{{ADMIN_PHONE}}\",\n  \"password\": \"{{ADMIN_PASSWORD}}\",\n  \"isLoginWithPassword\": true,\n  \"isLoginWithOtp\": false,\n  \"loginRole\": \"ADMIN\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:5001/api/v1/auth/login",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5001",
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "description": "Admin password login. On success sets collection variable ADMIN_TOKEN automatically."
+          },
+          "response": [],
+          "id": "a9c9612d-edce-4555-ae9e-c35df9bdd86d"
+        },
         {
           "name": "GET /admin/dashboard/stats",
           "request": {
@@ -451,7 +570,8 @@
             },
             "description": "Aggregate KPIs."
           },
-          "response": []
+          "response": [],
+          "id": "41275965-58bd-4a98-9c58-3cb5b5633ba4"
         },
         {
           "name": "GET /admin/catalog/debug",
@@ -470,7 +590,8 @@
             },
             "description": "Catalog build diagnostics."
           },
-          "response": []
+          "response": [],
+          "id": "9cd5e5e7-b329-4c37-a587-07cb60ddfaac"
         },
         {
           "name": "GET /admin/catalog/items/:providerId",
@@ -495,7 +616,8 @@
             },
             "description": "Live /on_search items for a provider."
           },
-          "response": []
+          "response": [],
+          "id": "e5604c04-5b60-4212-869e-2ecc2c38d99a"
         },
         {
           "name": "GET /admin/orders",
@@ -524,7 +646,8 @@
             },
             "description": ""
           },
-          "response": []
+          "response": [],
+          "id": "15affa2e-0efa-489b-81ce-e28f1acc03af"
         },
         {
           "name": "GET /admin/orders/:orderId",
@@ -543,7 +666,8 @@
             },
             "description": ""
           },
-          "response": []
+          "response": [],
+          "id": "a430ecf3-bb5b-4c24-8e23-be21d07bd035"
         },
         {
           "name": "POST /admin/orders/:orderId/fulfillment",
@@ -575,7 +699,8 @@
               }
             }
           },
-          "response": []
+          "response": [],
+          "id": "392edf8d-ff78-4a3a-91e0-6da8418c1e0a"
         },
         {
           "name": "GET /admin/providers",
@@ -594,7 +719,8 @@
             },
             "description": ""
           },
-          "response": []
+          "response": [],
+          "id": "e7368248-ce7d-481d-bfd3-e30a42cd9b75"
         },
         {
           "name": "GET /admin/providers/:providerId",
@@ -613,7 +739,8 @@
             },
             "description": ""
           },
-          "response": []
+          "response": [],
+          "id": "1a3bf3f4-12f2-496a-8c16-f77e8dd93df4"
         },
         {
           "name": "PATCH /admin/providers/:providerId/toggle",
@@ -632,7 +759,8 @@
             },
             "description": ""
           },
-          "response": []
+          "response": [],
+          "id": "5e7dd3db-21fe-4312-b353-4efa840245a6"
         },
         {
           "name": "GET /admin/ppf",
@@ -657,7 +785,8 @@
             },
             "description": ""
           },
-          "response": []
+          "response": [],
+          "id": "5bc91632-8797-437a-9e31-9ef72236e5e7"
         },
         {
           "name": "GET /admin/ppf/order/:orderId",
@@ -676,7 +805,8 @@
             },
             "description": ""
           },
-          "response": []
+          "response": [],
+          "id": "447b6d41-e0e9-4031-ab39-3d34ad67c6df"
         },
         {
           "name": "POST /admin/ppf/trigger",
@@ -700,7 +830,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"order_id\": \"{{ORDER_ID}}\"\n}",
+              "raw": "{\n  \"ondc_order_id\": \"{{ORDER_ID}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -708,7 +838,8 @@
               }
             }
           },
-          "response": []
+          "response": [],
+          "id": "28c9817e-9e2b-44d9-a962-2ba5aa83a891"
         },
         {
           "name": "GET /admin/logs",
@@ -737,7 +868,8 @@
             },
             "description": ""
           },
-          "response": []
+          "response": [],
+          "id": "d3b8a84d-f0bc-47c1-af2c-ea84e0e9eec5"
         },
         {
           "name": "GET /admin/logs/:transactionId",
@@ -756,7 +888,8 @@
             },
             "description": ""
           },
-          "response": []
+          "response": [],
+          "id": "8d3915f1-5e22-4a8e-8470-bbbbb03a2006"
         },
         {
           "name": "DELETE /admin/logs",
@@ -775,7 +908,8 @@
             },
             "description": ""
           },
-          "response": []
+          "response": [],
+          "id": "b5903bd1-15cb-4c9e-90b4-28d3768600e2"
         },
         {
           "name": "GET /admin/transactions",
@@ -794,7 +928,8 @@
             },
             "description": ""
           },
-          "response": []
+          "response": [],
+          "id": "a2de8371-38a1-4368-bb4e-86416645f065"
         },
         {
           "name": "DELETE /admin/transactions",
@@ -813,7 +948,8 @@
             },
             "description": ""
           },
-          "response": []
+          "response": [],
+          "id": "486e3597-7cbd-49b1-8927-fbfb2cfb795a"
         },
         {
           "name": "GET /admin/request-monitor/counts",
@@ -832,7 +968,8 @@
             },
             "description": ""
           },
-          "response": []
+          "response": [],
+          "id": "a727be9f-b838-48e8-ad03-0269811b2bb8"
         },
         {
           "name": "GET /admin/request-monitor",
@@ -857,7 +994,8 @@
             },
             "description": ""
           },
-          "response": []
+          "response": [],
+          "id": "52147694-b855-46f5-9168-3cc9a0a32dab"
         },
         {
           "name": "GET /admin/request-monitor/:transactionId",
@@ -876,7 +1014,8 @@
             },
             "description": ""
           },
-          "response": []
+          "response": [],
+          "id": "90b51a61-3486-40fb-a263-80f5e5e59cec"
         },
         {
           "name": "GET /admin/issues",
@@ -895,9 +1034,11 @@
             },
             "description": ""
           },
-          "response": []
+          "response": [],
+          "id": "5b65fc4e-7f6b-4a8d-a24a-67e220d66682"
         }
-      ]
+      ],
+      "id": "3f456334-f85d-4e4e-9fc0-00c7c29bb66b"
     },
     {
       "name": "3. Health / Test",
@@ -914,7 +1055,8 @@
             },
             "description": ""
           },
-          "response": []
+          "response": [],
+          "id": "9b2b666f-9c63-4505-af27-4ae0af07d72c"
         },
         {
           "name": "GET /ondc/test/ping",
@@ -928,7 +1070,8 @@
             },
             "description": ""
           },
-          "response": []
+          "response": [],
+          "id": "dae880d1-ba36-4f8c-92ba-381619d229cc"
         },
         {
           "name": "GET /ondc/test/catalog",
@@ -942,9 +1085,11 @@
             },
             "description": ""
           },
-          "response": []
+          "response": [],
+          "id": "18d181e0-d5af-4c7e-ac9e-d3a1a0f17428"
         }
-      ]
+      ],
+      "id": "dc91ddb3-4a05-4a0b-ad5d-95fc7075c004"
     },
     {
       "name": "4. Domain search examples",
@@ -982,7 +1127,8 @@
             },
             "description": "RET10 grocery search."
           },
-          "response": []
+          "response": [],
+          "id": "ff6d44a2-d03b-4fa9-8055-dff8ef3c0242"
         },
         {
           "name": "POST /search — RET16 Home & Kitchen",
@@ -1017,9 +1163,11 @@
             },
             "description": "RET16 home & kitchen search."
           },
-          "response": []
+          "response": [],
+          "id": "c2ff3e97-4b92-4ff4-a268-e768f7c82fdb"
         }
-      ]
+      ],
+      "id": "b1ee0c62-6367-4c21-8356-965dca90f67c"
     }
   ],
   "variable": [
@@ -1111,6 +1259,16 @@
     {
       "key": "ADMIN_TOKEN",
       "value": "Bearer <paste_admin_jwt>",
+      "type": "string"
+    },
+    {
+      "key": "ADMIN_PHONE",
+      "value": "+919876543210",
+      "type": "string"
+    },
+    {
+      "key": "ADMIN_PASSWORD",
+      "value": "",
       "type": "string"
     }
   ]

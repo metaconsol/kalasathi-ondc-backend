@@ -559,4 +559,13 @@ CREATE TABLE IF NOT EXISTS `overall_txns` (
   KEY `idx_archived` (`is_archived`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- -----------------------------------------------------------------------------
+-- STEP 3 — PPF/RSF recon extended columns (NTS10 v2.0.0 bidirectional flow)
+-- -----------------------------------------------------------------------------
+ALTER TABLE `ondc_ppf_recon` ADD COLUMN IF NOT EXISTS `order_status` varchar(50) DEFAULT NULL AFTER `ondc_order_id`;
+ALTER TABLE `ondc_ppf_recon` ADD COLUMN IF NOT EXISTS `quote_json` longtext DEFAULT NULL AFTER `total_amount`;
+ALTER TABLE `ondc_ppf_recon` ADD COLUMN IF NOT EXISTS `direction` varchar(20) NOT NULL DEFAULT 'OUTBOUND' AFTER `settlements_json`;
+ALTER TABLE `ondc_ppf_recon` ADD COLUMN IF NOT EXISTS `inbound_recon_payload` longtext DEFAULT NULL AFTER `direction`;
+ALTER TABLE `ondc_ppf_recon` ADD COLUMN IF NOT EXISTS `outbound_on_recon_payload` longtext DEFAULT NULL AFTER `on_recon_payload`;
+
 SET FOREIGN_KEY_CHECKS = 1;

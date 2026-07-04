@@ -1,12 +1,15 @@
 /**
- * PPF (Payment Protection Framework) Controllers.
+ * PPF (Payment Protection Framework) / RSF Controllers.
  *
- * Beckn endpoint:
- *   POST /api/v1/ondc/on_receiver_recon  — BAP → BPP settlement callback
+ * Beckn endpoints (ONDC:NTS10 v2.0.0):
+ *   POST /api/v1/ondc/recon              — BAP/collector → BPP/receiver
+ *   POST /api/v1/ondc/on_recon           — BAP response to BPP-initiated recon
+ *   POST /api/v1/ondc/on_receiver_recon   — legacy alias → on_recon
  *
  * Admin endpoints:
- *   GET  /api/v1/ondc/admin/ppf          — list PPF recon records
- *   POST /api/v1/ondc/admin/ppf/trigger  — manually trigger recon for an order
+ *   GET  /api/v1/ondc/admin/ppf
+ *   GET  /api/v1/ondc/admin/ppf/order/:orderId
+ *   POST /api/v1/ondc/admin/ppf/trigger
  */
 
 import type { Request, Response } from 'express';
@@ -16,33 +19,104 @@ import { ppfModel } from '~/ondc/models/ppf.model';
 import { txnLogModel } from '~/ondc/models/log.model';
 import { buildAck } from '~/ondc/utils/payload.builder';
 import { ondcLogger } from '~/ondc/utils/logger.util';
-import type { BecknContext } from '~/ondc/types/beckn.types';
 
-/** POST /api/v1/ondc/on_receiver_recon — Beckn callback from BAP */
-export async function handleOnReceiverRecon(req: Request, res: Response): Promise<void> {
-  const ctx = (req.body as { context?: BecknContext })?.context;
-  res.status(200).json(buildAck(ctx ?? ({} as BecknContext)));
+function ntsAckContext(body: Record<string, any>) {
+  const ctx = body?.context ?? {};
+  return {
+    domain: ctx.domain ?? 'ONDC:NTS10',
+    country: ctx.location?.country?.code ?? 'IND',
+    city: ctx.location?.city?.code ?? 'std:080',
+    core_version: ctx.version ?? '2.0.0',
+    action: ctx.action ?? 'recon',
+    bap_id: ctx.bap_id ?? '',
+    bap_uri: ctx.bap_uri ?? '',
+    bpp_id: ctx.bpp_id ?? '',
+    bpp_uri: ctx.bpp_uri ?? '',
+    transaction_id: ctx.transaction_id ?? '',
+    message_id: ctx.message_id ?? '',
+    timestamp: ctx.timestamp ?? new Date().toISOString(),
+    ttl: ctx.ttl ?? 'P1D',
+  };
+}
+
+function parsePpfRow(row: Awaited<ReturnType<typeof ppfModel.findByOrderId>>[number]) {
+  const safeParse = (json: string | null) => {
+    if (!json) return null;
+    try {
+      return JSON.parse(json);
+    } catch {
+      return null;
+    }
+  };
+  return {
+    ...row,
+    quote: safeParse(row.quote_json ?? null),
+    settlements: safeParse(row.settlements_json),
+    inbound_recon: safeParse(row.inbound_recon_payload ?? null),
+    on_recon_received: safeParse(row.on_recon_payload ?? null),
+    on_recon_sent: safeParse(row.outbound_on_recon_payload ?? null),
+  };
+}
+
+/** POST /api/v1/ondc/recon — collector sends recon to receiver (us as BPP) */
+export async function handleRecon(req: Request, res: Response): Promise<void> {
+  const body = req.body as Record<string, any>;
+  const ackCtx = ntsAckContext(body);
+  res.status(200).json(buildAck(ackCtx as any));
 
   setImmediate(async () => {
     try {
       await txnLogModel.insert({
-        transaction_id: ctx?.transaction_id ?? '',
-        message_id: ctx?.message_id ?? '',
-        action: 'on_receiver_recon',
+        transaction_id: ackCtx.transaction_id,
+        message_id: ackCtx.message_id,
+        action: 'recon',
         direction: 'inbound',
-        bap_id: ctx?.bap_id ?? '',
-        bpp_id: ctx?.bpp_id ?? null,
-        domain: ctx?.domain ?? 'ONDC:NTS10',
+        bap_id: ackCtx.bap_id,
+        bpp_id: ackCtx.bpp_id,
+        domain: 'ONDC:NTS10',
         http_status: null,
         ack_status: 'ACK',
         payload_json: JSON.stringify(req.body),
         error_message: null,
       });
-      await ppfService.processOnRecon(req.body);
+      await ppfService.handleInboundRecon(req.body);
     } catch (err) {
-      ondcLogger.error('on_receiver_recon async error', { err });
+      ondcLogger.error('recon async error', { err });
     }
   });
+}
+
+/** POST /api/v1/ondc/on_recon — BAP responds to our recon */
+export async function handleOnRecon(req: Request, res: Response): Promise<void> {
+  const body = req.body as Record<string, any>;
+  const ackCtx = ntsAckContext({ ...body, context: { ...body.context, action: 'on_recon' } });
+  res.status(200).json(buildAck(ackCtx as any));
+
+  setImmediate(async () => {
+    try {
+      await txnLogModel.insert({
+        transaction_id: ackCtx.transaction_id,
+        message_id: ackCtx.message_id,
+        action: 'on_recon',
+        direction: 'inbound',
+        bap_id: ackCtx.bap_id,
+        bpp_id: ackCtx.bpp_id,
+        domain: 'ONDC:NTS10',
+        http_status: null,
+        ack_status: 'ACK',
+        payload_json: JSON.stringify(req.body),
+        error_message: body.error?.message ?? null,
+      });
+      await ppfService.processOnRecon(req.body);
+    } catch (err) {
+      ondcLogger.error('on_recon async error', { err });
+    }
+  });
+}
+
+/** POST /api/v1/ondc/on_receiver_recon — legacy alias */
+export async function handleOnReceiverRecon(req: Request, res: Response): Promise<void> {
+  return handleOnRecon(req, res);
 }
 
 /** GET /api/v1/ondc/admin/ppf — list PPF recon records */
@@ -56,18 +130,19 @@ export async function listPpfRecon(req: Request, res: Response): Promise<void> {
     limit: parseInt(limit, 10),
     offset: parseInt(offset, 10),
   });
-  ApiResponse.success(res, 'PPF recon records', rows);
+  ApiResponse.success(res, 'PPF recon records', rows.map(parsePpfRow));
 }
 
-/** GET /api/v1/ondc/admin/ppf/:orderId — recon records for one order */
+/** GET /api/v1/ondc/admin/ppf/order/:orderId — recon history for one order */
 export async function getPpfReconByOrder(req: Request, res: Response): Promise<void> {
   const rows = await ppfModel.findByOrderId(req.params['orderId'] as string);
-  ApiResponse.success(res, 'PPF recon for order', rows);
+  ApiResponse.success(res, 'PPF recon for order', rows.map(parsePpfRow));
 }
 
 /** POST /api/v1/ondc/admin/ppf/trigger — manually send recon to BAP */
 export async function triggerPpfRecon(req: Request, res: Response): Promise<void> {
-  const { ondc_order_id } = req.body as { ondc_order_id: string };
+  const body = req.body as { ondc_order_id?: string; order_id?: string };
+  const ondc_order_id = body.ondc_order_id ?? body.order_id;
   if (!ondc_order_id) {
     res.status(400).json({ error: 'ondc_order_id required' });
     return;
