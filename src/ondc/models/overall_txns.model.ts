@@ -59,6 +59,30 @@ export const overallTxnsModel = {
     return rows[0] ?? null;
   },
 
+  /**
+   * Marks the one solicited /on_status response allowed for buyer /status polling.
+   * Returns false when a previous /status request already claimed the marker.
+   */
+  async claimSolicitedOnStatus(txnId: string, orderStatus?: string | null): Promise<boolean> {
+    const result = await ondcExec(
+      `UPDATE overall_txns
+       SET on_status = 1, order_status = COALESCE(?, order_status), updated_at = NOW()
+       WHERE txn_id = ? AND COALESCE(on_status, 0) = 0`,
+      [orderStatus ?? null, txnId],
+    );
+    if (result.affectedRows > 0) return true;
+
+    const existing = await this.findByTxnId(txnId);
+    if (existing) return false;
+
+    await ondcExec(
+      `INSERT INTO overall_txns (txn_id, on_status, order_status)
+       VALUES (?, 1, ?)`,
+      [txnId, orderStatus ?? null],
+    );
+    return true;
+  },
+
   async list(
     filters: { limit?: number; offset?: number; archived?: boolean } = {},
   ): Promise<OverallTxnRow[]> {

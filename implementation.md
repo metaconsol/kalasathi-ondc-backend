@@ -1,3 +1,76 @@
+### Branch 035
+
+**Date:** 2026-07-06
+
+**Status:** Completed
+
+**Area:** ONDC — Track flow & Admin order detail
+
+**What:**
+
+Persisted a tracking-unavailable marker for transactions and surfaced a clear tracking message in the admin order detail API response so the seller dashboard can show the same "Tracking is not available for this order" text that the Pramaan buyer UI displays.
+
+**Why:**
+
+- When a buyer (Pramaan) clicks Track and `tracking=false`, the buyer test UI shows an explicit NACK `Tracking is not available for this order`. The seller admin dashboard should display the same message (not leave the field blank) so operations and support can see tracking state.
+- All data must remain database-driven (no UI-only toggles). Persisting the marker ensures consistency across callbacks, logs and admin views.
+
+**Changes:** file name and description of file change:
+
+- `src/ondc/controllers/beckn/track.controller.ts`
+  - When the primary fulfillment has no `tracking_url`, the `/track` handler now upserts/patches the `overall_txns` row for the transaction and writes `on_track: 0` and `track_link: null`, then returns the standard sync NACK (`Tracking is not available for this order`). This persists the failed-track marker so downstream admin views can detect it.
+
+- `src/ondc/controllers/admin/orders.controller.ts`
+  - `GET /api/v1/ondc/admin/orders/:orderId` now enriches each fulfillment with `tracking_available: boolean` and `tracking_message: string|null` (set to `'Tracking is not available for this order'` when no `tracking_url`). This lets the UI render a helpful message instead of a blank field.
+
+- Additional notes:
+  - No other functional changes were made. The change is read/write on `overall_txns` and read enrichment in the admin order detail response.
+  - Build completed successfully after the change.
+
+**Branch:** 035
+
+---
+
+### Branch 033
+
+**Date:** 2026-07-04
+
+**Status:** Completed
+
+**Area:** ONDC Catalog Variant Grouping (`on_search` parent item id)
+
+**What:**
+
+Updated the `on_search` catalog variant-grouping behavior so `parent_item_id` is emitted only for items that are actually generated from product variants. Standalone/non-variant catalog items no longer receive `parent_item_id`, and the payload does not force `parent_item_id: ""`.
+
+**Why:**
+
+- The catalog payload should reflect database-driven product structure.
+- If a product has active variants in `product_variants`, its variant items should expose their variant group through `parent_item_id`.
+- If a product has no variant group, `parent_item_id` should be omitted from that item instead of being sent as an empty string.
+- This keeps the payload semantically clean, even though the current Pramaan 1.2.5 validator expects `parent_item_id` to exist as an empty string for every item.
+
+**Changes:** file name and description of file change:
+
+- `src/ondc/adapters/product.adapter.ts`
+  Existing variant group resolution remains database-driven: items receive `variantGroupId = "VG-<product_id>"` only when `row.has_variants` is true and the row has a non-null `variant_id`; standalone products receive an empty internal variant group id.
+
+- `src/ondc/services/catalog.service.ts`
+  Passes the internal `_variantGroupId` from each built item into `applyVariantGrouping()` so grouping can decide whether `parent_item_id` should be present in the final payload.
+
+- `src/ondc/utils/catalog.builders.ts`
+  Updated `applyVariantGrouping()` so items with a real variant group get `parent_item_id = groupId`, while standalone items never enter the group map and therefore omit the `parent_item_id` key entirely. The internal `_variantGroupId` helper field is stripped before returning the final catalog items.
+
+**Verification:**
+
+- Ran `npm run build` successfully.
+- Confirmed the intended behavior:
+  - Variant item: `parent_item_id` is present with a value like `VG-6`.
+  - Standalone item: `parent_item_id` key is omitted.
+  - Empty `parent_item_id: ""` is not forced into the payload.
+
+**Note:** This is the desired clean catalog behavior. It will not remove Pramaan's current `on_search` errors for `parent_item_id`, because the Pramaan validator shown in the report checks `.to.exist.and.to.be.empty` for every item.
+
 ### Branch 032
 
 **Date:** 2026-07-04

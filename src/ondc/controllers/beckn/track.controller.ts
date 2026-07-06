@@ -47,7 +47,15 @@ export async function handleTrack(req: Request, res: Response): Promise<void> {
     const trackingUrl = primaryFulfillment?.tracking_url ?? null;
 
     if (!trackingUrl) {
-      // If tracking is disabled/not available, send NACK synchronously
+      // If tracking is disabled/not available, persist the failed track attempt
+      // and return a synchronous NACK so the dashboard can reflect that state.
+      try {
+        await overallTxnsModel.upsert(txnId, ctx.bpp_id ?? null);
+        await overallTxnsModel.patch(txnId, { on_track: 0, track_link: null });
+      } catch (err) {
+        ondcLogger.error('track db marker update failed', { txnId, err });
+      }
+
       return res.status(200).json(
         buildAck(ctx, {
           type: 'CONTEXT-ERROR',

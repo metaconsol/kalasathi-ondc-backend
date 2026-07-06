@@ -49,11 +49,17 @@ export async function listOrders(req: Request, res: Response): Promise<void> {
 export async function getOrder(req: Request, res: Response): Promise<void> {
   const order = await orderModel.findByOndcOrderId(req.params['orderId'] as string);
   if (!order) throw new AppError('Order not found', 404);
-  const [history, items, fulfillments] = await Promise.all([
+  const [history, items, rawFulfillments] = await Promise.all([
     orderModel.getStatusHistory(order.ondc_order_id),
     orderModel.getItems(order.ondc_order_id),
     orderModel.getFulfillments(order.ondc_order_id),
   ]);
+
+  const fulfillments = rawFulfillments.map((fulfillment) => ({
+    ...fulfillment,
+    tracking_available: !!fulfillment.tracking_url,
+    tracking_message: fulfillment.tracking_url ? null : 'Tracking is not available for this order',
+  }));
 
   ApiResponse.success(res, 'Order details', {
     order: { ...order, history, items, fulfillments },
