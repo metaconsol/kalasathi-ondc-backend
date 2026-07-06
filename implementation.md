@@ -1,3 +1,30 @@
+### Branch 037
+
+**Date:** 2026-07-06
+
+**Status:** Completed
+
+**Area:** ONDC Payload Validation (on_init, on_confirm, on_cancel)
+
+**What:**
+Fixed ONDC schema validation errors for `bank_name`, `branch_name`, `tags` array, `gps` location, and `provider.locations` array across `on_init`, `on_confirm`, and `on_cancel` beckn payloads. Ensures all data is strictly fetched from the database and omits optional fields when database values are missing, avoiding hardcoded fallback strings.
+
+**Why:**
+The ONDC validator was rejecting payloads because missing optional fields were being passed as empty strings (`""`), causing `minLength 1` errors. Missing arrays (`tags` and `provider.locations`) were being left `undefined` instead of empty arrays (`[]`), causing type assertion errors. The fix ensures strict schema compliance and dynamic database-driven payload construction.
+
+**Changes:** file name and description of file change:
+
+- `src/ondc/controllers/beckn/init.controller.ts`
+  Removed hardcoded `""` fallbacks for `bank_name` and `branch_name` in settlement details, omitting them entirely if missing in the DB. Ensured `quote.breakup[].item.tags` always defaults to an array `[]` if missing.
+- `src/ondc/controllers/beckn/confirm.controller.ts`
+  Applied the same dynamic DB check for settlement details and array formatting for `tags`. Fixed `start.location.gps` to strictly check truthiness, preventing empty strings `""` (length 0) from being sent and failing `minLength 1` validation.
+- `src/ondc/controllers/beckn/cancel.controller.ts`
+  Applied the dynamic settlement details fix for `bank_name` and `branch_name`. Fixed `provider.locations` to pull from original order or DB, falling back to a safe empty array `[]` instead of `undefined` to satisfy validator requirements.
+- `src/ondc/utils/catalog.builders.ts`
+  Updated `buildOnInitPayment` to conditionally construct `settlement_details`, ensuring `bank_name` and `branch_name` are fully omitted rather than defaulted to empty strings `""` when missing.
+
+---
+
 ### Branch 032
 
 **Date:** 2026-07-04
