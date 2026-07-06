@@ -10,6 +10,7 @@ import { buildAck, buildOnSelect } from '~/ondc/utils/payload.builder';
 import { becknService } from '~/ondc/services/beckn.service';
 import { observabilityService } from '~/ondc/services/observability.service';
 import { resolveOndcCatalogRow } from '~/ondc/adapters/product.adapter';
+import { checkProductServiceability } from '~/ondc/services/serviceability.service';
 import { fetchStoreById, fetchStoreLocations } from '~/ondc/adapters/seller.adapter';
 import { transactionModel } from '~/ondc/models/transaction.model';
 import { txnLogModel } from '~/ondc/models/log.model';
@@ -77,8 +78,17 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
       });
       await overallTxnsModel.upsert(txnId);
 
+      // Buyer's delivery pincode from the Delivery fulfillment's end location —
+      // used for per-product serviceability (products.availability_mode / pincodes).
+      const deliveryFulfillment =
+        (order.fulfillments ?? []).find((f: any) => (f?.type ?? 'Delivery') === 'Delivery') ??
+        order.fulfillments?.[0];
+      const buyerPincode =
+        String(deliveryFulfillment?.end?.location?.address?.area_code ?? '').trim() || null;
+
       // Validate items & build quote lines
       const validatedItems: any[] = [];
+      const serviceCheckItems: Array<{ itemId: string; productId: number }> = [];
       const lines: QuoteLineInput[] = [];
       const itemErrors: string[] = [];
       const requestErrors: string[] = [];
@@ -150,7 +160,28 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
           id: reqItem.id,
           fulfillment_id: fulfillmentId,
         });
+        serviceCheckItems.push({ itemId: reqItem.id, productId: row.product_id });
       }
+
+      // Per-product serviceability to the buyer's delivery pincode (mirrors the
+      // storefront check). Drives the fulfillment Serviceable/Non-serviceable state.
+      const serviceResults = await Promise.all(
+        serviceCheckItems.map(async (it) => ({
+          ...it,
+          result: await checkProductServiceability(it.productId, buyerPincode),
+        })),
+      );
+      const nonServiceable = serviceResults.filter((r) => !r.result.serviceable);
+      const fulfillmentStateCode = nonServiceable.length > 0 ? 'Non-serviceable' : 'Serviceable';
+      const serviceabilityErrors = nonServiceable.map(
+        (r) =>
+          `Item ${r.itemId} not deliverable${buyerPincode ? ` to ${buyerPincode}` : ''}` +
+          ` (${r.result.reason ?? 'not serviceable'})`,
+      );
+      // 40002 if the only reason is stock; 30009 (location not serviceable) otherwise.
+      const hasNonStockServiceFailure = nonServiceable.some(
+        (r) => r.result.reason !== 'out_of_stock',
+      );
 
       // TODO: integrate shipping API for accurate delivery cost
       const deliveryCharge = 0;
@@ -193,7 +224,7 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
             tracking: false,
             '@ondc/org/category': fulfillmentCategory,
             '@ondc/org/TAT': fulfillmentTAT,
-            state: { descriptor: { code: 'Serviceable' } },
+            state: { descriptor: { code: fulfillmentStateCode } },
           }),
         ),
         quote,
@@ -203,12 +234,14 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
         requestErrors.push('No serviceable items found in order');
       }
 
+      const domainItemIssues = [...itemErrors, ...serviceabilityErrors];
       const outboundError: BecknError | undefined =
-        requestErrors.length || itemErrors.length
+        requestErrors.length || domainItemIssues.length
           ? {
               type: requestErrors.length ? 'CORE-ERROR' : 'DOMAIN-ERROR',
-              code: requestErrors.length ? '30000' : '40002',
-              message: [...requestErrors, ...itemErrors].join('; '),
+              // 30000 request error; 30009 location not serviceable; else 40002 stock.
+              code: requestErrors.length ? '30000' : hasNonStockServiceFailure ? '30009' : '40002',
+              message: [...requestErrors, ...domainItemIssues].join('; '),
             }
           : undefined;
 
