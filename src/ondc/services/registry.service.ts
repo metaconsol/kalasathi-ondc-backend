@@ -29,13 +29,15 @@ export const registryService = {
   /**
    * Look up a subscriber's signing public key from the ONDC registry.
    * The request is signed with the BPP's own credentials — required by registry.
+   *
+   * Filters by subscriber_id + ukId ONLY: those uniquely identify the signing
+   * key across all subscriber roles. A hardcoded type filter (old behaviour:
+   * type='BAP') made gateway/BPP/logistics-signed requests fail lookup, and
+   * request-derived domain/city both poisoned the filter and disagreed with the
+   * cache key. A type='BAP' retry is kept as a fallback for registry versions
+   * that behave differently without a type filter.
    */
-  async lookupPublicKey(
-    subscriberId: string,
-    uniqueKeyId: string,
-    domain = '*',
-    city = '*',
-  ): Promise<string | null> {
+  async lookupPublicKey(subscriberId: string, uniqueKeyId: string): Promise<string | null> {
     const key = cacheKey(subscriberId, uniqueKeyId);
     const cached = pubKeyCache.get(key);
 
@@ -43,20 +45,18 @@ export const registryService = {
       return cached.pubKey;
     }
 
-    const requestBody = {
-      subscriber_id: subscriberId,
-      ukId: uniqueKeyId,
-      type: 'BAP',
-      country: 'IND',
-      domain: domain || '*',
-      city: city || '*',
-    };
+    const doLookup = async (withBapType: boolean): Promise<string | null> => {
+      const requestBody: Record<string, string> = {
+        subscriber_id: subscriberId,
+        ukId: uniqueKeyId,
+        country: 'IND',
+        ...(withBapType ? { type: 'BAP' } : {}),
+      };
 
-    const bodyStr = JSON.stringify(requestBody);
-    const digest = bodyDigest(bodyStr);
-    const authHeader = signRequest(bodyStr);
+      const bodyStr = JSON.stringify(requestBody);
+      const digest = bodyDigest(bodyStr);
+      const authHeader = signRequest(bodyStr);
 
-    try {
       const { data } = await axios.post<OndcRegistryLookupResponse[]>(
         ondcNetwork.registryLookup,
         requestBody,
@@ -80,15 +80,19 @@ export const registryService = {
       if (!entry) {
         entry = arr.find((r) => r.subscriber_id === subscriberId && r.signing_public_key);
       }
+      return entry?.signing_public_key ?? null;
+    };
 
-      if (!entry?.signing_public_key) return null;
+    try {
+      const pubKey = (await doLookup(false)) ?? (await doLookup(true));
+      if (!pubKey) return null;
 
       pubKeyCache.set(key, {
-        pubKey: entry.signing_public_key,
+        pubKey,
         expiresAt: Date.now() + CACHE_TTL_MS,
       });
 
-      return entry.signing_public_key;
+      return pubKey;
     } catch (err) {
       ondcLogger.error('Registry lookup failed', { subscriberId, uniqueKeyId, err });
       return cached?.pubKey ?? null;

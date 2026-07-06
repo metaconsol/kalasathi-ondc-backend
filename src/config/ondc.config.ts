@@ -43,6 +43,12 @@ export const ondcEnv = {
   // Signature skew tolerance in seconds
   headerMaxSkewSec: parseInt(optionalEnv('ONDC_HEADER_MAX_SKEW_SEC', '300'), 10),
 
+  // Explicit opt-in for the ?insecure=1 signature-verification bypass (testing).
+  // Server-side flag only — NEVER derived from request headers. Loopback callers
+  // (local Postman/curl) are additionally allowed without this flag.
+  // Set ONDC_ALLOW_INSECURE=1 on the preprod box while testing; remove for prod.
+  allowInsecure: optionalEnv('ONDC_ALLOW_INSECURE', '0') === '1',
+
   // Buyer app finder fee default (%)
   buyerFinderFeeDefault: optionalEnv('ONDC_BUYER_FINDER_FEE_DEFAULT', '3'),
 
