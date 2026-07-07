@@ -202,7 +202,8 @@ export function buildSettlementsFromOrder(
   const withholding = money(payment['@ondc/org/withholding_amount'] ?? 0);
   const settleAmount = money(total - parseFloat(commission));
   const updatedAt = nowNtsIso();
-  const cpId = counterpartyId ?? order.bap_id ?? ondcEnv.subscriberId;
+  // NTS recon request: counterparty_id is the receiver (BPP), per ONDC RSF reference.
+  const cpId = counterpartyId ?? order.bpp_id ?? ondcEnv.subscriberId;
 
   const settlementDetails = payment['@ondc/org/settlement_details'] ?? [];
   const settlements: PpfSettlementItem[] = [];
@@ -292,15 +293,56 @@ function formatSettlementForRecon(s: PpfSettlementItem): Record<string, unknown>
   return out;
 }
 
+/** Fields allowed on on_recon settlements — counterparty_id is recon-request only. */
+const ON_RECON_SETTLEMENT_KEYS = [
+  'id',
+  'payment_id',
+  'status',
+  'type',
+  'amount',
+  'commission',
+  'withholding_amount',
+  'tcs',
+  'tds',
+  'delay_amount',
+  'settlement_ref_no',
+  'due_date',
+  'updated_at',
+] as const;
+
+const MONEY_KEYS = [
+  'amount',
+  'commission',
+  'withholding_amount',
+  'tcs',
+  'tds',
+  'delay_amount',
+] as const;
+
 /**
  * on_recon settlement shape — Pramaan/NTS rejects counterparty_id here
- * (it is valid on recon request only).
+ * (it is valid on recon request only). Uses an allowlist so no extra keys leak through.
  */
-function formatSettlementForOnRecon(s: Record<string, unknown>): Record<string, unknown> {
-  const out = { ...s };
-  delete out.counterparty_id;
-  delete out._unknown;
-  if (!out.type) delete out.type;
+function formatSettlementForOnRecon(
+  s: Record<string, unknown>,
+  accord = false,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of ON_RECON_SETTLEMENT_KEYS) {
+    if (!(key in s) || s[key] === undefined || s[key] === '') continue;
+    let val = s[key];
+    if (
+      accord &&
+      (MONEY_KEYS as readonly string[]).includes(key) &&
+      val &&
+      typeof val === 'object'
+    ) {
+      const { diff_value: _, ...rest } = val as MoneyField;
+      val = rest;
+    }
+    out[key] = val;
+  }
+  if (out.type === '') delete out.type;
   return out;
 }
 
@@ -319,6 +361,27 @@ function withDiff(ours: MoneyField, theirs: MoneyField): MoneyField {
     value: theirs.value ?? ours.value,
     diff_value: diff,
   };
+}
+
+/**
+ * Align our persisted settlement ids with the inbound recon row so reconcile can
+ * match by id even when the collector uses a different id format.
+ */
+export function alignSettlementIds(
+  ours: PpfSettlementItem[],
+  theirs: Array<Record<string, unknown>>,
+): PpfSettlementItem[] {
+  if (theirs.length === 0) return ours;
+  return ours.map((row, idx) => {
+    const their = theirs[idx] ?? theirs[0];
+    if (!their) return row;
+    return {
+      ...row,
+      id: String(their.id ?? row.id),
+      payment_id: String(their.payment_id ?? row.payment_id),
+      status: String(their.status ?? row.status) as PpfSettlementItem['status'],
+    };
+  });
 }
 
 /**
@@ -355,7 +418,12 @@ export function reconcileSettlements(
       'tds',
       'delay_amount',
     ] as const;
-    const merged: Record<string, unknown> = { ...their };
+    const merged: Record<string, unknown> = {};
+    for (const key of ON_RECON_SETTLEMENT_KEYS) {
+      if (key in their && their[key] !== undefined) merged[key] = their[key];
+    }
+    // Preserve recon-only counterparty_id for internal compare — stripped before on_recon send.
+    if (their.counterparty_id) merged.counterparty_id = their.counterparty_id;
     let rowMatch = true;
 
     for (const field of amountFields) {
@@ -410,7 +478,7 @@ export function buildOnReconMessage(
     'INR';
   const rawSettlements =
     settlements.length > 0 ? settlements : ((order.settlements as Record<string, unknown>[]) ?? []);
-  const onReconSettlements = rawSettlements.map(formatSettlementForOnRecon);
+  const onReconSettlements = rawSettlements.map((s) => formatSettlementForOnRecon(s, accord));
   return {
     context: buildNtsContext(ctx, 'on_recon'),
     message: {

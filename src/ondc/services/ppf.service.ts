@@ -21,6 +21,7 @@ import {
   buildQuoteFromOrder,
   buildReconOrderPayload,
   buildSettlementsFromOrder,
+  alignSettlementIds,
   mapOrderStatusForRecon,
   reconcileSettlements,
   type NtsContext,
@@ -61,7 +62,7 @@ async function loadOrderBundle(ondcOrderId: string) {
   const order = await orderModel.findByOndcOrderId(ondcOrderId);
   if (!order) return null;
   const items = await orderModel.getItems(ondcOrderId);
-  const settlements = buildSettlementsFromOrder(order, order.bap_id);
+  const settlements = buildSettlementsFromOrder(order, order.bpp_id ?? ondcEnv.subscriberId);
   const quote = buildQuoteFromOrder(order, items);
   const orderPayload = buildReconOrderPayload(order, items, settlements);
   return { order, items, settlements, quote, orderPayload };
@@ -184,6 +185,7 @@ export const ppfService = {
 
       const { order, settlements, orderPayload } = bundle;
       const theirs = (inboundOrder.settlements ?? []) as Array<Record<string, unknown>>;
+      const alignedOurs = alignSettlementIds(settlements, theirs);
 
       const prior = await ppfModel.findLatestByOrderAndTxn(orderId, ctx.transaction_id);
       let priorSettlements: Array<Record<string, unknown>> | undefined;
@@ -197,7 +199,7 @@ export const ppfService = {
       }
 
       const { accord, settlements: reconciled } = reconcileSettlements(
-        settlements,
+        alignedOurs,
         theirs,
         priorSettlements,
       );
@@ -207,13 +209,23 @@ export const ppfService = {
           ? reconciled
           : ((orderPayload.settlements as Record<string, unknown>[]) ?? []);
 
-      const onReconPayload = buildOnReconMessage(ctx, orderPayload, accord, finalSettlements);
+      const onReconPayload = buildOnReconMessage(
+        ctx,
+        {
+          id: orderId,
+          amount: inboundOrder.amount ?? orderPayload.amount,
+        },
+        accord,
+        finalSettlements,
+      );
 
       ondcLogger.info('PPF posting on_recon', {
         orderId,
         txnId: ctx.transaction_id,
         target: `${ctx.bap_uri.replace(/\/$/, '')}/on_recon`,
         accord,
+        settlementKeys: ((onReconPayload.message as { orders?: Array<{ settlements?: unknown[] }> })
+          ?.orders?.[0]?.settlements?.[0] ?? {}) as Record<string, unknown>,
       });
 
       const rowId = await ppfModel.create({
