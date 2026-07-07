@@ -541,19 +541,27 @@ export async function handleCancel(req: Request, res: Response): Promise<void> {
       const origPayment = origOrder.payment ?? dbPayment ?? {};
 
       // Build settlement details dynamically from seller profile and store info
-      const dynamicSettlementDetails = [
-        {
-          settlement_counterparty: 'seller-app',
-          settlement_phase: 'sale-amount',
-          settlement_type: 'neft',
-          beneficiary_name: String(sellerProfile?.business_name ?? store?.name ?? ''),
-          upi_address: String(sellerProfile?.upi_id ?? ''),
-          settlement_bank_account_no: String(sellerProfile?.bank_account_no ?? ''),
-          settlement_ifsc_code: String(sellerProfile?.bank_ifsc ?? ''),
-          bank_name: '',
-          branch_name: '',
-        },
-      ];
+      const rawBankName = String((sellerProfile as any)?.bank_name ?? '').trim();
+      const rawBranchName = String((sellerProfile as any)?.bank_branch ?? '').trim();
+
+      const dynamicSettlementObj: any = {
+        settlement_counterparty: 'seller-app',
+        settlement_phase: 'sale-amount',
+        settlement_type: 'neft',
+        beneficiary_name: String(sellerProfile?.business_name ?? store?.name ?? ''),
+        upi_address: String(sellerProfile?.upi_id ?? ''),
+        settlement_bank_account_no: String(sellerProfile?.bank_account_no ?? ''),
+        settlement_ifsc_code: String(sellerProfile?.bank_ifsc ?? ''),
+      };
+
+      if (rawBankName) {
+        dynamicSettlementObj.bank_name = rawBankName;
+      }
+      if (rawBranchName) {
+        dynamicSettlementObj.branch_name = rawBranchName;
+      }
+
+      const dynamicSettlementDetails = [dynamicSettlementObj];
 
       const payment = {
         uri: origPayment.uri ?? 'https://ondc.transaction.com/payment',
@@ -581,7 +589,14 @@ export async function handleCancel(req: Request, res: Response): Promise<void> {
       const cancelledOrder = {
         id: dbOrder.ondc_order_id,
         state: 'Cancelled',
-        provider: { id: dbOrder.provider_id },
+        provider: {
+          id: dbOrder.provider_id,
+          locations:
+            origOrder.provider?.locations ??
+            (storeLocations.length > 0
+              ? storeLocations.map((loc: any) => ({ id: String(loc.id) }))
+              : []),
+        },
         items: items.flatMap((i) => {
           const cFulfId = cancelFulfIdMap.get(i.item_id) ?? 'C1';
           return [

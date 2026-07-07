@@ -34,7 +34,7 @@ function ntsContextFromBody(body: Record<string, any>): NtsContext {
   const ctx = body.context ?? {};
   return {
     domain: ctx.domain ?? 'ONDC:NTS10',
-    location: ctx.location ?? { country: { code: 'IND' }, city: { code: 'std:080' } },
+    location: ctx.location ?? { country: { code: 'IND' }, city: { code: '*' } },
     version: ctx.version ?? '2.0.0',
     action: ctx.action ?? 'recon',
     bap_id: ctx.bap_id ?? '',
@@ -202,7 +202,20 @@ export const ppfService = {
         priorSettlements,
       );
 
-      const onReconPayload = buildOnReconMessage(ctx, orderPayload, accord, reconciled);
+      const finalSettlements =
+        reconciled.length > 0
+          ? reconciled
+          : ((orderPayload.settlements as Record<string, unknown>[]) ?? []);
+
+      const onReconPayload = buildOnReconMessage(ctx, orderPayload, accord, finalSettlements);
+
+      ondcLogger.info('PPF posting on_recon', {
+        orderId,
+        txnId: ctx.transaction_id,
+        target: `${ctx.bap_uri.replace(/\/$/, '')}/on_recon`,
+        accord,
+      });
+
       const rowId = await ppfModel.create({
         ondc_order_id: orderId,
         order_status: mapOrderStatusForRecon(order.status),

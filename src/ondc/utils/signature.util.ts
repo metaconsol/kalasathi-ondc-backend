@@ -25,8 +25,14 @@ const SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex'); // 12 bytes
 
 function rawPrivToNode(b64: string): crypto.KeyObject {
   const raw = Buffer.from(b64, 'base64');
-  // Take first 32 bytes (seed). The PHP stores seed[32]+pub[32] = 64 bytes total.
-  const seed = raw.length === 64 ? raw.subarray(0, 32) : raw.subarray(0, 32);
+  // Accept a 32-byte seed or the 64-byte libsodium secret key (seed[0:32] + pub[32:64]).
+  if (raw.length !== 64 && raw.length !== 32) {
+    throw new Error(
+      `BPP_SIGN_PRIV_KEY must be base64 of a 32-byte Ed25519 seed or 64-byte libsodium ` +
+        `secret key (seed||pub); decoded to ${raw.length} bytes — check the env value`,
+    );
+  }
+  const seed = raw.subarray(0, 32);
   return crypto.createPrivateKey({
     key: Buffer.concat([PKCS8_PREFIX, seed]),
     format: 'der',
@@ -45,15 +51,22 @@ function rawPubToNode(b64: string): crypto.KeyObject {
 
 // ---------- Digest ----------
 
-/** Returns "BLAKE-512=<b64>" if blake2b512 available, else "SHA-256=<b64>" */
+/**
+ * Returns "BLAKE-512=<b64>" — the digest ONDC mandates (BLAKE2b-512 network-wide).
+ * No fallback: a different hash would emit structurally-valid headers that every
+ * counterparty rejects, and would silently break inbound verification too.
+ * blake2b512 exists in Node ≥10 (OpenSSL 1.1.1+); it is only absent in FIPS/
+ * stripped OpenSSL builds, which must fail loudly, not downgrade.
+ */
 export function bodyDigest(body: string): string {
   try {
     const h = crypto.createHash('blake2b512').update(body, 'utf8').digest('base64');
     return `BLAKE-512=${h}`;
-  } catch {
-    // Node.js < 21 or OpenSSL without BLAKE2b — fall back to SHA-256
-    const h = crypto.createHash('sha256').update(body, 'utf8').digest('base64');
-    return `SHA-256=${h}`;
+  } catch (err) {
+    throw new Error(
+      'blake2b512 unavailable in this Node/OpenSSL build — ONDC requires BLAKE-512 digests; ' +
+        `refusing to sign/verify with a different hash (${err instanceof Error ? err.message : err})`,
+    );
   }
 }
 

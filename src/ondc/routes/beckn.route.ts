@@ -28,8 +28,11 @@ import {
 
 const router = express.Router();
 
-// All Beckn endpoints: log → validate context → verify signature → handle
-const becknMiddleware = [ondcRequestLogger, ondcContextValidator, ondcAuthMiddleware];
+// All Beckn endpoints: log → verify signature → validate context → handle.
+// Auth MUST run before validation: the validator can emit outbound NACK
+// callbacks to the request's bap_uri, which for an unauthenticated caller
+// would be an SSRF + signed-response oracle to an attacker-chosen URL.
+const becknMiddleware = [ondcRequestLogger, ondcAuthMiddleware, ondcContextValidator];
 
 /**
  * @route POST /api/v1/ondc/search

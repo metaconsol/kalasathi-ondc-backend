@@ -65,7 +65,16 @@ export function createApp(): Application {
    * Skips built-in parsers for multipart/form-data to allow Multer to handle streams.
    */
   const urlencodedParser = express.urlencoded({ extended: true, limit: '5mb' });
-  const jsonParser = express.json({ limit: '10mb', strict: true });
+  const jsonParser = express.json({
+    limit: '10mb',
+    strict: true,
+    // ONDC signature verification MUST hash the exact bytes the sender signed.
+    // JSON.parse→stringify does not round-trip whitespace/unicode-escapes, so we
+    // keep the raw body for /ondc auth (see ondcAuth.middleware.ts).
+    verify: (req, _res, buf) => {
+      (req as express.Request & { rawBody?: string }).rawBody = buf.toString('utf8');
+    },
+  });
 
   app.use((req, res, next) => {
     const contentType = req.headers['content-type'] || '';

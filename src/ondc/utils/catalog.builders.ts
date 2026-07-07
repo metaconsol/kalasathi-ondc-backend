@@ -604,17 +604,22 @@ export function buildOnInitPayment(total: number, settlement?: SettlementDetails
     '@ondc/org/settlement_window': 'P1D',
     '@ondc/org/withholding_amount': '0.00',
     '@ondc/org/settlement_details': [
-      {
-        settlement_counterparty: 'seller-app',
-        settlement_phase: 'sale-amount',
-        settlement_type: 'upi',
-        upi_address: settlement?.upiAddress ?? 'mrignayanee@ybl',
-        settlement_bank_account_no: settlement?.bankAccountNo ?? 'XXXXXXXXXXX',
-        settlement_ifsc_code: settlement?.ifscCode ?? 'XXXXXXX',
-        beneficiary_name: settlement?.beneficiaryName ?? SELLER_PROFILE.COMPANY_NAME,
-        bank_name: settlement?.bankName ?? 'HDFC Bank',
-        branch_name: settlement?.branchName ?? 'Main Branch',
-      },
+      (() => {
+        const obj: any = {
+          settlement_counterparty: 'seller-app',
+          settlement_phase: 'sale-amount',
+          settlement_type: 'upi',
+          upi_address: settlement?.upiAddress ?? '',
+          settlement_bank_account_no: settlement?.bankAccountNo ?? '',
+          settlement_ifsc_code: settlement?.ifscCode ?? '',
+          beneficiary_name: settlement?.beneficiaryName ?? SELLER_PROFILE.COMPANY_NAME,
+        };
+        const rawBank = String(settlement?.bankName ?? '').trim();
+        if (rawBank) obj.bank_name = rawBank;
+        const rawBranch = String(settlement?.branchName ?? '').trim();
+        if (rawBranch) obj.branch_name = rawBranch;
+        return obj;
+      })(),
     ],
   };
 }
