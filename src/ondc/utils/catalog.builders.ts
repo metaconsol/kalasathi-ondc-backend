@@ -698,7 +698,8 @@ export function buildProviderEntry(
 /**
  * Sets parent_item_id on variant siblings and emits the variant_group categories.
  * Mirrors PHP _ensure_variant_support + _add_variant_catalog_data:
- *   - groups with <2 members have no parent_item_id (they're standalone items)
+ *   - items with a variant group get parent_item_id
+ *   - standalone items omit parent_item_id entirely
  *   - each group contributes a category {id, descriptor, tags: [type=variant_group, attr...]}
  *   - attr tags reference item.tags.attribute.<code> based on which attributes vary
  *
@@ -748,6 +749,12 @@ export function applyVariantGrouping(items: ItemWithVariantMeta[]): {
   const categories: VariantCategory[] = [];
 
   for (const [groupId, idxs] of groups.entries()) {
+    // If the DB produced a variant group for this product, expose that group id
+    // on the item. Standalone items never enter this map, so the key is omitted.
+    for (const idx of idxs) {
+      items[idx]!.parent_item_id = groupId;
+    }
+
     if (idxs.length < 2) continue;
 
     // Collect which attribute codes vary across siblings
@@ -781,11 +788,6 @@ export function applyVariantGrouping(items: ItemWithVariantMeta[]): {
       const pb = VARIANT_ATTR_PRIORITY[b] ?? 999;
       return pa === pb ? a.localeCompare(b) : pa - pb;
     });
-
-    // Apply parent_item_id to siblings
-    for (const idx of idxs) {
-      items[idx]!.parent_item_id = groupId;
-    }
 
     const catTags: VariantCategory['tags'] = [
       { code: 'type', list: [{ code: 'type', value: 'variant_group' }] },

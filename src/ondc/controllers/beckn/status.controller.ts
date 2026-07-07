@@ -38,13 +38,24 @@ export async function handleStatus(req: Request, res: Response): Promise<void> {
         return;
       }
 
+      const shouldSendSolicitedOnStatus = await overallTxnsModel.claimSolicitedOnStatus(
+        txnId,
+        dbOrder.status,
+      );
+      if (!shouldSendSolicitedOnStatus) {
+        ondcLogger.info('status: duplicate buyer status poll ACKed without on_status callback', {
+          orderId: dbOrder.ondc_order_id,
+          txnId,
+          status: dbOrder.status,
+        });
+        return;
+      }
+
       const liveFulfillments = await orderModel.getFulfillments(dbOrder.ondc_order_id);
 
       // Full ONDC order: quote/items/billing/payment inherited from on_confirm,
       // fulfillment state/agent/tracking overlaid from live DB, order.state mapped.
       const onStatusOrder = await buildOnStatusOrder(dbOrder, liveFulfillments);
-
-      await overallTxnsModel.patch(txnId, { on_status: 1, order_status: dbOrder.status });
 
       const payload = buildOnStatus(ctx, onStatusOrder) as any;
       const { statusCode, error: cbErr } = await becknService.sendCallback(
