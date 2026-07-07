@@ -112,6 +112,7 @@ export const txnLogModel = {
     ids?: number[];
     transactionIds?: string[];
     action?: string;
+    actions?: string[];
     direction?: string;
     domain?: string;
     q?: string;
@@ -127,7 +128,10 @@ export const txnLogModel = {
       conds.push(`transaction_id IN (${filters.transactionIds.map(() => '?').join(',')})`);
       params.push(...filters.transactionIds);
     }
-    if (filters.action) {
+    if (filters.actions && filters.actions.length) {
+      conds.push(`action IN (${filters.actions.map(() => '?').join(',')})`);
+      params.push(...filters.actions);
+    } else if (filters.action) {
       conds.push('action = ?');
       params.push(filters.action);
     }
