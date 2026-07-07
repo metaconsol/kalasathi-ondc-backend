@@ -24,6 +24,61 @@ The ONDC validator was rejecting payloads because missing optional fields were b
   Updated `buildOnInitPayment` to conditionally construct `settlement_details`, ensuring `bank_name` and `branch_name` are fully omitted rather than defaulted to empty strings `""` when missing.
 
 ---
+### Branch 034
+
+**Date:** 2026-07-06
+
+**Status:** Completed — backend tsc clean, `npm run build` OK. Pending deploy to preprod + Pramaan Flow 10B re-run.
+
+**Area:** ONDC PPF / RSF 2.0 (Flow 10A/10B) — Pramaan `on_recon` validation, auth, logging, settlement schema
+
+**What:**
+
+Fixed Pramaan reconciliation failures where `on_recon` report showed `context` as undefined, `recon`/`on_recon` did not appear in admin transaction logs, and Flow 10A returned `"orders[0].settlements[0].counterparty_id" is not allowed`:
+
+1. **NTS10 sync ACK/NACK:** `/recon` and `/on_recon` sync responses now use `buildNtsAck()` / `buildNtsNack()` with `location` + `version` instead of retail `buildAck()` (`country`/`city`/`core_version`).
+2. **`on_recon` payload:** `buildOnReconMessage()` sends schema-minimal orders (`id`, `amount`, `recon_accord`, `settlements`) with full NTS10 `context`; strips `counterparty_id` from settlements (valid on `recon`, not on `on_recon`).
+3. **Auth for NTS10:** `ondcAuth.middleware` reads city from `context.location.city.code` for registry lookup; returns NTS-shaped NACK on auth errors for `ONDC:NTS10` requests without changing retail success path.
+4. **Logging:** `ondcLogger.middleware` extracts `domain`, `action`, `bpp_id` correctly for NTS10 inbound requests; outbound `recon`/`on_recon` logged in `ppf.service.ts`.
+5. **Registry retry:** `registry.service` retries public-key lookup with `domain: '*'` when first lookup fails (Pramaan/collector keys).
+6. **Trigger guard:** `POST /admin/ppf/trigger` returns 404 when order not found instead of fake success.
+
+**Why:**
+
+- Pramaan Flow 10B sends inbound `/recon` (NTS10); BPP must ACK in NTS shape and auto-reply `/on_recon` with valid `context` — report failed with all `context.*` tests undefined because payload was wrong or never sent.
+- Old `ppf.controller` used retail `buildAck()` for `/recon` ACK; Pramaan accepted sync ACK but `on_recon` validation failed.
+- `ondcAuth` used `context.city` only — missing on NTS10 — causing registry lookup/signature failures before `handleInboundRecon` ran (no logs, no `on_recon`).
+- `counterparty_id` is allowed in `recon` request settlements but Pramaan rejects it in `on_recon` response settlements.
+- Settlement reconcile could return empty array; fallback to order settlements ensures `on_recon` always has settlement rows.
+
+**Changes:** file name and description of file change:
+
+- `src/ondc/utils/ppf.builder.ts`
+  Added `buildNtsAck()`, `buildNtsNack()`, `isNts10Context()`. City default `*` (not `std:080`). `buildOnReconMessage()` emits minimal order + full NTS context. Added `formatSettlementForOnRecon()` to strip `counterparty_id`, `_unknown`, empty `type` from `on_recon` settlements.
+
+- `src/ondc/controllers/ppf.controller.ts`
+  Replaced retail `buildAck()` + `ntsAckContext` helper with `buildNtsAck()`. Removed duplicate inbound `txnLogModel.insert` (middleware is single source for inbound logs). Trigger returns 404 when `sendRecon()` finds no order.
+
+- `src/ondc/services/ppf.service.ts`
+  `ntsContextFromBody` city default `*`. Settlement fallback when reconcile returns empty. Logs `PPF posting on_recon` before callback. Outbound `on_recon`/`recon` rows written to `ondc_txn_logs`.
+
+- `src/ondc/middleware/ondcAuth.middleware.ts`
+  Added `registryCityFromCtx()` (retail `context.city` or NTS `location.city.code`). Added `respondNack()` — NTS10 requests get `buildNtsNack()`, retail unchanged. Retail search/select/init/confirm success path unchanged.
+
+- `src/ondc/middleware/ondcLogger.middleware.ts`
+  Added `extractInboundLogFields()` for NTS10 + retail; logs `domain`, `action`, `bpp_id` from request and ACK response so inbound `recon`/`on_recon` appear in admin Logs with `ONDC:NTS10`.
+
+- `src/ondc/services/registry.service.ts`
+  Retry registry lookup with `domain: '*'` when first lookup returns no signing key.
+
+**Verification:**
+
+- Local `POST /recon?insecure=1` returns NTS10 ACK with `location` + `version`.
+- `on_recon` payload includes `context.domain`, `context.bap_id`, `context.bpp_uri`, `message.orders[]` without `counterparty_id`.
+- Admin Logs: inbound `recon` + outbound `on_recon` for same `transaction_id` (on server Pramaan actually hits).
+- Pramaan Flow 10B Receiver: complete retail order first, then Start 10B; Generate Report should pass context verification.
+
+**Note:** Logs appear only on the DB/server matching the Pramaan subscriber (e.g. `preprod.odopmartmp.com` vs `test.odopmartmp.com`). Use exact transaction ID from Flow 10B panel. Flow 10A (Collector) uses admin trigger; Flow 10B (Receiver) is automatic inbound recon.
 
 ### Branch 032
 
@@ -200,7 +255,6 @@ If a BAP sends a request missing a mandatory payload field, the ONDC protocol ex
 - `src/ondc/controllers/beckn/track.controller.ts`
   Added validation at the beginning of `handleTrack` to check if `message.order_id` is present. If missing, it synchronously returns a `NACK` response containing an error object with `type: 'CONTEXT-ERROR'`, `code: '20000'`, `path: 'message.order_id'`, and a descriptive message.
 
-<<<<<<< Updated upstream
 
 ## BRANCH-026
 
@@ -244,10 +298,6 @@ If a BAP sends a request missing a mandatory payload field, the ONDC protocol ex
 
 - `src/app.ts`
   - Added `on_receiver_recon` to the Beckn action routing set so that direct action-path requests are rewritten under `/api/v1/ondc`.
-
-=======
-
-> > > > > > > Stashed changes
 
 ### Branch 025
 

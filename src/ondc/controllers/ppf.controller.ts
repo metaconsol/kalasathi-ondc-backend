@@ -16,28 +16,8 @@ import type { Request, Response } from 'express';
 import { ApiResponse } from '~/lib/response';
 import { ppfService } from '~/ondc/services/ppf.service';
 import { ppfModel } from '~/ondc/models/ppf.model';
-import { txnLogModel } from '~/ondc/models/log.model';
-import { buildAck } from '~/ondc/utils/payload.builder';
+import { buildNtsAck } from '~/ondc/utils/ppf.builder';
 import { ondcLogger } from '~/ondc/utils/logger.util';
-
-function ntsAckContext(body: Record<string, any>) {
-  const ctx = body?.context ?? {};
-  return {
-    domain: ctx.domain ?? 'ONDC:NTS10',
-    country: ctx.location?.country?.code ?? 'IND',
-    city: ctx.location?.city?.code ?? 'std:080',
-    core_version: ctx.version ?? '2.0.0',
-    action: ctx.action ?? 'recon',
-    bap_id: ctx.bap_id ?? '',
-    bap_uri: ctx.bap_uri ?? '',
-    bpp_id: ctx.bpp_id ?? '',
-    bpp_uri: ctx.bpp_uri ?? '',
-    transaction_id: ctx.transaction_id ?? '',
-    message_id: ctx.message_id ?? '',
-    timestamp: ctx.timestamp ?? new Date().toISOString(),
-    ttl: ctx.ttl ?? 'P1D',
-  };
-}
 
 function parsePpfRow(row: Awaited<ReturnType<typeof ppfModel.findByOrderId>>[number]) {
   const safeParse = (json: string | null) => {
@@ -60,25 +40,10 @@ function parsePpfRow(row: Awaited<ReturnType<typeof ppfModel.findByOrderId>>[num
 
 /** POST /api/v1/ondc/recon — collector sends recon to receiver (us as BPP) */
 export async function handleRecon(req: Request, res: Response): Promise<void> {
-  const body = req.body as Record<string, any>;
-  const ackCtx = ntsAckContext(body);
-  res.status(200).json(buildAck(ackCtx as any));
+  res.status(200).json(buildNtsAck(req.body as Record<string, unknown>));
 
   setImmediate(async () => {
     try {
-      await txnLogModel.insert({
-        transaction_id: ackCtx.transaction_id,
-        message_id: ackCtx.message_id,
-        action: 'recon',
-        direction: 'inbound',
-        bap_id: ackCtx.bap_id,
-        bpp_id: ackCtx.bpp_id,
-        domain: 'ONDC:NTS10',
-        http_status: null,
-        ack_status: 'ACK',
-        payload_json: JSON.stringify(req.body),
-        error_message: null,
-      });
       await ppfService.handleInboundRecon(req.body);
     } catch (err) {
       ondcLogger.error('recon async error', { err });
@@ -88,25 +53,10 @@ export async function handleRecon(req: Request, res: Response): Promise<void> {
 
 /** POST /api/v1/ondc/on_recon — BAP responds to our recon */
 export async function handleOnRecon(req: Request, res: Response): Promise<void> {
-  const body = req.body as Record<string, any>;
-  const ackCtx = ntsAckContext({ ...body, context: { ...body.context, action: 'on_recon' } });
-  res.status(200).json(buildAck(ackCtx as any));
+  res.status(200).json(buildNtsAck(req.body as Record<string, unknown>));
 
   setImmediate(async () => {
     try {
-      await txnLogModel.insert({
-        transaction_id: ackCtx.transaction_id,
-        message_id: ackCtx.message_id,
-        action: 'on_recon',
-        direction: 'inbound',
-        bap_id: ackCtx.bap_id,
-        bpp_id: ackCtx.bpp_id,
-        domain: 'ONDC:NTS10',
-        http_status: null,
-        ack_status: 'ACK',
-        payload_json: JSON.stringify(req.body),
-        error_message: body.error?.message ?? null,
-      });
       await ppfService.processOnRecon(req.body);
     } catch (err) {
       ondcLogger.error('on_recon async error', { err });
@@ -148,5 +98,9 @@ export async function triggerPpfRecon(req: Request, res: Response): Promise<void
     return;
   }
   const rowId = await ppfService.sendRecon(ondc_order_id);
+  if (rowId == null) {
+    res.status(404).json({ error: 'Order not found or recon failed — check server logs' });
+    return;
+  }
   ApiResponse.success(res, 'PPF recon triggered', { ppf_recon_id: rowId });
 }

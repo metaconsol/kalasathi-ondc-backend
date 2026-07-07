@@ -14,14 +14,27 @@ import { logBecknIncoming } from '~/ondc/utils/logger.util';
 import { txnLogModel } from '~/ondc/models/log.model';
 import type { BecknContext } from '~/ondc/types/beckn.types';
 
+function extractInboundLogFields(body: { context?: Record<string, unknown> }, req: Request) {
+  const ctx = body.context ?? {};
+  const pathAction = req.path.split('/').pop() ?? 'unknown';
+  return {
+    transactionId: String(ctx.transaction_id ?? 'unknown'),
+    messageId: String(ctx.message_id ?? 'unknown'),
+    action: String(ctx.action ?? pathAction),
+    domain: (ctx.domain as string | undefined) ?? null,
+    bapId: (ctx.bap_id as string | undefined) ?? null,
+    bppId: (ctx.bpp_id as string | undefined) ?? null,
+  };
+}
+
 export function ondcRequestLogger(req: Request, res: Response, next: NextFunction): void {
   const startTime = Date.now();
-  const body = req.body as { context?: BecknContext };
-  const ctx = body.context;
+  const body = req.body as { context?: BecknContext | Record<string, unknown> };
+  const fields = extractInboundLogFields(body as { context?: Record<string, unknown> }, req);
 
-  const transactionId = ctx?.transaction_id ?? 'unknown';
-  const action = ctx?.action ?? req.path.split('/').pop() ?? 'unknown';
-  const bapId = ctx?.bap_id ?? null;
+  const transactionId = fields.transactionId;
+  const action = fields.action;
+  const bapId = fields.bapId;
 
   // Intercept res.json so we can capture the ACK/NACK body sent back to the BAP.
   // We restore the original immediately after — only one call is needed per request.
@@ -38,9 +51,9 @@ export function ondcRequestLogger(req: Request, res: Response, next: NextFunctio
     logBecknIncoming({
       action,
       transactionId,
-      messageId: ctx?.message_id ?? 'unknown',
+      messageId: fields.messageId,
       bapId,
-      domain: ctx?.domain ?? null,
+      domain: fields.domain,
       ip: req.ip ?? req.socket.remoteAddress ?? 'unknown',
       headers: {
         authorization: req.headers['authorization'] as string | undefined,
@@ -61,7 +74,7 @@ export function ondcRequestLogger(req: Request, res: Response, next: NextFunctio
     // only log their outbound callbacks. Fire-and-forget: never fails a request.
     const resp = syncResponse as
       | {
-          context?: { bpp_id?: string };
+          context?: { bpp_id?: string; domain?: string };
           message?: { ack?: { status?: string } };
           error?: { message?: string };
         }
@@ -72,12 +85,12 @@ export function ondcRequestLogger(req: Request, res: Response, next: NextFunctio
     txnLogModel
       .insert({
         transaction_id: transactionId,
-        message_id: ctx?.message_id ?? 'unknown',
+        message_id: fields.messageId,
         action,
         direction: 'inbound',
         bap_id: bapId,
-        bpp_id: resp?.context?.bpp_id ?? ctx?.bpp_id ?? null,
-        domain: ctx?.domain ?? null,
+        bpp_id: resp?.context?.bpp_id ?? fields.bppId,
+        domain: resp?.context?.domain ?? fields.domain,
         http_status: res.statusCode,
         ack_status: ackStatus,
         payload_json: JSON.stringify(
