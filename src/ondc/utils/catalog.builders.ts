@@ -749,13 +749,15 @@ export function applyVariantGrouping(items: ItemWithVariantMeta[]): {
   const categories: VariantCategory[] = [];
 
   for (const [groupId, idxs] of groups.entries()) {
-    // If the DB produced a variant group for this product, expose that group id
-    // on the item. Standalone items never enter this map, so the key is omitted.
+    // A variant-group category only makes sense when at least two visible
+    // siblings survive domain filtering. A lone visible variant must behave
+    // like a standalone item, otherwise buyers receive parent_item_id values
+    // that point to no category entry and some UIs render a blank catalog.
+    if (idxs.length < 2) continue;
+
     for (const idx of idxs) {
       items[idx]!.parent_item_id = groupId;
     }
-
-    if (idxs.length < 2) continue;
 
     // Collect which attribute codes vary across siblings
     const valuesByCode = new Map<string, Set<string>>();
