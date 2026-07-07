@@ -36,10 +36,10 @@ export function buildNtsContext(
   messageId?: string,
 ): NtsContext {
   return {
-    domain: 'ONDC:NTS10',
+    domain: incoming.domain ?? 'ONDC:NTS10',
     location: {
       country: { code: incoming.location?.country?.code ?? 'IND' },
-      city: { code: incoming.location?.city?.code ?? 'std:080' },
+      city: { code: incoming.location?.city?.code ?? '*' },
     },
     version: incoming.version ?? '2.0.0',
     action,
@@ -51,6 +51,61 @@ export function buildNtsContext(
     message_id: messageId ?? randomUUID(),
     timestamp: nowNtsIso(),
     ttl: incoming.ttl ?? 'P1D',
+  };
+}
+
+/** True when context uses NTS10 shape (`location` + `version`) instead of retail Beckn. */
+export function isNts10Context(ctx: Record<string, unknown> | undefined): boolean {
+  if (!ctx) return false;
+  const domain = String(ctx.domain ?? '');
+  if (domain.includes('NTS')) return true;
+  return !!(ctx.location && ctx.version && !ctx.core_version);
+}
+
+function ntsContextFromRaw(ctx: Record<string, unknown>): Record<string, unknown> {
+  const loc = (ctx.location ?? {}) as Record<string, unknown>;
+  const country = (loc.country ?? {}) as Record<string, unknown>;
+  const city = (loc.city ?? {}) as Record<string, unknown>;
+  return {
+    domain: ctx.domain ?? 'ONDC:NTS10',
+    location: {
+      country: { code: country.code ?? 'IND' },
+      city: { code: city.code ?? '*' },
+    },
+    version: ctx.version ?? '2.0.0',
+    action: ctx.action ?? 'recon',
+    bap_id: ctx.bap_id ?? '',
+    bap_uri: ctx.bap_uri ?? '',
+    bpp_id: ctx.bpp_id ?? ondcEnv.subscriberId,
+    bpp_uri: ctx.bpp_uri ?? ondcEnv.baseUri,
+    transaction_id: ctx.transaction_id ?? '',
+    message_id: ctx.message_id ?? '',
+    timestamp: nowNtsIso(),
+    ttl: ctx.ttl ?? 'P1D',
+  };
+}
+
+/** NTS10 sync ACK — must use `location` + `version`, NOT retail `country`/`city`/`core_version`. */
+export function buildNtsAck(body: Record<string, unknown>): Record<string, unknown> {
+  return {
+    context: ntsContextFromRaw((body.context ?? {}) as Record<string, unknown>),
+    message: { ack: { status: 'ACK' } },
+  };
+}
+
+/** NTS10 sync NACK — same context envelope as buildNtsAck. */
+export function buildNtsNack(
+  body: Record<string, unknown>,
+  error: { type?: string; code: string; message: string },
+): Record<string, unknown> {
+  return {
+    context: ntsContextFromRaw((body.context ?? {}) as Record<string, unknown>),
+    message: { ack: { status: 'NACK' } },
+    error: {
+      type: error.type ?? 'CORE-ERROR',
+      code: error.code,
+      message: error.message,
+    },
   };
 }
 
@@ -237,6 +292,18 @@ function formatSettlementForRecon(s: PpfSettlementItem): Record<string, unknown>
   return out;
 }
 
+/**
+ * on_recon settlement shape — Pramaan/NTS rejects counterparty_id here
+ * (it is valid on recon request only).
+ */
+function formatSettlementForOnRecon(s: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...s };
+  delete out.counterparty_id;
+  delete out._unknown;
+  if (!out.type) delete out.type;
+  return out;
+}
+
 function parseMoney(v: unknown): number {
   if (v == null) return 0;
   if (typeof v === 'object' && v !== null && 'value' in v) {
@@ -333,14 +400,32 @@ export function buildOnReconMessage(
   accord: boolean,
   settlements: Record<string, unknown>[],
 ): Record<string, unknown> {
+  const settlementTotal = settlements.reduce(
+    (sum, s) => sum + parseFloat(String((s.amount as { value?: string })?.value ?? 0)),
+    0,
+  );
+  const currency =
+    (order.amount as { currency?: string } | undefined)?.currency ??
+    (order.quote as { price?: { currency?: string } } | undefined)?.price?.currency ??
+    'INR';
+  const rawSettlements =
+    settlements.length > 0 ? settlements : ((order.settlements as Record<string, unknown>[]) ?? []);
+  const onReconSettlements = rawSettlements.map(formatSettlementForOnRecon);
   return {
     context: buildNtsContext(ctx, 'on_recon'),
     message: {
       orders: [
         {
-          ...order,
+          id: order.id,
+          amount: {
+            currency,
+            value:
+              settlementTotal > 0
+                ? money(settlementTotal)
+                : ((order.amount as { value?: string })?.value ?? '0.00'),
+          },
           recon_accord: accord,
-          settlements,
+          settlements: onReconSettlements,
         },
       ],
     },
