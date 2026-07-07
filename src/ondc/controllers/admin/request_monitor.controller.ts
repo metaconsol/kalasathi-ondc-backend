@@ -58,7 +58,7 @@ export async function getActionCounts(req: Request, res: Response): Promise<void
  *    action   — one of the ACTIONS list (default: select)
  *    days     — 0=all, default 7
  *    q        — transaction_id substring search
- *    bap_id   — bap_id substring search (buyer app filter)
+ *    bap_id   — exact bap_id match (buyer app filter)
  *    ack      — '' | 'ACK' | 'NACK'  (buyer response filter)
  *    page     — default 1
  *    limit    — default 25, max 100
@@ -86,8 +86,8 @@ export async function listByAction(req: Request, res: Response): Promise<void> {
     whereParams.push(`%${q}%`);
   }
   if (bapId) {
-    where += ' AND bap_id LIKE ?';
-    whereParams.push(`%${bapId}%`);
+    where += ' AND bap_id = ?';
+    whereParams.push(bapId);
   }
   if (domain) {
     where += ' AND domain = ?';

@@ -48,6 +48,7 @@ export async function listLogs(req: Request, res: Response): Promise<void> {
  *   ids[]             — specific ondc_txn_logs.id rows
  *   transaction_ids[] — every log belonging to these transactions
  *   action            — e.g. 'search', 'on_search'
+ *   actions[]         — delete rows matching any of these actions (e.g. ['search','on_search'])
  *   direction         — 'inbound' | 'outbound'
  *   domain            — e.g. 'ONDC:RET16'
  *   q                 — transaction_id LIKE match
@@ -58,6 +59,7 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
     ids?: unknown;
     transaction_ids?: unknown;
     action?: unknown;
+    actions?: unknown;
     direction?: unknown;
     domain?: unknown;
     q?: unknown;
@@ -70,6 +72,9 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
     ? body.transaction_ids.map((t) => String(t).trim()).filter(Boolean)
     : [];
   const action = body.action ? String(body.action).trim() : undefined;
+  const actions = Array.isArray(body.actions)
+    ? body.actions.map((a) => String(a).trim()).filter(Boolean)
+    : [];
   const direction =
     body.direction === 'inbound' || body.direction === 'outbound'
       ? (body.direction as string)
@@ -78,7 +83,13 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
   const q = body.q ? String(body.q).trim() : undefined;
 
   const hasSelector =
-    ids.length > 0 || transactionIds.length > 0 || !!action || !!direction || !!domain || !!q;
+    ids.length > 0 ||
+    transactionIds.length > 0 ||
+    !!action ||
+    actions.length > 0 ||
+    !!direction ||
+    !!domain ||
+    !!q;
   if (!hasSelector) {
     ApiResponse.badRequest(res, 'Provide at least one filter or selection to delete logs');
     return;
@@ -87,7 +98,8 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
   const deleted = await txnLogModel.deleteFiltered({
     ...(ids.length ? { ids } : {}),
     ...(transactionIds.length ? { transactionIds } : {}),
-    ...(action ? { action } : {}),
+    ...(actions.length ? { actions } : {}),
+    ...(action && !actions.length ? { action } : {}),
     ...(direction ? { direction } : {}),
     ...(domain ? { domain } : {}),
     ...(q ? { q } : {}),
