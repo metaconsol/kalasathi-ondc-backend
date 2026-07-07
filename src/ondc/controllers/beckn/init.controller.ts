@@ -99,14 +99,25 @@ function normalizeBilling(billing: LooseObject = {}): LooseObject {
   };
 }
 
+function normalizeQuoteBreakupItem(item: any): any {
+  if (!item || typeof item !== 'object') return item;
+
+  const sanitizedItem = { ...item };
+  delete sanitizedItem.quantity;
+
+  if (!sanitizedItem.tags || !Array.isArray(sanitizedItem.tags)) {
+    sanitizedItem.tags = sanitizedItem.tags ? [sanitizedItem.tags] : [];
+  }
+
+  return sanitizedItem;
+}
+
 function sanitizeQuoteBreakup(breakup: any[]): any[] {
   return breakup.map((entry: any) => {
     const item = entry?.item;
     if (!item || typeof item !== 'object') return entry;
 
-    const sanitizedItem = { ...item };
-    delete sanitizedItem.quantity;
-    return { ...entry, item: sanitizedItem };
+    return { ...entry, item: normalizeQuoteBreakupItem(item) };
   });
 }
 
@@ -279,19 +290,31 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
         String(order?.['payment']?.['@ondc/org/buyer_app_finder_fee_amount'] ?? '').trim() ||
         String(ondcEnv.buyerFinderFeeDefault);
 
-      const settlementDetails = [
-        {
-          settlement_counterparty: 'seller-app',
-          settlement_phase: 'sale-amount',
-          settlement_type: 'neft',
-          beneficiary_name: String(sellerProfile?.business_name ?? store?.name ?? ''),
-          upi_address: String(sellerProfile?.upi_id ?? ''),
-          settlement_bank_account_no: String(sellerProfile?.bank_account_no ?? ''),
-          settlement_ifsc_code: String(sellerProfile?.bank_ifsc ?? ''),
-          bank_name: '',
-          branch_name: '',
-        },
-      ];
+      const branchName = String(
+        storeLocations[0]?.address_line1 ?? storeLocations[0]?.city ?? store?.name ?? '',
+      );
+
+      const rawBankName = String((sellerProfile as any)?.bank_name ?? '').trim();
+      const rawBranchName = String((sellerProfile as any)?.bank_branch ?? '').trim();
+
+      const settlementObj: any = {
+        settlement_counterparty: 'seller-app',
+        settlement_phase: 'sale-amount',
+        settlement_type: 'neft',
+        beneficiary_name: String(sellerProfile?.business_name ?? store?.name ?? ''),
+        upi_address: String(sellerProfile?.upi_id ?? ''),
+        settlement_bank_account_no: String(sellerProfile?.bank_account_no ?? ''),
+        settlement_ifsc_code: String(sellerProfile?.bank_ifsc ?? ''),
+      };
+
+      if (rawBankName) {
+        settlementObj.bank_name = rawBankName;
+      }
+      if (rawBranchName) {
+        settlementObj.branch_name = rawBranchName;
+      }
+
+      const settlementDetails = [settlementObj];
 
       const bppTerms = [
         {
