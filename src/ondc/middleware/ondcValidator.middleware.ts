@@ -27,29 +27,6 @@ const REQUIRED_CONTEXT_FIELDS: (keyof BecknContext)[] = [
   'timestamp',
 ];
 
-function isIgmRoute(action: string): boolean {
-  return action === 'issue' || action === 'issue_status';
-}
-
-function isIgmV2Context(ctx: Record<string, unknown>): boolean {
-  const action = String(ctx.action ?? '').trim();
-  if (!isIgmRoute(action)) return false;
-  const version = String(ctx.version ?? ctx.core_version ?? '').trim();
-  return version.startsWith('2') || !!ctx.location;
-}
-
-function hasIgmV2Location(ctx: Record<string, unknown>): boolean {
-  const location = (ctx.location ?? {}) as Record<string, unknown>;
-  const country = (location.country ?? {}) as Record<string, unknown>;
-  const city = (location.city ?? {}) as Record<string, unknown>;
-  return (
-    typeof country.code === 'string' &&
-    country.code.trim() !== '' &&
-    typeof city.code === 'string' &&
-    city.code.trim() !== ''
-  );
-}
-
 function isBlank(value: unknown): boolean {
   return value == null || (typeof value === 'string' && value.trim().length === 0);
 }
@@ -78,81 +55,22 @@ export function ondcContextValidator(req: Request, res: Response, next: NextFunc
     message: string;
   } | null = null;
 
-  const igmV2Context = isIgmV2Context(ctx as Record<string, unknown>);
-
   // 1. Validate required context fields
-  if (igmV2Context) {
-    const version = String(
-      (ctx as Record<string, unknown>).version ?? ctx.core_version ?? '',
-    ).trim();
-    const commonFields = [
-      'domain',
-      'action',
-      'bap_id',
-      'bap_uri',
-      'transaction_id',
-      'message_id',
-      'timestamp',
-    ];
-    for (const field of commonFields) {
-      if (isBlank((ctx as Record<string, unknown>)[field])) {
-        validationError = {
-          type: 'CONTEXT-ERROR',
-          code: '20000',
-          path: `context.${field}`,
-          message: `Missing required field: context.${field}`,
-        };
-        break;
-      }
-    }
-    if (!validationError) {
-      const hasRetailGeo = !isBlank(ctx.country) && !isBlank(ctx.city);
-      const hasLocationGeo = hasIgmV2Location(ctx as Record<string, unknown>);
-      if (!hasRetailGeo && !hasLocationGeo) {
-        validationError = {
-          type: 'CONTEXT-ERROR',
-          code: '20000',
-          path: 'context.location',
-          message:
-            'Missing required issue v2 location fields: context.location.country.code and context.location.city.code',
-        };
-      } else if (!version) {
-        validationError = {
-          type: 'CONTEXT-ERROR',
-          code: '20000',
-          path: 'context.version',
-          message: 'Missing required field: context.version',
-        };
-      }
-    }
-  } else {
-    for (const field of REQUIRED_CONTEXT_FIELDS) {
-      if (isBlank(ctx[field])) {
-        validationError = {
-          type: 'CONTEXT-ERROR',
-          code: '20000',
-          path: `context.${field}`,
-          message: `Missing required field: context.${field}`,
-        };
-        break;
-      }
+  for (const field of REQUIRED_CONTEXT_FIELDS) {
+    if (isBlank(ctx[field])) {
+      validationError = {
+        type: 'CONTEXT-ERROR',
+        code: '20000',
+        path: `context.${field}`,
+        message: `Missing required field: context.${field}`,
+      };
+      break;
     }
   }
 
   // 2. Validate core version
   if (!validationError) {
-    if (igmV2Context) {
-      const version = String(
-        (ctx as Record<string, unknown>).version ?? ctx.core_version ?? '',
-      ).trim();
-      if (!version.startsWith('2')) {
-        validationError = {
-          type: 'CONTEXT-ERROR',
-          code: '20000',
-          message: `Unsupported issue v2 version: ${version || 'undefined'}. Expected 2.0.0`,
-        };
-      }
-    } else if (
+    if (
       !ctx.core_version ||
       !SUPPORTED_CORE_VERSIONS.includes(
         ctx.core_version as (typeof SUPPORTED_CORE_VERSIONS)[number],
