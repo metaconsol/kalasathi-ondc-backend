@@ -143,13 +143,17 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
         const fulfillmentId = String(reqItem.fulfillment_id ?? fallbackFulfillmentId);
         selectedFulfillmentId = fulfillmentId;
         const stockAvailable = row.stock > 0 ? 99 : 0;
-        const stockMaximum = row.stock > 0 ? 99 : 0;
+        const stockMaximum = row.stock;
+
+        if (row.stock <= 0) {
+          itemErrors.push('Item is currently out of stock');
+        }
 
         lines.push({
           itemId: reqItem.id,
           itemName: row.name,
           unitPrice: row.price,
-          quantity: qty,
+          quantity: row.stock <= 0 ? 0 : qty,
           stockAvailable,
           stockMaximum,
           taxPercent: row.gst_percent,

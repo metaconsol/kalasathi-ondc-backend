@@ -502,7 +502,7 @@ export function buildQuote(
       item: {
         quantity: {
           available: { count: String(Math.min(99, l.stockAvailable)) },
-          maximum: { count: String(Math.min(10, l.stockMaximum)) },
+          maximum: { count: String(l.stockMaximum) },
         },
         price: { currency: 'INR', value: l.unitPrice.toFixed(2) },
       },

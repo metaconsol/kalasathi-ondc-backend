@@ -57,6 +57,8 @@ export interface MainDbSellerProfile {
   bank_account_no: string | null;
   bank_ifsc: string | null;
   upi_id: string | null;
+  bank_name: string | null;
+  branch_name: string | null;
 }
 
 const STORE_SELECT = `
@@ -120,7 +122,9 @@ export async function fetchSellerProfileByStoreId(
        sp.business_name,
        sp.bank_account_no,
        sp.bank_ifsc,
-       sp.upi_id
+       sp.upi_id,
+       sp.bank_name,
+       sp.branch_name
      FROM stores s
      INNER JOIN seller_profiles sp ON sp.user_id = s.seller_user_id
      WHERE s.id = ?
@@ -137,6 +141,8 @@ export async function fetchSellerProfileByStoreId(
     bank_account_no: rows[0].bank_account_no ?? null,
     bank_ifsc: rows[0].bank_ifsc ?? null,
     upi_id: rows[0].upi_id ?? null,
+    bank_name: rows[0].bank_name ?? null,
+    branch_name: rows[0].branch_name ?? null,
   };
 }
 
