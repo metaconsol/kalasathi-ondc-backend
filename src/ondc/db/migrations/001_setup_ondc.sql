@@ -569,3 +569,16 @@ ALTER TABLE `ondc_ppf_recon` ADD COLUMN IF NOT EXISTS `inbound_recon_payload` lo
 ALTER TABLE `ondc_ppf_recon` ADD COLUMN IF NOT EXISTS `outbound_on_recon_payload` longtext DEFAULT NULL AFTER `on_recon_payload`;
 
 SET FOREIGN_KEY_CHECKS = 1;
+
+
+-- need to revert in future
+-- Step 1: Add columns for Bank Name and Branch Name
+-- (IF NOT EXISTS keeps this file re-runnable — the rest of 001 is idempotent)
+ALTER TABLE seller_profiles
+ADD COLUMN IF NOT EXISTS bank_name VARCHAR(255) DEFAULT 'Kotak Mahindra Bank',
+ADD COLUMN IF NOT EXISTS branch_name VARCHAR(255) DEFAULT 'Bhopal';
+
+-- Step 2: Update existing records where these details are missing
+UPDATE seller_profiles
+SET bank_name = 'Kotak Mahindra Bank', branch_name = 'Bhopal'
+WHERE bank_name IS NULL OR branch_name IS NULL OR bank_name = '' OR branch_name = '';
