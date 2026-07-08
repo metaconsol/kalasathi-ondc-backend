@@ -17,7 +17,6 @@ import { txnLogModel } from '~/ondc/models/log.model';
 import { overallTxnsModel } from '~/ondc/models/overall_txns.model';
 import { buildQuote, type QuoteLineInput } from '~/ondc/utils/catalog.builders';
 import { ondcLogger } from '~/ondc/utils/logger.util';
-import { ondcEnv } from '~/config/ondc.config';
 import type { BecknContext, BecknError } from '~/ondc/types/beckn.types';
 
 function buildTimeToShip(
@@ -165,11 +164,31 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
 
       // Per-product serviceability to the buyer's delivery pincode (mirrors the
       // storefront check). Drives the fulfillment Serviceable/Non-serviceable state.
+      // Fail OPEN on a DB error here: a transient query failure must not silently
+      // drop the entire on_select (the outer catch has no callback-on-error path,
+      // so the buyer would otherwise see nothing until TTL expiry).
       const serviceResults = await Promise.all(
-        serviceCheckItems.map(async (it) => ({
-          ...it,
-          result: await checkProductServiceability(it.productId, buyerPincode),
-        })),
+        serviceCheckItems.map(async (it) => {
+          try {
+            const result = await checkProductServiceability(it.productId, buyerPincode);
+            ondcLogger.info('Serviceability check', {
+              txnId,
+              itemId: it.itemId,
+              productId: it.productId,
+              buyerPincode,
+              ...result,
+            });
+            return { ...it, result };
+          } catch (err) {
+            ondcLogger.error('Serviceability check failed — failing open (serviceable)', {
+              txnId,
+              itemId: it.itemId,
+              productId: it.productId,
+              err,
+            });
+            return { ...it, result: { serviceable: true, availabilityMode: 'UNKNOWN' as const } };
+          }
+        }),
       );
       const nonServiceable = serviceResults.filter((r) => !r.result.serviceable);
       const fulfillmentStateCode = nonServiceable.length > 0 ? 'Non-serviceable' : 'Serviceable';
