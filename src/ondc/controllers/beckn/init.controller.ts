@@ -117,7 +117,20 @@ function sanitizeQuoteBreakup(breakup: any[]): any[] {
     const item = entry?.item;
     if (!item || typeof item !== 'object') return entry;
 
-    return { ...entry, item: normalizeQuoteBreakupItem(item) };
+    const sanitizedItem = { ...item };
+    delete sanitizedItem.quantity;
+
+    if (Array.isArray(sanitizedItem.tags) && sanitizedItem.tags.length === 0) {
+      delete sanitizedItem.tags;
+    }
+
+    if (Object.keys(sanitizedItem).length === 0) {
+      const newEntry = { ...entry };
+      delete newEntry.item;
+      return newEntry;
+    }
+
+    return { ...entry, item: sanitizedItem };
   });
 }
 
@@ -231,7 +244,7 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
           unitPrice: catalogRow.price,
           quantity,
           stockAvailable: catalogRow.stock > 0 ? 99 : 0,
-          stockMaximum: catalogRow.stock > 0 ? 99 : 0,
+          stockMaximum: catalogRow.stock,
           taxPercent: catalogRow.gst_percent,
         });
       }
@@ -290,31 +303,19 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
         String(order?.['payment']?.['@ondc/org/buyer_app_finder_fee_amount'] ?? '').trim() ||
         String(ondcEnv.buyerFinderFeeDefault);
 
-      const branchName = String(
-        storeLocations[0]?.address_line1 ?? storeLocations[0]?.city ?? store?.name ?? '',
-      );
-
-      const rawBankName = String((sellerProfile as any)?.bank_name ?? '').trim();
-      const rawBranchName = String((sellerProfile as any)?.bank_branch ?? '').trim();
-
-      const settlementObj: any = {
-        settlement_counterparty: 'seller-app',
-        settlement_phase: 'sale-amount',
-        settlement_type: 'neft',
-        beneficiary_name: String(sellerProfile?.business_name ?? store?.name ?? ''),
-        upi_address: String(sellerProfile?.upi_id ?? ''),
-        settlement_bank_account_no: String(sellerProfile?.bank_account_no ?? ''),
-        settlement_ifsc_code: String(sellerProfile?.bank_ifsc ?? ''),
-      };
-
-      if (rawBankName) {
-        settlementObj.bank_name = rawBankName;
-      }
-      if (rawBranchName) {
-        settlementObj.branch_name = rawBranchName;
-      }
-
-      const settlementDetails = [settlementObj];
+      const settlementDetails = [
+        {
+          settlement_counterparty: 'seller-app',
+          settlement_phase: 'sale-amount',
+          settlement_type: 'neft',
+          beneficiary_name: String(sellerProfile?.business_name ?? store?.name ?? ''),
+          upi_address: String(sellerProfile?.upi_id ?? ''),
+          settlement_bank_account_no: String(sellerProfile?.bank_account_no ?? ''),
+          settlement_ifsc_code: String(sellerProfile?.bank_ifsc ?? ''),
+          bank_name: String(sellerProfile?.bank_name ?? 'Kotak Mahindra Bank'),
+          branch_name: String(sellerProfile?.branch_name ?? 'Bhopal'),
+        },
+      ];
 
       const bppTerms = [
         {

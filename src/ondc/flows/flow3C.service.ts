@@ -543,8 +543,8 @@ export const flow3CService = {
             upi_address: String(sellerProfile?.upi_id ?? ''),
             settlement_bank_account_no: String(sellerProfile?.bank_account_no ?? ''),
             settlement_ifsc_code: String(sellerProfile?.bank_ifsc ?? ''),
-            bank_name: '',
-            branch_name: '',
+            bank_name: String(sellerProfile?.bank_name ?? ''),
+            branch_name: String(sellerProfile?.branch_name ?? ''),
           },
         ],
     };

@@ -1,4 +1,51 @@
+### Branch 041
+
+**Date:** 2026-07-08
+
+**Status:** Completed
+
+**Area:** ONDC Validations (Pramaan Flow 5 & Flow 7) - Stock limits, missing settlement fields, tags
+
+**What:**
+Fixed multiple ONDC schema validation and functional issues across Beckn payload responses to resolve failures in Pramaan Flow 5 and Flow 7. This includes fixing out-of-stock validation on `on_select`, updating `maximum.count` to reflect exact DB stock without artificial caps, dynamically handling missing settlement fields (`bank_name`, `branch_name`) to prevent schema failures, deleting empty `tags` arrays to meet `minItems` rules, and correcting the variant stock logic from using `unit_count` to actual `stock`.
+
+**Why:**
+Pramaan testing validation enforces strict constraints:
+
+- Out of stock items must return a specific 40002 error in `on_select`.
+- Empty arrays for `tags` and missing properties (like empty `bank_name` resolving to `undefined`) fail schema tests.
+- Maximum quote quantity should accurately reflect the available inventory.
+- Variants were previously bypassing the out-of-stock check because the adapter mistakenly read `unit_count` (e.g. pack size) instead of actual inventory stock.
+
+**Changes:** file name and description of file change.
+
+- `src/ondc/controllers/beckn/select.controller.ts`
+  - Added out-of-stock check logic: if `row.stock <= 0`, explicitly insert `Item is currently out of stock` error (code 40002), and push the quote quantity as `0`.
+  - Updated `stockMaximum` from the hardcoded `row.stock > 0 ? 99 : 0` check to map exactly to `row.stock`.
+
+- `src/ondc/controllers/beckn/init.controller.ts`
+  - Changed `bank_name` and `branch_name` defaults to use `||` instead of `??` so that empty database strings successfully fall back to `Kotak Mahindra Bank` and `Bhopal`.
+  - Replaced the hardcoded `stockMaximum` 99 cap with `catalogRow.stock`.
+  - Enhanced the `sanitizeQuoteBreakup` logic to entirely delete the `tags` array if it is empty, preventing `minItems: 1` validation failures.
+
+- `src/ondc/controllers/beckn/confirm.controller.ts`
+  - Updated `bank_name` and `branch_name` assignments to use the `||` fallback directly instead of conditionally assigning them, ensuring they are never `undefined` in the payload.
+  - Applied the exact same empty `tags` array deletion logic to `sanitizeQuoteBreakup`.
+  - Also removed the 99 cap on `stockMaximum`.
+
+- `src/ondc/adapters/product.adapter.ts`
+  - Fixed a critical variant stock calculation error. It was previously using `unit_count` as `stock`. Replaced it with the exact `p.stock` column from the database, fixing out-of-stock variants acting as in-stock.
+
+- `src/ondc/adapters/order.adapter.ts`, `src/ondc/flows/flow3C.service.ts`, `src/ondc/adapters/seller.adapter.ts`
+  - Fixed `bank_name` and `branch_name` hardcoded mappings so that `on_status` and `on_cancel` responses successfully fetch the correct real data from `sellerProfile`.
+
+- `src/ondc/utils/catalog.builders.ts`
+  - Removed the `Math.min(10, ...)` wrapper inside `buildQuote` for `maximum.count`, allowing the payload to emit the actual stock limit correctly.
+
+---
+
 ### Branch 035
+
 ### Branch 037
 
 **Date:** 2026-07-06
@@ -91,6 +138,7 @@ The ONDC validator was rejecting payloads because missing optional fields were b
   Updated `buildOnInitPayment` to conditionally construct `settlement_details`, ensuring `bank_name` and `branch_name` are fully omitted rather than defaulted to empty strings `""` when missing.
 
 ---
+
 ### Branch 034
 
 **Date:** 2026-07-06
@@ -321,7 +369,6 @@ If a BAP sends a request missing a mandatory payload field, the ONDC protocol ex
 
 - `src/ondc/controllers/beckn/track.controller.ts`
   Added validation at the beginning of `handleTrack` to check if `message.order_id` is present. If missing, it synchronously returns a `NACK` response containing an error object with `type: 'CONTEXT-ERROR'`, `code: '20000'`, `path: 'message.order_id'`, and a descriptive message.
-
 
 ## BRANCH-026
 

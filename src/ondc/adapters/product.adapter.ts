@@ -524,8 +524,7 @@ function buildRowForVariant(
       : p.unit_count
         ? parseFloat(String(p.unit_count))
         : null;
-  const stock =
-    unitCount != null ? Math.max(0, Math.floor(unitCount)) : parseInt(String(p.stock ?? 0), 10);
+  const stock = parseInt(String(p.stock ?? 0), 10);
 
   return {
     product_id: p.id,

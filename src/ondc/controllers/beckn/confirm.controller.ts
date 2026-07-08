@@ -62,7 +62,20 @@ function sanitizeQuoteBreakup(breakup: any[]): any[] {
     const item = entry?.item;
     if (!item || typeof item !== 'object') return entry;
 
-    return { ...entry, item: normalizeQuoteBreakupItem(item) };
+    const sanitizedItem = { ...item };
+    delete sanitizedItem.quantity;
+
+    if (Array.isArray(sanitizedItem.tags) && sanitizedItem.tags.length === 0) {
+      delete sanitizedItem.tags;
+    }
+
+    if (Object.keys(sanitizedItem).length === 0) {
+      const newEntry = { ...entry };
+      delete newEntry.item;
+      return newEntry;
+    }
+
+    return { ...entry, item: sanitizedItem };
   });
 }
 
@@ -254,7 +267,7 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
           unitPrice: catalogRow.price,
           quantity: qty,
           stockAvailable: catalogRow.stock > 0 ? 99 : 0,
-          stockMaximum: catalogRow.stock > 0 ? 99 : 0,
+          stockMaximum: catalogRow.stock,
           taxPercent: catalogRow.gst_percent,
         });
       }
@@ -465,7 +478,7 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
       );
 
       const rawBankName = String((sellerProfile as any)?.bank_name ?? '').trim();
-      const rawBranchName = String((sellerProfile as any)?.bank_branch ?? '').trim();
+      const rawBranchName = String((sellerProfile as any)?.branch_name ?? '').trim();
 
       const settlementObj: any = {
         settlement_counterparty: 'seller-app',
