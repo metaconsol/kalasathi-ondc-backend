@@ -51,76 +51,6 @@ const nowIso = () => new Date().toISOString();
 
 type TicketRow = NonNullable<Awaited<ReturnType<typeof customerTicketModel.getById>>>;
 
-type IgmRawContext = BecknContext & {
-  version?: string;
-  location?: {
-    country?: { code?: string };
-    city?: { code?: string };
-  };
-};
-
-function readIgmContext(context: Partial<IgmRawContext>) {
-  const version = String(context.version ?? context.core_version ?? '1.2.5');
-  const country = String(context.location?.country?.code ?? context.country ?? 'IND');
-  const city = String(context.location?.city?.code ?? context.city ?? 'std:0755');
-  const ttl = typeof context.ttl === 'string' && context.ttl.trim() ? context.ttl : 'PT30S';
-  return { country, city, version, ttl };
-}
-
-function buildIgmCallbackContext(
-  base: {
-    domain: string;
-    country: string;
-    city: string;
-    version: string;
-    bap_id: string;
-    bap_uri: string;
-    transaction_id: string;
-    message_id: string;
-    ttl: string;
-  },
-  action: 'on_issue' | 'on_issue_status',
-): Record<string, unknown> {
-  if (base.version.startsWith('2')) {
-    return {
-      domain: base.domain,
-      location: {
-        country: { code: base.country },
-        city: { code: base.city },
-      },
-      version: base.version,
-      action,
-      bap_id: base.bap_id,
-      bap_uri: base.bap_uri,
-      bpp_id: ondcEnv.subscriberId,
-      bpp_uri: ondcEnv.baseUri,
-      transaction_id: base.transaction_id,
-      message_id: base.message_id,
-      timestamp: nowIso(),
-      ttl: base.ttl,
-    };
-  }
-
-  return buildResponseContext(
-    {
-      domain: base.domain,
-      country: base.country,
-      city: base.city,
-      action,
-      core_version: base.version,
-      bap_id: base.bap_id,
-      bap_uri: base.bap_uri,
-      bpp_id: '',
-      bpp_uri: '',
-      transaction_id: base.transaction_id,
-      message_id: base.message_id,
-      timestamp: '',
-      ttl: base.ttl,
-    },
-    action,
-  );
-}
-
 function isIgmV2Row(row: TicketRow): boolean {
   if (row.core_version?.startsWith('2')) return true;
   const issue = parseIgmIssue(row);
@@ -175,20 +105,22 @@ async function pushOnIssue(
     return;
   }
 
-  const responseContext = buildIgmCallbackContext(
-    {
-      domain: row.domain || 'ONDC:RET12',
-      country: row.country || 'IND',
-      city: row.city || 'std:0755',
-      version: row.core_version || '1.2.5',
-      bap_id: row.bap_id || '',
-      bap_uri: row.bap_uri || '',
-      transaction_id: row.txn_id,
-      message_id: newMessageId(),
-      ttl: row.ttl || 'PT30S',
-    },
-    'on_issue',
-  );
+  const ctxBase = {
+    domain: row.domain || 'ONDC:RET12',
+    country: row.country || 'IND',
+    city: row.city || 'std:0755',
+    action: 'on_issue' as const,
+    core_version: row.core_version || '1.2.5',
+    bap_id: row.bap_id || '',
+    bap_uri: row.bap_uri || '',
+    bpp_id: '',
+    bpp_uri: '',
+    transaction_id: row.txn_id,
+    message_id: newMessageId(),
+    timestamp: '',
+    ttl: row.ttl || 'PT30S',
+  };
+  const responseContext = buildResponseContext(ctxBase, 'on_issue');
 
   let message: Record<string, unknown>;
   if (isIgmV2Row(row)) {
@@ -250,7 +182,6 @@ async function handleIgmV2Issue(
     short_desc: desc['short_desc'] ?? '',
     long_desc: desc['long_desc'] ?? '',
   };
-  const contextMeta = readIgmContext(context as unknown as Partial<IgmRawContext>);
 
   let row = await customerTicketModel.findByTicketId(issueId);
 
@@ -291,27 +222,23 @@ async function handleIgmV2Issue(
       bap_uri: context.bap_uri,
       bpp_id: context.bpp_id ?? ondcEnv.subscriberId,
       bpp_uri: context.bpp_uri ?? null,
-      country: contextMeta.country,
-      city: contextMeta.city,
-      core_version: contextMeta.version,
-      ttl: contextMeta.ttl,
+      country: context.country ?? 'IND',
+      city: context.city ?? 'std:0755',
+      core_version: context.core_version ?? '1.2.5',
+      ttl: context.ttl ?? null,
       descriptor_json: JSON.stringify(descriptor),
       descriptor_attachments_json: JSON.stringify({ images, attachments }),
       payload_json: JSON.stringify(issueState),
       refs_json: JSON.stringify(issueState['refs'] ?? []),
       actors_json: JSON.stringify(issueState['actors'] ?? []),
       messages: [openMsg],
-      mirror: extractTicketMirrorFields(issueState, { ttl: contextMeta.ttl }),
+      mirror: extractTicketMirrorFields(issueState, context.ttl ? { ttl: context.ttl } : undefined),
     });
     row = await customerTicketModel.findByTicketId(issueId);
     if (row) {
       await customerTicketModel.saveIgmIssueState(row.id, issueState, {
         displayStatus: 'OPEN',
         igmStatusRaw: 'OPEN',
-        country: contextMeta.country,
-        city: contextMeta.city,
-        coreVersion: contextMeta.version,
-        ttl: contextMeta.ttl,
       });
     }
   } else {
@@ -378,10 +305,6 @@ async function handleIgmV2Issue(
       displayStatus: status,
       igmStatusRaw: status,
       ...(merged['resolutions'] ? { resolutions: merged['resolutions'] as unknown[] } : {}),
-      country: contextMeta.country,
-      city: contextMeta.city,
-      coreVersion: contextMeta.version,
-      ttl: contextMeta.ttl,
     });
   }
 
@@ -536,19 +459,8 @@ export const igmService = {
       },
     );
 
-    const incomingMeta = readIgmContext(context as unknown as Partial<IgmRawContext>);
-    const responseContext = buildIgmCallbackContext(
-      {
-        domain: context.domain || row.domain || 'ONDC:RET12',
-        country: incomingMeta.country,
-        city: incomingMeta.city,
-        version: incomingMeta.version,
-        bap_id: String(context.bap_id ?? row.bap_id ?? ''),
-        bap_uri: String(context.bap_uri ?? row.bap_uri ?? ''),
-        transaction_id: String(context.transaction_id ?? row.txn_id ?? ''),
-        message_id: newMessageId(),
-        ttl: incomingMeta.ttl,
-      },
+    const responseContext = buildResponseContext(
+      { ...context, action: 'on_issue_status' } as any,
       'on_issue_status',
     );
 
