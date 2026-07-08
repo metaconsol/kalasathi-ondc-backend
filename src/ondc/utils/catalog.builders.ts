@@ -33,8 +33,53 @@ export interface ProviderBuildInfo {
   logo_url?: string | null;
   fssai_license?: string | null;
   updated_at?: Date | string | null;
+  support_phone?: string | null;
+  support_email?: string | null;
   /** Aggregate SNP rating 1-5, 1 decimal digit. Defaults if not set. */
   rating?: string | null;
+}
+
+const DEFAULT_PROVIDER_SHORT_DESC = 'ODOP store on ONDC';
+const DEFAULT_PROVIDER_LONG_DESC =
+  'ODOP seller storefront with products available for discovery and fulfillment on ONDC.';
+const DEFAULT_CONTACT_PHONE = '+91 9201838159';
+const DEFAULT_CONTACT_EMAIL = 'info@odopmartmp.com';
+const DEFAULT_LOCALITY = 'Bhopal';
+
+function nonEmptyString(...values: Array<unknown>): string | null {
+  for (const value of values) {
+    const trimmed = String(value ?? '').trim();
+    if (trimmed) return trimmed;
+  }
+  return null;
+}
+
+export function resolveProviderShortDesc(value: unknown, providerName?: unknown): string {
+  return (
+    nonEmptyString(value, providerName && `${String(providerName).trim()} store on ONDC`) ??
+    DEFAULT_PROVIDER_SHORT_DESC
+  );
+}
+
+export function resolveProviderLongDesc(value: unknown, providerName?: unknown): string {
+  return (
+    nonEmptyString(
+      value,
+      providerName && `${String(providerName).trim()} storefront for ONDC retail orders.`,
+    ) ?? DEFAULT_PROVIDER_LONG_DESC
+  );
+}
+
+export function resolveOndcPhone(value: unknown): string {
+  return nonEmptyString(value, SELLER_PROFILE.SUPPORT_PHONE) ?? DEFAULT_CONTACT_PHONE;
+}
+
+export function resolveOndcEmail(value: unknown): string {
+  return nonEmptyString(value, SELLER_PROFILE.SUPPORT_EMAIL) ?? DEFAULT_CONTACT_EMAIL;
+}
+
+export function resolveOndcLocality(...values: Array<unknown>): string {
+  return nonEmptyString(...values, SELLER_PROFILE.LOCALITY) ?? DEFAULT_LOCALITY;
 }
 
 // ─── Provider tags ─────────────────────────────────────────────────────────
@@ -295,17 +340,19 @@ export function buildBppFulfillments() {
  * Per ONDC 1.2.5: only id, type, contact — no @ondc/org/category or @ondc/org/TAT.
  * Those fields belong only in the top-level bpp/fulfillments array.
  */
-export function buildProviderFulfillments(): object[] {
+export function buildProviderFulfillments(providerRow?: ProviderBuildInfo): object[] {
+  const phone = resolveOndcPhone(providerRow?.support_phone);
+  const email = resolveOndcEmail(providerRow?.support_email);
   return [
     {
       id: '1',
       type: 'Delivery',
-      contact: { phone: SELLER_PROFILE.SUPPORT_PHONE, email: SELLER_PROFILE.SUPPORT_EMAIL },
+      contact: { phone, email },
     },
     {
       id: '2',
       type: 'Self-Pickup',
-      contact: { phone: SELLER_PROFILE.SUPPORT_PHONE, email: SELLER_PROFILE.SUPPORT_EMAIL },
+      contact: { phone, email },
     },
   ];
 }
@@ -644,7 +691,7 @@ export function buildProviderEntry(
       ? locations
       : [
           buildProviderLocation('L1', '23.259933,77.412613', {
-            locality: '',
+            locality: resolveOndcLocality(),
             street: '',
             city: SELLER_PROFILE.CITY,
             area_code: SELLER_PROFILE.AREA_CODE,
@@ -665,12 +712,12 @@ export function buildProviderEntry(
     // SNP-maintained aggregate rating, 1-5 scale, 1 decimal digit.
     rating: providerRow.rating ?? DEFAULT_PROVIDER_RATING,
     // Provider-level fulfillments: id/type/contact ONLY (no @ondc/org/TAT or category).
-    fulfillments: buildProviderFulfillments(),
+    fulfillments: buildProviderFulfillments(providerRow),
     descriptor: {
       name: providerRow.name,
       symbol: ODOP_LOGO_URL,
-      short_desc: providerRow.short_desc ?? '',
-      long_desc: providerRow.long_desc ?? '',
+      short_desc: resolveProviderShortDesc(providerRow.short_desc, providerRow.name),
+      long_desc: resolveProviderLongDesc(providerRow.long_desc, providerRow.name),
       images: [ODOP_LOGO_URL],
     },
     ttl: 'PT24H',
