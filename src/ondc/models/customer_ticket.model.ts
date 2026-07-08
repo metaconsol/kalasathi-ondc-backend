@@ -246,6 +246,10 @@ export const customerTicketModel = {
       displayStatus?: string;
       igmStatusRaw?: string;
       resolutions?: unknown[];
+      country?: string;
+      city?: string;
+      coreVersion?: string;
+      ttl?: string;
     } = {},
   ): Promise<void> {
     const mirror = extractTicketMirrorFields(issue);
@@ -288,6 +292,10 @@ export const customerTicketModel = {
       'selected_resolution_id = ?',
       'selected_resolution_code = ?',
       'selected_resolution_label = ?',
+      'country = COALESCE(?, country)',
+      'city = COALESCE(?, city)',
+      'core_version = COALESCE(?, core_version)',
+      'ttl = COALESCE(?, ttl)',
       'updated_at = NOW()',
     ];
     const params: unknown[] = [
@@ -328,6 +336,10 @@ export const customerTicketModel = {
       mirror.selected_resolution_id,
       mirror.selected_resolution_code,
       mirror.selected_resolution_label,
+      opts.country ?? null,
+      opts.city ?? null,
+      opts.coreVersion ?? null,
+      opts.ttl ?? null,
     ];
     if (opts.resolutions) {
       sets.splice(sets.length - 1, 0, 'resolutions_json = ?');
