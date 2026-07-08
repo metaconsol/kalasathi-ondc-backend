@@ -12,6 +12,16 @@ import { flow3BService } from '~/ondc/flows/flow3B.service';
 import { AppError } from '~/lib/response';
 import type { OndcOrderStatus } from '~/ondc/types/order.types';
 
+/**
+ * Sellers may only see/modify their own orders (admins see all). Responds 404
+ * rather than 403 so order ids of other sellers can't be probed.
+ */
+function assertOrderVisible(req: Request, order: { seller_id?: number | null }): void {
+  if (req.user?.role === 'SELLER' && Number(order.seller_id) !== Number(req.user.id)) {
+    throw new AppError('Order not found', 404);
+  }
+}
+
 /** GET /api/v1/ondc/admin/orders */
 export async function listOrders(req: Request, res: Response): Promise<void> {
   const { status, provider_id, page = '1', limit = '20' } = req.query as Record<string, string>;
@@ -49,6 +59,7 @@ export async function listOrders(req: Request, res: Response): Promise<void> {
 export async function getOrder(req: Request, res: Response): Promise<void> {
   const order = await orderModel.findByOndcOrderId(req.params['orderId'] as string);
   if (!order) throw new AppError('Order not found', 404);
+  assertOrderVisible(req, order);
   const [history, items, rawFulfillments] = await Promise.all([
     orderModel.getStatusHistory(order.ondc_order_id),
     orderModel.getItems(order.ondc_order_id),
@@ -76,6 +87,7 @@ export async function updateFulfillment(req: Request, res: Response): Promise<vo
   if (!dbOrder) {
     throw new AppError('Order not found', 404);
   }
+  assertOrderVisible(req, dbOrder);
   if (dbOrder.status === 'CANCELLED') {
     throw new AppError('Cannot update fulfillment for a cancelled order', 400);
   }
