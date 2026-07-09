@@ -6,6 +6,7 @@
  */
 
 import { ondcExec, ondcQuery } from '~/lib/ondcSql';
+import { parseStoreOndcDomains, type OndcRetailDomain } from '~/ondc/config/domain.config';
 
 export interface OndcProviderRow {
   id: number;
@@ -20,6 +21,7 @@ export interface OndcProviderRow {
   support_phone: string | null;
   support_email: string | null;
   domain: string;
+  domains: OndcRetailDomain[];
   is_active: boolean;
   created_at: Date;
   updated_at: Date;
@@ -37,12 +39,13 @@ const STORE_SELECT = `
   NULL                                   AS fssai_license,
   s.support_phone                        AS support_phone,
   s.support_email                        AS support_email,
-  'ONDC:RET12'                           AS domain,
+  s.ondc_domain                          AS ondc_domain_raw,
   s.is_active                            AS is_active,
   s.created_at                           AS created_at,
   s.updated_at                           AS updated_at`;
 
 function mapRow(r: any): OndcProviderRow {
+  const domains = parseStoreOndcDomains(r.ondc_domain_raw ?? null);
   return {
     id: Number(r.id),
     provider_id: String(r.provider_id),
@@ -55,7 +58,8 @@ function mapRow(r: any): OndcProviderRow {
     fssai_license: r.fssai_license ?? null,
     support_phone: r.support_phone ?? null,
     support_email: r.support_email ?? null,
-    domain: r.domain ?? 'ONDC:RET12',
+    domains,
+    domain: domains[0] ?? 'ONDC:RET12',
     is_active: Boolean(r.is_active),
     created_at: r.created_at,
     updated_at: r.updated_at,
