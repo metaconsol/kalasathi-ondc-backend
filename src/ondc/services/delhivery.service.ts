@@ -876,3 +876,168 @@ export async function createPickup(
 
   return data;
 }
+
+// ---------------------------------------------------------------------------
+// 7. Shipping-cost estimate for /on_select — real Delhivery freight charge.
+//
+// Mirrors odop_backend's calculateShippingCost (Delhivery invoice/charges API).
+// FAIL-OPEN: returns null whenever it can't produce a trustworthy number
+// (Delhivery disabled, missing token / pincode / store location, or any API
+// error). Callers must treat null as "no delivery charge" (0), NEVER as an
+// error — /on_select must respond even if the courier is down.
+// ---------------------------------------------------------------------------
+
+const SHIPPING_ESTIMATE_TIMEOUT_MS = 6000;
+
+/** Pull the freight amount out of Delhivery's charges response (nested/array-safe). */
+function findChargeAmount(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  if (Array.isArray(value)) {
+    let total = 0;
+    let found = false;
+    for (const entry of value) {
+      const amount = findChargeAmount(entry);
+      if (amount !== null) {
+        total += amount;
+        found = true;
+      }
+    }
+    return found ? total : null;
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const preferred = [
+      'total_amount',
+      'totalAmount',
+      'total',
+      'charge',
+      'charges',
+      'shipping_charge',
+      'shippingCharge',
+      'freight',
+      'freight_charge',
+      'freightCharge',
+      'gross_amount',
+      'grossAmount',
+    ];
+    for (const key of preferred) {
+      const amount = findChargeAmount(record[key]);
+      if (amount !== null) return amount;
+    }
+    for (const entry of Object.values(record)) {
+      const amount = findChargeAmount(entry);
+      if (amount !== null) return amount;
+    }
+  }
+  return null;
+}
+
+const sixDigitPincode = (v: unknown): string | null => {
+  const s = clean(v);
+  return /^\d{6}$/.test(s) ? s : null;
+};
+
+interface ShippingItemInput {
+  productId: number;
+  quantity: number;
+}
+
+/**
+ * Estimated Delhivery freight for shipping `items` from the store to
+ * `buyerPincode`. Returns the amount in INR, or null to skip (fail-open).
+ * @param paymentType affects Delhivery's COD-vs-prepaid charge; defaults Pre-paid.
+ */
+export async function estimateDeliveryCharge(input: {
+  storeId: number | null;
+  items: ShippingItemInput[];
+  buyerPincode: string | null | undefined;
+  paymentType?: 'Pre-paid' | 'COD';
+}): Promise<number | null> {
+  if (!delhiveryEnv.enabled || !delhiveryEnv.token) return null;
+  if (!input.storeId || input.items.length === 0) return null;
+
+  const destPin = sixDigitPincode(input.buyerPincode);
+  if (!destPin) return null;
+
+  try {
+    const locations = await ondcQuery<{ pincode: string | null }>(
+      `SELECT pincode FROM store_locations
+       WHERE store_id = ? AND is_active = 1
+       ORDER BY CASE location_type
+         WHEN 'SELF_PICKUP' THEN 1 WHEN 'DELIVERY' THEN 2 WHEN 'RETURN' THEN 3 ELSE 4 END, id ASC
+       LIMIT 1`,
+      [input.storeId],
+    );
+    const originPin = sixDigitPincode(locations[0]?.pincode);
+    if (!originPin) return null;
+
+    const ids = Array.from(new Set(input.items.map((i) => Number(i.productId)).filter(Boolean)));
+    if (ids.length === 0) return null;
+    const placeholders = ids.map(() => '?').join(',');
+    const prodRows = await ondcQuery<{
+      id: number;
+      package_weight_gm: number | null;
+      package_length_cm: string | null;
+      package_width_cm: string | null;
+      package_height_cm: string | null;
+    }>(
+      `SELECT id, package_weight_gm, package_length_cm, package_width_cm, package_height_cm
+       FROM products WHERE id IN (${placeholders})`,
+      ids,
+    );
+    const byId = new Map(prodRows.map((r) => [Number(r.id), r]));
+
+    let weightGm = 0;
+    let lengthCm = 0;
+    let widthCm = 0;
+    let heightCm = 0;
+    for (const item of input.items) {
+      const qty = Math.max(1, toNumber(item.quantity, 1));
+      const p = byId.get(Number(item.productId));
+      weightGm += (toNumber(p?.package_weight_gm) || DEFAULT_PACKAGE_METRICS.weightGm) * qty;
+      lengthCm = Math.max(
+        lengthCm,
+        toNumber(p?.package_length_cm) || DEFAULT_PACKAGE_METRICS.lengthCm,
+      );
+      widthCm = Math.max(widthCm, toNumber(p?.package_width_cm) || DEFAULT_PACKAGE_METRICS.widthCm);
+      heightCm = Math.max(
+        heightCm,
+        toNumber(p?.package_height_cm) || DEFAULT_PACKAGE_METRICS.heightCm,
+      );
+    }
+
+    const params: Record<string, string | number> = {
+      md: delhiveryEnv.defaultShippingMode === 'Express' ? 'E' : 'S',
+      cgm: Math.max(1, Math.round(weightGm) || DEFAULT_PACKAGE_METRICS.weightGm),
+      o_pin: originPin,
+      d_pin: destPin,
+      ss: 'Delivered',
+      pt: input.paymentType === 'COD' ? 'COD' : 'Pre-paid',
+      l: Math.max(1, Math.round(lengthCm) || DEFAULT_PACKAGE_METRICS.lengthCm),
+      b: Math.max(1, Math.round(widthCm) || DEFAULT_PACKAGE_METRICS.widthCm),
+      h: Math.max(1, Math.round(heightCm) || DEFAULT_PACKAGE_METRICS.heightCm),
+      ipkg_type: 'box',
+    };
+
+    const { data } = await axios.get(`${delhiveryEnv.baseUrl}/api/kinko/v1/invoice/charges/.json`, {
+      headers: jsonHeaders(),
+      params,
+      timeout: SHIPPING_ESTIMATE_TIMEOUT_MS,
+    });
+    const amount = findChargeAmount(data);
+    if (amount === null || amount < 0) return null;
+    return Math.round(amount * 100) / 100;
+  } catch (err) {
+    ondcLogger.warn('Delhivery shipping estimate failed — using 0 (fail-open)', {
+      storeId: input.storeId,
+      buyerPincode: input.buyerPincode,
+      err,
+    });
+    return null;
+  }
+}
