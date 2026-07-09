@@ -5,7 +5,12 @@ import { bapTermsModel } from '~/ondc/models/bap_terms.model';
 /** GET /api/v1/ondc/admin/bap-terms */
 export async function listBapTerms(req: Request, res: Response): Promise<void> {
   const { bap_id, bap_uri, transaction_id } = req.query as Record<string, string | undefined>;
-  const rows = await bapTermsModel.list({ bap_id, bap_uri, transaction_id });
+  // Only pass defined filters — exactOptionalPropertyTypes rejects explicit `undefined`.
+  const rows = await bapTermsModel.list({
+    ...(bap_id ? { bap_id } : {}),
+    ...(bap_uri ? { bap_uri } : {}),
+    ...(transaction_id ? { transaction_id } : {}),
+  });
 
   const shaped = rows.map((row) => ({
     id: row.id,

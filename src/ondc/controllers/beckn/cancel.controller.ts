@@ -53,7 +53,7 @@ export async function handleCancel(req: Request, res: Response): Promise<void> {
       const productIds = items
         .map((i) => {
           const match = i.item_id?.match(/prod_(\d+)/);
-          if (match) return parseInt(match[1], 10);
+          if (match && match[1]) return parseInt(match[1], 10);
           return i.product_id;
         })
         .filter(Boolean);

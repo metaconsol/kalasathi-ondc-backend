@@ -9,8 +9,10 @@
     "types": ["node"],
     "typeRoots": ["./src/types", "./node_modules/@types"],
     "sourceMap": true,
-    "declaration": true,
-    "declarationMap": true,
+    // noEmit:true means no .d.ts is ever produced, so declaration emit is inert
+    // here — it only triggered TS4094 emit-phase checks on generated Prisma code.
+    "declaration": false,
+    "declarationMap": false,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "strict": true,

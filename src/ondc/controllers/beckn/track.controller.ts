@@ -22,7 +22,7 @@ export async function handleTrack(req: Request, res: Response): Promise<void> {
   // context.* fields are already validated globally in ondcValidator.middleware.ts
   // We only need to validate the endpoint-specific mandatory fields here
   if (!message?.order_id) {
-    return res.status(200).json(
+    res.status(200).json(
       buildAck(ctx || ({} as BecknContext), {
         type: 'CONTEXT-ERROR', // or JSON-SCHEMA-ERROR
         code: '20000',
@@ -30,6 +30,7 @@ export async function handleTrack(req: Request, res: Response): Promise<void> {
         message: 'Missing required field: message.order_id',
       }),
     );
+    return;
   }
 
   const txnId = ctx.transaction_id;
@@ -56,13 +57,14 @@ export async function handleTrack(req: Request, res: Response): Promise<void> {
         ondcLogger.error('track db marker update failed', { txnId, err });
       }
 
-      return res.status(200).json(
+      res.status(200).json(
         buildAck(ctx, {
           type: 'CONTEXT-ERROR',
           code: '40003',
           message: 'Tracking is not available for this order',
         }),
       );
+      return;
     }
 
     // Tracking is available, send sync ACK
@@ -76,7 +78,10 @@ export async function handleTrack(req: Request, res: Response): Promise<void> {
           url: trackingUrl,
           status: 'active',
         };
-        const payload = buildOnTrack(ctx, tracking);
+        // buildOnTrack (like the other payload builders) is typed `object`;
+        // cast so context/message access + callback typing resolve, matching
+        // select.controller's buildOnSelect(...) as any pattern.
+        const payload = buildOnTrack(ctx, tracking) as any;
 
         await overallTxnsModel.patch(txnId, {
           on_track: 1,
@@ -111,6 +116,8 @@ export async function handleTrack(req: Request, res: Response): Promise<void> {
     });
   } catch (err) {
     ondcLogger.error('track sync error', { txnId, err });
-    res.status(500).json(buildAck(ctx, { type: 'SYSERR', code: '500', message: 'Internal error' }));
+    res
+      .status(500)
+      .json(buildAck(ctx, { type: 'CORE-ERROR', code: '50000', message: 'Internal error' }));
   }
 }
