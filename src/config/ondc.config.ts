@@ -40,6 +40,10 @@ export const ondcEnv = {
   adminEmail: optionalEnv('ONDC_ADMIN_EMAIL'),
   adminPasswordHash: optionalEnv('ONDC_ADMIN_PASSWORD_HASH'),
 
+  // PIN that lets an admin temporarily reveal the signing keys on the BPP
+  // Settings page. Unset = reveal disabled entirely.
+  settingsRevealPin: optionalEnv('ONDC_SETTINGS_REVEAL_PIN'),
+
   // Signature skew tolerance in seconds
   headerMaxSkewSec: parseInt(optionalEnv('ONDC_HEADER_MAX_SKEW_SEC', '300'), 10),
 
