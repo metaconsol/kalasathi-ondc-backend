@@ -31,5 +31,9 @@ export const delhiveryEnv = {
     environment === 'production'
       ? envValue('DELHIVERY_PRODUCTION_BASE_URL', 'https://track.delhivery.com')
       : envValue('DELHIVERY_STAGING_BASE_URL', 'https://staging-express.delhivery.com'),
-  token: envValue('DELHIVERY_API_TOKEN'),
+  token: envValue('DELHIVERY_API_TOKEN').replace(/\s+/g, ''),
+  /** Registered Delhivery client name — sent as `client` on manifests and `registered_name` on warehouse creation. */
+  clientName: envValue('DELHIVERY_CLIENT_NAME'),
+  /** 'Surface' (default) or 'Express' */
+  defaultShippingMode: envValue('DELHIVERY_DEFAULT_SHIPPING_MODE', 'Surface'),
 };

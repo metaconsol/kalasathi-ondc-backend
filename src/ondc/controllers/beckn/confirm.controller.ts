@@ -364,7 +364,11 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
               seller_id: provider?.seller_id ?? 0,
               store_id: provider?.store_id ?? null,
               status: 'CREATED',
-              payment_method: (payment['type'] === 'ON-DELIVERY' ? 'COD' : 'PREPAID') as any,
+              // ONDC v1.2.x: COD is payment.type ON-FULFILLMENT ('ON-DELIVERY' kept for tolerance)
+              payment_method: (payment['type'] === 'ON-FULFILLMENT' ||
+              payment['type'] === 'ON-DELIVERY'
+                ? 'COD'
+                : 'PREPAID') as any,
               payment_status: payment['status'] === 'PAID' ? 'PAID' : 'NOT_PAID',
               payment_transaction_ref: payment['params']?.['transaction_id'] ?? null,
               payment_json: JSON.stringify(payment),
