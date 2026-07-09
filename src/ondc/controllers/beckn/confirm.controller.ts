@@ -31,8 +31,21 @@ import { bapTermsModel } from '~/ondc/models/bap_terms.model';
 import { ondcLogger } from '~/ondc/utils/logger.util';
 import { ondcEnv } from '~/config/ondc.config';
 import { ondcQuery, withOndcTransaction } from '~/lib/ondcSql';
-import { buildQuote, type QuoteLineInput } from '~/ondc/utils/catalog.builders';
+import {
+  buildQuote,
+  resolveOndcEmail,
+  resolveOndcLocality,
+  resolveOndcPhone,
+  type QuoteLineInput,
+} from '~/ondc/utils/catalog.builders';
 import type { BecknContext } from '~/ondc/types/beckn.types';
+
+const DEFAULT_QUOTE_ITEM_TAGS = [
+  {
+    code: 'quote',
+    list: [{ code: 'type', value: 'item' }],
+  },
+];
 
 /** Extract numeric string value from quote.price.value */
 function quoteTotal(order: Record<string, any>): number {
@@ -50,8 +63,8 @@ function normalizeQuoteBreakupItem(item: any): any {
   const sanitizedItem = { ...item };
   delete sanitizedItem.quantity;
 
-  if (!sanitizedItem.tags || !Array.isArray(sanitizedItem.tags)) {
-    sanitizedItem.tags = sanitizedItem.tags ? [sanitizedItem.tags] : [];
+  if (!Array.isArray(sanitizedItem.tags) || sanitizedItem.tags.length === 0) {
+    sanitizedItem.tags = DEFAULT_QUOTE_ITEM_TAGS;
   }
 
   return sanitizedItem;
@@ -65,8 +78,8 @@ function sanitizeQuoteBreakup(breakup: any[]): any[] {
     const sanitizedItem = { ...item };
     delete sanitizedItem.quantity;
 
-    if (Array.isArray(sanitizedItem.tags) && sanitizedItem.tags.length === 0) {
-      delete sanitizedItem.tags;
+    if (!Array.isArray(sanitizedItem.tags) || sanitizedItem.tags.length === 0) {
+      sanitizedItem.tags = DEFAULT_QUOTE_ITEM_TAGS;
     }
 
     if (Object.keys(sanitizedItem).length === 0) {
@@ -571,7 +584,7 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
               address: {
                 // name: '',
                 // building: '',
-                locality: String(startLoc?.address_line2 ?? startLoc?.address_line1 ?? ''),
+                locality: resolveOndcLocality(startLoc?.address_line2, startLoc?.address_line1),
                 city: String(startLoc?.city ?? ''),
                 state: String(startLoc?.state ?? ''),
                 // country: String(startLoc?.country ?? ''),
@@ -579,8 +592,8 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
               },
             },
             contact: {
-              phone: String(store?.phone ?? ''),
-              email: String(store?.email ?? ''),
+              phone: resolveOndcPhone(store?.phone),
+              email: resolveOndcEmail(store?.email),
             },
           },
           end: {

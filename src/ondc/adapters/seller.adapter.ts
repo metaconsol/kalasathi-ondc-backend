@@ -15,7 +15,13 @@ import { ondcQuery } from '~/lib/ondcSql';
 import type { OndcProvider } from '~/ondc/types/ondc.types';
 import { ondcEnv } from '~/config/ondc.config';
 import { SELLER_PROFILE } from '~/ondc/config/constants';
-import { buildProviderLocation, type ProviderLocation } from '~/ondc/utils/catalog.builders';
+import {
+  buildProviderLocation,
+  resolveOndcLocality,
+  resolveProviderLongDesc,
+  resolveProviderShortDesc,
+  type ProviderLocation,
+} from '~/ondc/utils/catalog.builders';
 
 export interface MainDbSeller {
   id: number;
@@ -209,7 +215,7 @@ export function mapStoreLocationToOndcLocation(loc: MainDbStoreLocation): Provid
     String(loc.id),
     gps,
     {
-      locality: loc.address_line2 ?? loc.address_line1 ?? SELLER_PROFILE.LOCALITY,
+      locality: resolveOndcLocality(loc.address_line2, loc.address_line1),
       street: loc.address_line1 ?? SELLER_PROFILE.STREET,
       city: loc.city,
       area_code: loc.pincode,
@@ -231,8 +237,8 @@ export function adaptSellerToOndcProvider(seller: MainDbSeller, providerId: stri
     id: providerId,
     descriptor: {
       name: seller.name || SELLER_PROFILE.BRAND_NAME,
-      short_desc: seller.description?.slice(0, 200) ?? '',
-      long_desc: seller.description ?? '',
+      short_desc: resolveProviderShortDesc(seller.description?.slice(0, 200), seller.name),
+      long_desc: resolveProviderLongDesc(seller.description, seller.name),
       images: logoUrl ? [logoUrl] : [],
     },
     locations: [],

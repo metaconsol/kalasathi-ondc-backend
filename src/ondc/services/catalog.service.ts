@@ -106,6 +106,8 @@ export const catalogService = {
         long_desc: store.description ?? '',
         logo_url: store.logo ?? null,
         fssai_license: null,
+        support_phone: store.phone,
+        support_email: store.email,
         updated_at: new Date(),
       };
 

@@ -26,6 +26,12 @@ import { buildQuote, type QuoteLineInput } from '~/ondc/utils/catalog.builders';
 import type { BecknContext } from '~/ondc/types/beckn.types';
 
 type LooseObject = Record<string, any>;
+const DEFAULT_QUOTE_ITEM_TAGS = [
+  {
+    code: 'quote',
+    list: [{ code: 'type', value: 'item' }],
+  },
+];
 
 interface FallbackCatalogRow {
   store_id: number;
@@ -105,8 +111,8 @@ function normalizeQuoteBreakupItem(item: any): any {
   const sanitizedItem = { ...item };
   delete sanitizedItem.quantity;
 
-  if (!sanitizedItem.tags || !Array.isArray(sanitizedItem.tags)) {
-    sanitizedItem.tags = sanitizedItem.tags ? [sanitizedItem.tags] : [];
+  if (!Array.isArray(sanitizedItem.tags) || sanitizedItem.tags.length === 0) {
+    sanitizedItem.tags = DEFAULT_QUOTE_ITEM_TAGS;
   }
 
   return sanitizedItem;
@@ -120,8 +126,8 @@ function sanitizeQuoteBreakup(breakup: any[]): any[] {
     const sanitizedItem = { ...item };
     delete sanitizedItem.quantity;
 
-    if (Array.isArray(sanitizedItem.tags) && sanitizedItem.tags.length === 0) {
-      delete sanitizedItem.tags;
+    if (!Array.isArray(sanitizedItem.tags) || sanitizedItem.tags.length === 0) {
+      sanitizedItem.tags = DEFAULT_QUOTE_ITEM_TAGS;
     }
 
     if (Object.keys(sanitizedItem).length === 0) {
