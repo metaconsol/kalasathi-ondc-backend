@@ -1,3 +1,26 @@
+### Branch 043
+
+**Date:** 2026-07-09
+
+**Status:** Completed
+
+**Area:** ONDC Validations (Pramaan Flow 7) - Non-Cancellable Item validation
+
+**What:**
+Fixed the non-cancellable item order cancellation issue. When an order contains a product marked as non-cancellable in the database, the backend now correctly intercepts the cancellation attempt and returns a synchronous NACK with error code 50001 (Cancellation not possible).
+
+**Why:**
+Pramaan testing Flow 7 mandates that if a non-cancellable product is selected, the seller must reject any attempt to cancel it with a specific 50001 NACK error. The previous logic failed because the product ID lookup in the database used an incorrect concatenated ID instead of parsing the exact product ID from the `item_id` string, leading the backend to incorrectly allow the cancellation. Additionally, ONDC schema requires NACK responses to echo the full request context, which was missing.
+
+**Changes:** file name and description of file change.
+
+- `src/ondc/controllers/beckn/cancel.controller.ts`
+  - Fixed the product ID extraction logic to use a regular expression (`/prod_(\d+)/`) on `item_id`, ensuring the correct database lookup for the `cancellable` flag.
+  - Implemented the 50001 NACK synchronous response to block cancellation of orders containing non-cancellable items.
+  - Added the `context: ctx` object to all NACK responses (including "Order not found", "Internal Server Error", and the 50001 error) to ensure full ONDC schema compliance.
+
+---
+
 ### Branch 041
 
 **Date:** 2026-07-08
