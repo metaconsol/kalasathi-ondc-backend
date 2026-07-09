@@ -50,7 +50,7 @@ import {
   closeOndcIssue,
 } from '~/ondc/controllers/admin/issues.controller';
 import { getDashboardStats } from '~/ondc/controllers/admin/stats.controller';
-import { getSettings } from '~/ondc/controllers/admin/settings.controller';
+import { getSettings, revealKeys } from '~/ondc/controllers/admin/settings.controller';
 import {
   listPpfRecon,
   getPpfReconByOrder,
@@ -68,6 +68,8 @@ router.get('/dashboard/stats', ...sellerGuard, getDashboardStats);
 
 // ---- BPP settings (read-only non-secret ONDC config from env) ----
 router.get('/settings', ...adminGuard, getSettings);
+// PIN-protected temporary reveal of the signing keys (admin only)
+router.post('/settings/reveal-keys', ...adminGuard, revealKeys);
 
 // ---- Catalog (read-only, built live from ondc_odop_db) ----
 router.get('/catalog/debug', ...adminGuard, debugCatalog);
