@@ -44,8 +44,14 @@ const STORE_SELECT = `
   s.created_at                           AS created_at,
   s.updated_at                           AS updated_at`;
 
+function buildNameFilter(q?: string): { clause: string; params: string[] } {
+  const term = q?.trim();
+  if (!term) return { clause: '', params: [] };
+  return { clause: 'WHERE s.store_name LIKE ?', params: [`%${term}%`] };
+}
+
 function mapRow(r: any): OndcProviderRow {
-  const domains = parseStoreOndcDomains(r.ondc_domain_raw ?? null);
+  const domains = parseStoreOndcDomains(r.ondc_domain_raw);
   return {
     id: Number(r.id),
     provider_id: String(r.provider_id),
@@ -92,6 +98,30 @@ export const providerModel = {
   async listAll(): Promise<OndcProviderRow[]> {
     const rows = await ondcQuery<any>(
       `SELECT ${STORE_SELECT} FROM stores s ORDER BY s.is_active DESC, s.store_name ASC`,
+    );
+    return rows.map(mapRow);
+  },
+
+  async countAll(opts?: { q?: string }): Promise<number> {
+    const { clause, params } = buildNameFilter(opts?.q);
+    const rows = await ondcQuery<{ cnt: number }>(
+      `SELECT COUNT(*) AS cnt FROM stores s ${clause}`,
+      params,
+    );
+    return Number(rows[0]?.cnt ?? 0);
+  },
+
+  async listPaginated(opts: {
+    limit: number;
+    offset: number;
+    q?: string;
+  }): Promise<OndcProviderRow[]> {
+    const { clause, params } = buildNameFilter(opts.q);
+    const rows = await ondcQuery<any>(
+      `SELECT ${STORE_SELECT} FROM stores s ${clause}
+       ORDER BY s.is_active DESC, s.store_name ASC
+       LIMIT ? OFFSET ?`,
+      [...params, opts.limit, opts.offset],
     );
     return rows.map(mapRow);
   },
