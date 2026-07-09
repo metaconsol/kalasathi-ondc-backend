@@ -95,27 +95,44 @@ export function normalizeOndcDomain(raw: string | null | undefined): OndcRetailD
   return lookup[key] ?? null;
 }
 
-/** Parse stores.ondc_domain JSON/text into unique canonical ONDC domain codes. */
-export function parseStoreOndcDomains(raw: string | null | undefined): OndcRetailDomain[] {
-  if (!raw?.trim()) return ['ONDC:RET12'];
+/** Collect raw domain tags from stores.ondc_domain (JSON array, double-encoded JSON, CSV, or plain text). */
+function extractStoreDomainTags(raw: unknown): string[] {
+  if (raw == null || raw === '') return [];
 
-  let tags: string[] = [];
-  const trimmed = raw.trim();
-  if (trimmed.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(trimmed) as unknown;
-      if (Array.isArray(parsed)) tags = parsed.map((v) => String(v).trim()).filter(Boolean);
-    } catch {
-      tags = [];
-    }
-  } else if (trimmed.includes(',')) {
-    tags = trimmed
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-  } else {
-    tags = [trimmed];
+  if (Array.isArray(raw)) {
+    return raw.flatMap((v) => extractStoreDomainTags(v));
   }
+
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(raw)) {
+    return extractStoreDomainTags(raw.toString('utf8'));
+  }
+
+  const text = String(raw).trim();
+  if (!text) return [];
+
+  if (text.startsWith('[') || (text.startsWith('"') && text.includes('['))) {
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (parsed !== text) return extractStoreDomainTags(parsed);
+    } catch {
+      // fall through to CSV / single-value parsing
+    }
+  }
+
+  if (text.includes(',')) {
+    return text
+      .split(',')
+      .map((s) => s.trim().replace(/^["']|["']$/g, ''))
+      .filter(Boolean);
+  }
+
+  return [text.replace(/^["']|["']$/g, '')];
+}
+
+/** Parse stores.ondc_domain JSON/text into unique canonical ONDC domain codes. */
+export function parseStoreOndcDomains(raw: unknown): OndcRetailDomain[] {
+  const tags = extractStoreDomainTags(raw);
+  if (!tags.length) return ['ONDC:RET12'];
 
   const seen = new Set<OndcRetailDomain>();
   const out: OndcRetailDomain[] = [];

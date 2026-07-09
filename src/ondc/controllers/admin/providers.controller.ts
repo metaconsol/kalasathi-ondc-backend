@@ -8,10 +8,35 @@ import type { Request, Response } from 'express';
 import { ApiResponse, AppError } from '~/lib/response';
 import { providerModel } from '~/ondc/models/provider.model';
 
-/** GET /api/v1/ondc/admin/providers */
-export async function listProviders(_req: Request, res: Response): Promise<void> {
-  const providers = await providerModel.listAll();
-  ApiResponse.success(res, 'Providers', providers);
+/** GET /api/v1/ondc/admin/providers — unpaginated when no page/limit; else 12 per page by default */
+export async function listProviders(req: Request, res: Response): Promise<void> {
+  const { page, limit, q } = req.query as Record<string, string>;
+
+  if (page === undefined && limit === undefined) {
+    const providers = await providerModel.listAll();
+    ApiResponse.success(res, 'Providers', providers);
+    return;
+  }
+
+  const pageNum = Math.max(1, parseInt(page ?? '1', 10) || 1);
+  const limitNum = Math.min(100, Math.max(1, parseInt(limit ?? '12', 10) || 12));
+  const offset = (pageNum - 1) * limitNum;
+
+  const search = q?.trim() || undefined;
+  const listOpts = { limit: limitNum, offset, ...(search ? { q: search } : {}) };
+  const countOpts = search ? { q: search } : {};
+
+  const [providers, total] = await Promise.all([
+    providerModel.listPaginated(listOpts),
+    providerModel.countAll(countOpts),
+  ]);
+
+  ApiResponse.success(res, 'Providers', providers, {
+    page: pageNum,
+    limit: limitNum,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / limitNum)),
+  });
 }
 
 /** GET /api/v1/ondc/admin/providers/:providerId */
