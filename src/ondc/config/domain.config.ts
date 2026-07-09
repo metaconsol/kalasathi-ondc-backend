@@ -67,6 +67,68 @@ export const DOMAIN_CONFIGS: Record<OndcRetailDomain, DomainConfig> = {
 
 export const SUPPORTED_DOMAINS: OndcRetailDomain[] = ['ONDC:RET10', 'ONDC:RET12', 'ONDC:RET16'];
 
+/**
+ * Map categories.domain or stores.ondc_domain text tags to canonical ONDC codes.
+ * grocery → RET10, fashion → RET12, home_kitchen / home decor → RET16.
+ */
+export function normalizeOndcDomain(raw: string | null | undefined): OndcRetailDomain | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  const upper = trimmed.toUpperCase();
+  if (upper === 'ONDC:RET10' || upper === 'ONDC:RET12' || upper === 'ONDC:RET16') {
+    return upper as OndcRetailDomain;
+  }
+
+  const key = trimmed.toLowerCase().replace(/[\s_&-]+/g, '');
+  const lookup: Record<string, OndcRetailDomain> = {
+    grocery: 'ONDC:RET10',
+    fashion: 'ONDC:RET12',
+    apparel: 'ONDC:RET12',
+    clothing: 'ONDC:RET12',
+    handicrafts: 'ONDC:RET12',
+    handloom: 'ONDC:RET12',
+    jewellery: 'ONDC:RET12',
+    homekitchen: 'ONDC:RET16',
+    homeandkitchen: 'ONDC:RET16',
+    homedecor: 'ONDC:RET16',
+  };
+  return lookup[key] ?? null;
+}
+
+/** Parse stores.ondc_domain JSON/text into unique canonical ONDC domain codes. */
+export function parseStoreOndcDomains(raw: string | null | undefined): OndcRetailDomain[] {
+  if (!raw?.trim()) return ['ONDC:RET12'];
+
+  let tags: string[] = [];
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (Array.isArray(parsed)) tags = parsed.map((v) => String(v).trim()).filter(Boolean);
+    } catch {
+      tags = [];
+    }
+  } else if (trimmed.includes(',')) {
+    tags = trimmed
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  } else {
+    tags = [trimmed];
+  }
+
+  const seen = new Set<OndcRetailDomain>();
+  const out: OndcRetailDomain[] = [];
+  for (const tag of tags) {
+    const dom = normalizeOndcDomain(tag);
+    if (dom && !seen.has(dom)) {
+      seen.add(dom);
+      out.push(dom);
+    }
+  }
+  return out.length ? out : ['ONDC:RET12'];
+}
+
 export function getDomainConfig(domain: string): DomainConfig {
   const cfg = DOMAIN_CONFIGS[domain as OndcRetailDomain];
   if (!cfg) throw new Error(`Unsupported ONDC domain: ${domain}`);
