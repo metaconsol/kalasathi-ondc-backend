@@ -11,6 +11,7 @@ import { becknService } from '~/ondc/services/beckn.service';
 import { observabilityService } from '~/ondc/services/observability.service';
 import { resolveOndcCatalogRow } from '~/ondc/adapters/product.adapter';
 import { checkProductServiceability } from '~/ondc/services/serviceability.service';
+import { estimateDeliveryCharge } from '~/ondc/services/delhivery.service';
 import { fetchStoreById, fetchStoreLocations } from '~/ondc/adapters/seller.adapter';
 import { transactionModel } from '~/ondc/models/transaction.model';
 import { txnLogModel } from '~/ondc/models/log.model';
@@ -88,6 +89,7 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
       // Validate items & build quote lines
       const validatedItems: any[] = [];
       const serviceCheckItems: Array<{ itemId: string; productId: number }> = [];
+      const shippingItems: Array<{ productId: number; quantity: number }> = [];
       const lines: QuoteLineInput[] = [];
       const itemErrors: string[] = [];
       const requestErrors: string[] = [];
@@ -164,6 +166,7 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
           fulfillment_id: fulfillmentId,
         });
         serviceCheckItems.push({ itemId: reqItem.id, productId: row.product_id });
+        shippingItems.push({ productId: row.product_id, quantity: qty });
       }
 
       // Per-product serviceability to the buyer's delivery pincode (mirrors the
@@ -206,19 +209,20 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
         (r) => r.result.reason !== 'out_of_stock',
       );
 
-      // TODO: integrate shipping API for accurate delivery cost
-      const deliveryCharge = 0;
-      const packingCharge = 0;
-      const convenienceFee = 0;
-      const fulfillmentTax = 0;
-      const quote = buildQuote(
-        lines,
-        selectedFulfillmentId,
-        deliveryCharge,
-        packingCharge,
-        convenienceFee,
-        { includeZeroBreakups: true, fulfillmentTax },
-      );
+      // Real Delhivery freight to the buyer's pincode (fail-open → 0 when the
+      // courier is disabled/unreachable, so /on_select never blocks). Only the
+      // item prices + this delivery charge appear in the quote — no tax /
+      // packing / convenience-fee lines.
+      const deliveryCharge =
+        (await estimateDeliveryCharge({
+          storeId: resolvedStoreId,
+          items: shippingItems,
+          buyerPincode,
+          paymentType: 'Pre-paid',
+        })) ?? 0;
+      const quote = buildQuote(lines, selectedFulfillmentId, deliveryCharge, {
+        includeZeroBreakups: true,
+      });
 
       const store = resolvedStoreId ? await fetchStoreById(resolvedStoreId) : null;
       const storeLocations = resolvedStoreId ? await fetchStoreLocations(resolvedStoreId) : [];

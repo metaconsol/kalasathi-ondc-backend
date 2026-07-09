@@ -271,9 +271,8 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
           taxPercent: catalogRow.gst_percent,
         });
       }
-      const computedQuote = buildQuote(quoteLines, fallbackFulfillmentId, 0, 0, 0, {
+      const computedQuote = buildQuote(quoteLines, fallbackFulfillmentId, 0, {
         includeZeroBreakups: true,
-        fulfillmentTax: 0,
       });
       const breakup: any[] = (() => {
         if (inboundBreakup.length === 0) {

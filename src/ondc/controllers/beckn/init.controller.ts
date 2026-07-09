@@ -250,9 +250,8 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
       }
 
       const quote = (() => {
-        const computedQuote = buildQuote(quoteLines, fallbackFulfillmentId, 0, 0, 0, {
+        const computedQuote = buildQuote(quoteLines, fallbackFulfillmentId, 0, {
           includeZeroBreakups: true,
-          fulfillmentTax: 0,
         });
         if (inboundBreakup.length === 0) {
           return {
