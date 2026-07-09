@@ -21,6 +21,7 @@ export type OndcFulfillmentState =
   | 'RTO-Disposed'
   | 'Cancelled'
   | 'Return_Initiated'
+  | 'Return_Approved'
   | 'Return_Picked'
   | 'Return_Delivered'
   | 'Liquidated'
