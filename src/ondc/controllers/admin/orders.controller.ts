@@ -15,8 +15,9 @@ import type { OndcOrderStatus } from '~/ondc/types/order.types';
 /**
  * Sellers may only see/modify their own orders (admins see all). Responds 404
  * rather than 403 so order ids of other sellers can't be probed.
+ * (Also used by logistics.controller for the Delhivery endpoints.)
  */
-function assertOrderVisible(req: Request, order: { seller_id?: number | null }): void {
+export function assertOrderVisible(req: Request, order: { seller_id?: number | null }): void {
   if (req.user?.role === 'SELLER' && Number(order.seller_id) !== Number(req.user.id)) {
     throw new AppError('Order not found', 404);
   }

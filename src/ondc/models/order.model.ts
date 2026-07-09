@@ -56,6 +56,12 @@ export interface OndcOrderRow {
   tracking_number: string | null;
   tracking_link: string | null;
   logistics_provider: string | null;
+  // Delhivery shipment state (003_delhivery_logistics.sql)
+  delhivery_upload_wbn: string | null;
+  delhivery_pickup_id: string | null;
+  delhivery_shipment_status: string | null;
+  delhivery_last_scan_at: Date | null;
+  delhivery_last_response: string | null;
   cancel_reason_id: string | null;
   return_reason_id: string | null;
   raw_confirm_payload: string | null;
@@ -116,7 +122,19 @@ export interface OndcStatusHistoryRow {
   created_at: Date;
 }
 
-type CreateOrderData = Omit<OndcOrderRow, 'id' | 'created_at' | 'updated_at' | 'status_updated_at'>;
+type CreateOrderData = Omit<
+  OndcOrderRow,
+  | 'id'
+  | 'created_at'
+  | 'updated_at'
+  | 'status_updated_at'
+  // Delhivery columns are only ever written by the logistics flow, never at create.
+  | 'delhivery_upload_wbn'
+  | 'delhivery_pickup_id'
+  | 'delhivery_shipment_status'
+  | 'delhivery_last_scan_at'
+  | 'delhivery_last_response'
+>;
 type CreateItemData = Omit<OndcOrderItemRow, 'id' | 'created_at'>;
 type CreateFulfData = Omit<OndcFulfillmentRow, 'id' | 'created_at' | 'updated_at'>;
 

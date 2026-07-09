@@ -50,7 +50,19 @@ export function adaptConfirmToOrderRow(
   message: ConfirmMessage,
   sellerId: number,
   storeId: number | null = null,
-): Omit<OndcOrderRow, 'id' | 'created_at' | 'updated_at' | 'status_updated_at'> {
+): Omit<
+  OndcOrderRow,
+  | 'id'
+  | 'created_at'
+  | 'updated_at'
+  | 'status_updated_at'
+  // Delhivery columns are only written by the logistics flow, never at confirm.
+  | 'delhivery_upload_wbn'
+  | 'delhivery_pickup_id'
+  | 'delhivery_shipment_status'
+  | 'delhivery_last_scan_at'
+  | 'delhivery_last_response'
+> {
   const { order } = message;
   const quote = order.quote;
   const payment = order.payment;

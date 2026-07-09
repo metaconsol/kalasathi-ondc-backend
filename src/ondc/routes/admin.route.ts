@@ -13,6 +13,14 @@ import {
   updateFulfillment,
 } from '~/ondc/controllers/admin/orders.controller';
 import {
+  checkPincode,
+  bookShipment,
+  trackShipment,
+  cancelShipment,
+  packingSlip,
+  createPickup,
+} from '~/ondc/controllers/admin/logistics.controller';
+import {
   listProviders,
   getProvider,
   toggleProvider,
@@ -63,8 +71,17 @@ router.get('/catalog/items{/:providerId}', ...sellerGuard, listCatalogItems);
 
 // ---- Orders ----
 router.get('/orders', ...sellerGuard, listOrders);
+// Literal segment registered before /orders/:orderId so it can't be captured.
+router.get('/orders/logistics/delhivery/serviceability/:pincode', ...sellerGuard, checkPincode);
 router.get('/orders/:orderId', ...sellerGuard, getOrder);
 router.post('/orders/:orderId/fulfillment', ...sellerGuard, updateFulfillment);
+
+// ---- Delhivery logistics for ONDC orders (mirrors odop_backend seller flow) ----
+router.post('/orders/:orderId/delhivery/book', ...sellerGuard, bookShipment);
+router.get('/orders/:orderId/delhivery/track', ...sellerGuard, trackShipment);
+router.post('/orders/:orderId/delhivery/cancel', ...sellerGuard, cancelShipment);
+router.get('/orders/:orderId/delhivery/packing-slip', ...sellerGuard, packingSlip);
+router.post('/orders/:orderId/delhivery/pickup', ...sellerGuard, createPickup);
 
 // ---- Providers (read-only view of stores; provider_id = String(stores.id)) ----
 router.get('/providers', ...adminGuard, listProviders);

@@ -38,7 +38,7 @@ export function createApp(): Application {
   app.use(
     cors({
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Cart-Session'],
-      exposedHeaders: ['Authorization', 'X-Total-Count'],
+      exposedHeaders: ['Authorization', 'X-Total-Count', 'Content-Disposition'],
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       credentials: true,
       origin: (origin, callback) => {
