@@ -13,6 +13,16 @@ import testRouter from './test.route';
 
 const router = express.Router();
 
+// Never cache ONDC responses. These are credentialed cross-origin API calls;
+// Express's default ETag would make the browser send If-None-Match → 304, and
+// the browser then reuses a cached response whose Access-Control-Allow-Origin
+// was set for a DIFFERENT origin (e.g. cached under test.odopmartmp.com, reused
+// on odopmartmp.com) → "CORS AllowOriginMismatch". no-store stops that.
+router.use((_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
+
 // ONDC feature flag gate
 router.use((_req, res, next) => {
   if (!ondcEnv.enabled) {
