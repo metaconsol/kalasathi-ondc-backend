@@ -10,7 +10,7 @@ import { orderModel } from '~/ondc/models/order.model';
 import { ondcLogger } from '~/ondc/utils/logger.util';
 import type { OndcFulfillmentState } from '~/ondc/types/order.types';
 import { flow1AService } from '~/ondc/flows/flow1A.service';
-import { flow3CService } from '~/ondc/flows/flow3C.service';
+import { flow3BService } from '~/ondc/flows/flow3B.service';
 import { flow4AService } from '~/ondc/flows/flow4A.service';
 
 export const fulfillmentService = {
@@ -121,21 +121,18 @@ export const fulfillmentService = {
   },
 
   /** Initiate RTO (return to origin) */
-  async initiateRto(ondcOrderId: string, fulfillmentId = 'F1'): Promise<void> {
-    await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'RTO-Initiated');
-    const order = await orderModel.findByOndcOrderId(ondcOrderId);
-    await orderModel.transitionStatus(
-      ondcOrderId,
-      order?.status ?? null,
-      'CANCELLED',
-      'RTO-Initiated',
-      'seller',
-      'RTO initiated',
-    );
-    ondcLogger.info('RTO initiated', { ondcOrderId });
-    // Flow 3B (RTO): unsolicited on_cancel (RTO) followed by on_status.
-    await flow3CService.cancelRto(ondcOrderId);
-    await flow1AService.pushOnStatus(ondcOrderId, 'RTO-Initiated');
+  async initiateRto(ondcOrderId: string, fulfillmentId = 'F1', reasonId = '013'): Promise<void> {
+    ondcLogger.info('RTO initiated', { ondcOrderId, fulfillmentId, reasonId });
+    await flow3BService.cancelInTransit(ondcOrderId, reasonId);
+  },
+
+  async completeRto(
+    ondcOrderId: string,
+    fulfillmentId = 'F1',
+    finalState: 'RTO-Delivered' | 'RTO-Disposed',
+  ): Promise<void> {
+    ondcLogger.info('RTO final status pushed', { ondcOrderId, fulfillmentId, finalState });
+    await flow3BService.pushOnStatus(ondcOrderId, finalState);
   },
 
   /** Handle return initiation from buyer */

@@ -1,7 +1,7 @@
 /**
  * Flow 3A — Seller-initiated cancellation.
  *  - cancelByseller        → FULL cancel  (Pramaan Flow 3C): unsolicited on_cancel
- *  - partialCancelByseller → PARTIAL cancel (Pramaan Flow 3A): on_update + on_status
+ *  - partialCancelByseller → PARTIAL cancel (Pramaan Flow 3A): on_update only
  * PHP reference: generate_flow3a_on_cancel.php / _on_status.php / _on_update.php
  */
 
@@ -162,8 +162,9 @@ export const flow3AService = {
 
   /**
    * Merchant-initiated PARTIAL cancellation (Pramaan Flow 3A) — cancels some item
-   * quantities. Sends /on_update (remaining qty on the delivery fulfillment, the
-   * cancelled qty on a Cancel fulfillment with a quote_trail) followed by /on_status.
+   * quantities. Sends only /on_update so the buyer NP can drive the intermediate
+   * settlement step before the seller continues with later unsolicited /on_status
+   * callbacks from the fulfillment controls.
    */
   async partialCancelByseller(
     ondcOrderId: string,
@@ -293,39 +294,5 @@ export const flow3AService = {
 
     observabilityService.push('on_update', onUpdatePayload);
     ondcLogger.info('Flow3A: seller PARTIAL cancel (on_update)', { ondcOrderId, reasonId });
-
-    // 2) on_status — the SAME updated order so the buyer NP sees a state that is
-    //    consistent with the on_update (reduced quote + Cancel fulfillment).
-    //    Rebuilding from raw_confirm here (the old flow1A path) would resurrect the
-    //    pre-cancel quantities/quote and contradict the on_update we just sent.
-    const statusContext = buildResponseContext(sellerContext(order), 'on_status');
-    const onStatusPayload = {
-      context: statusContext,
-      message: { order: { ...updatedOrder, updated_at: nowIso() } },
-    };
-
-    const stRes = await becknService.sendCallback(
-      becknService.buildCallbackUrl(order.bap_uri, 'on_status'),
-      'on_status',
-      onStatusPayload as any,
-      order.transaction_id,
-    );
-
-    await txnLogModel.insert({
-      transaction_id: order.transaction_id,
-      message_id: (statusContext as any).message_id,
-      action: 'on_status',
-      direction: 'outbound',
-      bap_id: order.bap_id,
-      bpp_id: (statusContext as any).bpp_id ?? null,
-      domain: order.domain,
-      http_status: stRes.statusCode ?? null,
-      ack_status: stRes.statusCode && stRes.statusCode < 300 ? 'ACK' : 'NACK',
-      payload_json: JSON.stringify(onStatusPayload),
-      error_message: stRes.error ?? null,
-    });
-
-    observabilityService.push('on_status', onStatusPayload);
-    ondcLogger.info('Flow3A: seller PARTIAL cancel (on_status)', { ondcOrderId, reasonId });
   },
 };

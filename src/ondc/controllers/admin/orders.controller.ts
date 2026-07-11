@@ -8,7 +8,6 @@ import { orderModel } from '~/ondc/models/order.model';
 import { fulfillmentService } from '~/ondc/services/fulfillment.service';
 import { flow1AService } from '~/ondc/flows/flow1A.service';
 import { flow3AService } from '~/ondc/flows/flow3A.service';
-import { flow3BService } from '~/ondc/flows/flow3B.service';
 import { AppError } from '~/lib/response';
 import type { OndcOrderStatus } from '~/ondc/types/order.types';
 
@@ -89,7 +88,8 @@ export async function updateFulfillment(req: Request, res: Response): Promise<vo
     throw new AppError('Order not found', 404);
   }
   assertOrderVisible(req, dbOrder);
-  if (dbOrder.status === 'CANCELLED') {
+  const allowedAfterCancelled = new Set(['rto_delivered', 'rto_disposed']);
+  if (dbOrder.status === 'CANCELLED' && !allowedAfterCancelled.has(String(action))) {
     throw new AppError('Cannot update fulfillment for a cancelled order', 400);
   }
 
@@ -126,16 +126,7 @@ export async function updateFulfillment(req: Request, res: Response): Promise<vo
     case 'cancelled':
       {
         const reasonId = (req.body['reason_id'] as string) || '002';
-        const fulfillments = await orderModel.getFulfillments(orderId);
-        const hasInTransitFulfillment = fulfillments.some((f) =>
-          ['Agent-assigned', 'Order-picked-up', 'Out-for-delivery'].includes(String(f.state)),
-        );
-
-        if (hasInTransitFulfillment) {
-          await flow3BService.cancelInTransit(orderId, reasonId);
-        } else {
-          await flow3AService.cancelByseller(orderId, reasonId);
-        }
+        await flow3AService.cancelByseller(orderId, reasonId);
       }
       break;
     case 'partial_cancel':
@@ -162,7 +153,17 @@ export async function updateFulfillment(req: Request, res: Response): Promise<vo
       await fulfillmentService.markReturnDelivered(orderId, fulfillment_id);
       break;
     case 'rto':
-      await fulfillmentService.initiateRto(orderId, fulfillment_id);
+      await fulfillmentService.initiateRto(
+        orderId,
+        fulfillment_id,
+        (req.body['reason_id'] as string) || '013',
+      );
+      break;
+    case 'rto_delivered':
+      await fulfillmentService.completeRto(orderId, fulfillment_id, 'RTO-Delivered');
+      break;
+    case 'rto_disposed':
+      await fulfillmentService.completeRto(orderId, fulfillment_id, 'RTO-Disposed');
       break;
     case 'return':
       await fulfillmentService.initiateReturn(orderId, fulfillment_id);

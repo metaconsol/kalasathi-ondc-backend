@@ -4,7 +4,7 @@
   "description": "ODOP backend API",
   "main": "dist/main.js",
   "scripts": {
-    "dev": "tsx watch src/main.ts",
+    "dev": "tsx --watch src/main.ts",
     "build": "node esbuild.config.mjs",
     "build:watch": "node esbuild.config.mjs --watch",
     "start": "node dist/main.js",
@@ -49,6 +49,7 @@
     "@types/node": "^25.5.2",
     "@types/nodemailer": "^8.0.0",
     "@types/pdfkit": "^0.17.6",
+    "cross-env": "^10.1.0",
     "esbuild": "^0.25.0",
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.8",
@@ -58,7 +59,8 @@
     "prettier": "^3.8.1",
     "prisma": "^6.19.3",
     "ts-node": "^10.9.2",
-    "tsx": "^4.21.0",
+    "tsconfig-paths": "^4.2.0",
+    "tsx": "^4.23.0",
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.50.0"
   },
