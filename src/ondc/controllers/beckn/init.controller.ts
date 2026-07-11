@@ -11,6 +11,7 @@ import { buildAck, buildOnInit } from '~/ondc/utils/payload.builder';
 import { becknService } from '~/ondc/services/beckn.service';
 import { observabilityService } from '~/ondc/services/observability.service';
 import { resolveOndcCatalogRow } from '~/ondc/adapters/product.adapter';
+import { estimateDeliveryCharge } from '~/ondc/services/delhivery.service';
 import {
   fetchSellerProfileByStoreId,
   fetchStoreById,
@@ -176,6 +177,33 @@ function normalizeFulfillments(fulfillments: LooseObject[] = []): LooseObject[] 
   }));
 }
 
+/**
+ * Delivery charge we already quoted in this transaction's outbound /on_select
+ * (quote-trail consistency — the contract requires on_init's quote to match
+ * on_select's). Returns null when no on_select was logged for the txn.
+ * Also used by confirm.controller as its no-inbound-quote fallback.
+ */
+export async function quotedSelectDeliveryCharge(txnId: string): Promise<number | null> {
+  try {
+    const rows = await ondcQuery<{ payload_json: string | null }>(
+      `SELECT payload_json FROM ondc_txn_logs
+       WHERE transaction_id = ? AND action = 'on_select' AND direction = 'outbound'
+       ORDER BY id DESC LIMIT 1`,
+      [txnId],
+    );
+    if (!rows[0]?.payload_json) return null;
+    const payload = JSON.parse(rows[0].payload_json);
+    const breakup = payload?.message?.order?.quote?.breakup;
+    if (!Array.isArray(breakup)) return null;
+    const delivery = breakup.find((b: any) => String(b?.['@ondc/org/title_type']) === 'delivery');
+    if (!delivery) return null;
+    const value = Number(delivery?.price?.value);
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function handleInit(req: Request, res: Response): Promise<void> {
   const { context: ctx, message } = req.body as {
     context: BecknContext;
@@ -217,6 +245,7 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
       );
 
       const quoteLines: QuoteLineInput[] = [];
+      const shippingItems: Array<{ productId: number; quantity: number }> = [];
       let resolvedStoreId: number | null = storeIdFromProvider;
       const normalizedItems: Array<{
         id: string;
@@ -244,6 +273,9 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
         if (resolvedStoreId !== null && catalogRow.store_id !== resolvedStoreId) continue;
 
         resolvedStoreId = catalogRow.store_id;
+        if ('product_id' in catalogRow && catalogRow.product_id) {
+          shippingItems.push({ productId: Number(catalogRow.product_id), quantity });
+        }
         quoteLines.push({
           itemId: String(rawItem.id),
           itemName: catalogRow.name,
@@ -255,8 +287,29 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
         });
       }
 
+      // ── Delivery charge: the quote trail must stay consistent — on_init's
+      // quote has to match on_select's. Reuse the delivery charge we quoted in
+      // THIS transaction's outbound /on_select; if the buyer skipped /select,
+      // fall back to a fresh Delhivery estimate (0 only as last resort).
+      const buyerPincode =
+        String(
+          inboundFulfillments.find((f: any) => f?.end?.location?.address?.area_code)?.end?.location
+            ?.address?.area_code ??
+            (order['billing'] as any)?.address?.area_code ??
+            '',
+        ).trim() || null;
+      const deliveryCharge =
+        (await quotedSelectDeliveryCharge(txnId)) ??
+        (await estimateDeliveryCharge({
+          storeId: resolvedStoreId,
+          items: shippingItems,
+          buyerPincode,
+          paymentType: 'Pre-paid',
+        })) ??
+        0;
+
       const quote = (() => {
-        const computedQuote = buildQuote(quoteLines, fallbackFulfillmentId, 0, {
+        const computedQuote = buildQuote(quoteLines, fallbackFulfillmentId, deliveryCharge, {
           includeZeroBreakups: true,
         });
         if (inboundBreakup.length === 0) {
@@ -356,9 +409,21 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
           ...quote,
           ttl: order?.['quote']?.['ttl'] ?? quote.ttl ?? 'P1D',
         },
+        // Contract v1.2.5 on_init payment: type/collected_by + settlement terms
+        // are required alongside the finder fee and settlement details.
         payment: {
+          type: String(order?.['payment']?.['type'] ?? 'ON-ORDER'),
+          collected_by: String(order?.['payment']?.['collected_by'] ?? 'BAP'),
+          status: 'NOT-PAID',
+          params: {
+            amount: total.toFixed(2),
+            currency: 'INR',
+          },
           '@ondc/org/buyer_app_finder_fee_type': 'percent',
           '@ondc/org/buyer_app_finder_fee_amount': buyerFeeAmount,
+          '@ondc/org/settlement_basis': 'delivery',
+          '@ondc/org/settlement_window': 'P1D',
+          '@ondc/org/withholding_amount': '0.00',
           '@ondc/org/settlement_details': settlementDetails,
         },
       };

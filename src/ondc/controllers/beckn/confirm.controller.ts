@@ -39,6 +39,7 @@ import {
   type QuoteLineInput,
 } from '~/ondc/utils/catalog.builders';
 import type { BecknContext } from '~/ondc/types/beckn.types';
+import { quotedSelectDeliveryCharge } from './init.controller';
 
 const DEFAULT_QUOTE_ITEM_TAGS = [
   {
@@ -284,7 +285,11 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
           taxPercent: catalogRow.gst_percent,
         });
       }
-      const computedQuote = buildQuote(quoteLines, fallbackFulfillmentId, 0, {
+      // Buyer's confirm normally carries the agreed quote; when it doesn't,
+      // rebuild with the SAME delivery charge quoted at /select (quote trail).
+      const fallbackDelivery =
+        inboundBreakup.length === 0 ? ((await quotedSelectDeliveryCharge(txnId)) ?? 0) : 0;
+      const computedQuote = buildQuote(quoteLines, fallbackFulfillmentId, fallbackDelivery, {
         includeZeroBreakups: true,
       });
       const breakup: any[] = (() => {
@@ -613,8 +618,13 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
           ttl: order?.['quote']?.['ttl'] ?? computedQuote.ttl ?? 'P1D',
         },
         payment: {
-          url: String(inboundPaymentUrl ?? ''),
-          tl_method: String(inboundTlMethod ?? 'http/get'),
+          // Never emit an empty/dummy payment url — only when the buyer sent one.
+          ...(inboundPaymentUrl
+            ? {
+                url: String(inboundPaymentUrl),
+                tl_method: String(inboundTlMethod ?? 'http/get'),
+              }
+            : {}),
           params: {
             currency: String(inboundCurrency ?? 'INR'),
             transaction_id: String(inboundTransactionId ?? ''),

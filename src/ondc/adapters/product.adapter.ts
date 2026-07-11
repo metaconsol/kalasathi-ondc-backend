@@ -531,7 +531,14 @@ function buildRowForVariant(
     variant_id: v.id,
     store_id: p.store_id,
     name:
-      v.variant_name && v.variant_name.trim() !== ''
+      // Only append the variant name when it adds information — sellers often
+      // set variant_name = product_name, which produced ugly "X - X" names.
+      v.variant_name &&
+      v.variant_name.trim() !== '' &&
+      v.variant_name.trim().toLowerCase() !==
+        String(p.product_name ?? '')
+          .trim()
+          .toLowerCase()
         ? `${p.product_name} - ${v.variant_name}`
         : p.product_name,
     description: p.description,
@@ -773,12 +780,21 @@ export async function buildOndcItemFromRow(
   // Colour resolution: structured ondc attribute → variant color_code → fallback.
   // Fallback: when a variant carries no structured colour but has a distinct
   // variant_name (e.g. "carousel pink"), use it so variant grouping still works
-  // without per-variant attributes seeded. Skips empty / "Default" names.
+  // without per-variant attributes seeded. Skips empty / "Default" names AND
+  // names that just repeat the product name (would emit colour = product name).
   const vName = row.variant_name?.trim();
+  const productNameLower = String(row.name ?? '')
+    .trim()
+    .toLowerCase();
   const colour =
     attrValue(row.ondc_attrs, 'colour') ??
     row.color_code ??
-    (row.variant_id !== null && vName && vName.toLowerCase() !== 'default' ? vName : undefined);
+    (row.variant_id !== null &&
+    vName &&
+    vName.toLowerCase() !== 'default' &&
+    vName.toLowerCase() !== productNameLower
+      ? vName
+      : undefined);
   const sizeFromVariant =
     row.variant_level_name && row.variant_level_name.toLowerCase().includes('size')
       ? (row.variant_attribute_value ?? undefined)

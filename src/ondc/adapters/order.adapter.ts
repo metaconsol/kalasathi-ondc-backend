@@ -233,7 +233,11 @@ export async function buildOnStatusOrder(
     storeId ? fetchStoreLocations(storeId) : Promise.resolve([]),
     storeId ? fetchSellerProfileByStoreId(storeId) : Promise.resolve(null),
   ]);
-  const startLoc = storeLocations[0];
+  // Prefer a location row that actually has coordinates — a store can have
+  // multiple rows (e.g. RETURN without gps) and [0] may lack lat/lng, which
+  // used to make on_status advertise a wrong default gps.
+  const startLoc =
+    storeLocations.find((l) => l.latitude != null && l.longitude != null) ?? storeLocations[0];
   const providerName = store?.name ?? 'ODOP Provider';
 
   // ONDC /on_status requires fulfillment start.time and end.time, each with a
@@ -279,16 +283,18 @@ export async function buildOnStatusOrder(
           orig.start?.location?.gps ??
           (startLoc?.latitude != null && startLoc?.longitude != null
             ? `${startLoc.latitude},${startLoc.longitude}`
-            : '12.9716,77.5946'),
+            : // Bhopal HQ — must match the catalog's provider-location fallback,
+              // never a foreign city (was Bengaluru ⇒ on_search/on_status mismatch).
+              '23.259933,77.412613'),
         address: {
           locality:
             orig.start?.location?.address?.locality ??
             startLoc?.address_line2 ??
             startLoc?.address_line1 ??
             'NA',
-          city: orig.start?.location?.address?.city ?? startLoc?.city ?? 'Bengaluru',
-          area_code: orig.start?.location?.address?.area_code ?? startLoc?.pincode ?? '560001',
-          state: orig.start?.location?.address?.state ?? startLoc?.state ?? 'KA',
+          city: orig.start?.location?.address?.city ?? startLoc?.city ?? 'Bhopal',
+          area_code: orig.start?.location?.address?.area_code ?? startLoc?.pincode ?? '462001',
+          state: orig.start?.location?.address?.state ?? startLoc?.state ?? 'Madhya Pradesh',
         },
       },
       time: { range: { start: createdIso, end: updatedIso }, timestamp: createdIso },
@@ -374,9 +380,14 @@ export async function buildOnStatusOrder(
   }
 
   // payment.params is schema-required; the buyer's confirm often omits it.
+  // Never invent a payment uri — keep uri/tl_method only when a real one exists.
   const payment = (order['payment'] ?? {}) as Record<string, any>;
-  payment['uri'] = payment['uri'] ?? 'https://ondc.transaction.com/payment';
-  payment['tl_method'] = payment['tl_method'] ?? 'http/get';
+  if (payment['uri']) {
+    payment['tl_method'] = payment['tl_method'] ?? 'http/get';
+  } else {
+    delete payment['uri'];
+    delete payment['tl_method'];
+  }
   if (!payment['params']) {
     payment['params'] = {
       currency: row.currency ?? 'INR',

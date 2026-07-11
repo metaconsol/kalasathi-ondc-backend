@@ -59,7 +59,8 @@ export async function handleTrack(req: Request, res: Response): Promise<void> {
 
       res.status(200).json(
         buildAck(ctx, {
-          type: 'CONTEXT-ERROR',
+          // 40003 (tracking not enabled) is a BPP core error, not a context error.
+          type: 'CORE-ERROR',
           code: '40003',
           message: 'Tracking is not available for this order',
         }),
