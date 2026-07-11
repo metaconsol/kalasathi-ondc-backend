@@ -1,3 +1,59 @@
+### Branch 047
+
+**Date:** 2026-07-11
+
+**Status:** Completed
+
+**Area:** ONDC seller cancellation â€” Flow 3A partial cancellation and Flow 3B in-transit RTO lifecycle
+
+**What:**
+
+- Corrected the partial-cancellation callback sequence: Flow 3A now sends only the unsolicited `on_update` callback with reduced item quantities, a recalculated quote, and the Cancel fulfillment. The later `on_status` is sent through the normal fulfillment lifecycle rather than immediately after the partial cancellation.
+- Separated seller full cancellation from RTO handling. The `cancelled` action consistently follows the full-cancel callback path, while RTO is explicitly initiated with the `rto` action.
+- Completed the Flow 3B RTO lifecycle: initiating RTO sends `on_cancel`; subsequent `rto_delivered` or `rto_disposed` actions send `on_status` with the final RTO fulfillment state.
+- Refactored the RTO payload builder to reuse persisted order, fulfillment, confirm-payload, store, billing, and cancellation data so callbacks remain consistent across RTO stages.
+
+**Why:**
+
+- Sending a second unsolicited `on_status` immediately after Flow 3A `on_update` can conflict with the buyer NP's intermediate settlement/update handling. The partial-cancel callback must represent one consistent reduced order state.
+- An in-transit cancellation has a distinct RTO lifecycle. It must retain the original delivery fulfillment, create or reuse an RTO fulfillment, and report its final RTO outcome separately.
+- The admin fulfillment API previously blocked every action once an order became cancelled, preventing the required final RTO status callback.
+
+**Changes:** file name and description of file change.
+
+- `src/ondc/flows/flow3A.service.ts`
+  - Removed the immediate `on_status` callback from `partialCancelByseller`.
+  - Retained the `on_update` callback, its audit log, and observability event as the Flow 3A result.
+  - Updated documentation/comments to describe the correct partial-cancel sequence.
+
+- `src/ondc/flows/flow3B.service.ts`
+  - Refactored RTO payload construction into a shared builder for `RTO-Initiated`, `RTO-Delivered`, and `RTO-Disposed` states.
+  - Persists the cancelled delivery fulfillment and RTO fulfillment, including reason, pre-cancel state, and original fulfillment metadata.
+  - Sends `on_cancel` when RTO starts and `on_status` when the RTO reaches Delivered or Disposed.
+  - Builds callback context and order data dynamically from the stored order, fulfillments, confirm payload, store, billing, BAP terms, and transaction data.
+
+- `src/ondc/services/fulfillment.service.ts`
+  - Replaced the previous RTO callback path with `flow3BService`.
+  - Added `completeRto()` for the final `RTO-Delivered` and `RTO-Disposed` callback states.
+  - Added reason-id support when RTO is initiated.
+
+- `src/ondc/controllers/admin/orders.controller.ts`
+  - Made full cancellation (`action: "cancelled"`) use the full seller cancellation path consistently.
+  - Added `rto_delivered` and `rto_disposed` fulfillment actions.
+  - Allows only those final RTO actions after an order is in `CANCELLED` status.
+  - Passes the requested RTO cancellation reason to the fulfillment service.
+
+- `package.json` and `package-lock.json`
+  - Updated the TypeScript development command to explicit `tsx --watch` syntax.
+  - Updated `tsx` and added `tsconfig-paths` and `cross-env` development dependencies.
+
+**Verification:**
+
+- Ran TypeScript type checking with `npm exec tsc -- --noEmit` successfully.
+- Confirmed the local backend starts, connects to the database, and listens on port `5001`.
+
+---
+
 ### Branch 043
 
 **Date:** 2026-07-09
