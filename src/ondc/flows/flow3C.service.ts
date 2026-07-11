@@ -513,8 +513,10 @@ export const flow3CService = {
     const origPayment = origOrder.payment ?? dbPayment ?? {};
 
     const payment = {
-      uri: origPayment.uri ?? 'https://ondc.transaction.com/payment',
-      tl_method: origPayment.tl_method ?? 'http/get',
+      // Never invent a payment uri — only carry one the buyer actually sent.
+      ...(origPayment.uri
+        ? { uri: origPayment.uri, tl_method: origPayment.tl_method ?? 'http/get' }
+        : {}),
       params: {
         currency: origPayment.params?.currency ?? 'INR',
         transaction_id:
