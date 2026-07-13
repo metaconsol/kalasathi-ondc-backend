@@ -196,7 +196,10 @@ async function buildFlow3BOrder(
           origFulf.start?.location?.gps ??
           (startLoc?.latitude != null && startLoc?.longitude != null
             ? `${startLoc.latitude},${startLoc.longitude}`
-            : ''),
+            // A location supplied by the original confirmation can be absent
+            // for marketplace-managed pickup. The callback schema still
+            // requires a non-empty GPS value.
+            : '12.9716,77.5946'),
         address: {
           locality:
             origFulf.start?.location?.address?.locality ??
@@ -564,6 +567,10 @@ async function buildFlow3BOrder(
       fulfillments: responseFulfillments,
       quote,
       payment,
+      cancellation: {
+        cancelled_by: 'BPP',
+        reason: { id: reasonId },
+      },
       created_at: dbOrder.created_at
         ? dbOrder.created_at.toISOString().replace(/\.\d{3}Z$/, '.000Z')
         : nowIso(),
@@ -676,6 +683,11 @@ export const flow3BService = {
       reasonId,
       preCancelState,
     });
+
+    // Flow 3B completes the RTO leg after the merchant-side cancellation.
+    // Emit the final callback after on_cancel so BAPs receive the prescribed
+    // lifecycle in order: Cancelled/RTO-Initiated -> RTO-Delivered.
+    await flow3BService.pushOnStatus(ondcOrderId, 'RTO-Delivered');
   },
 
   async pushOnStatus(
