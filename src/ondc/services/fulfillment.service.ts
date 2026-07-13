@@ -12,6 +12,7 @@ import type { OndcFulfillmentState } from '~/ondc/types/order.types';
 import { flow1AService } from '~/ondc/flows/flow1A.service';
 import { flow3BService } from '~/ondc/flows/flow3B.service';
 import { flow4AService } from '~/ondc/flows/flow4A.service';
+import { flow4BService } from '~/ondc/flows/flow4B.service';
 
 export const fulfillmentService = {
   /** Mark an order as packed */
@@ -136,8 +137,14 @@ export const fulfillmentService = {
   },
 
   /** Handle return initiation from buyer */
-  async initiateReturn(ondcOrderId: string, fulfillmentId = 'F1'): Promise<void> {
-    await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'Return_Initiated');
+  async initiateReturn(
+    ondcOrderId: string,
+    fulfillmentId = 'F1',
+    fulfillmentType?: string,
+  ): Promise<void> {
+    await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'Return_Initiated', {
+      ...(fulfillmentType ? { fulfillmentType } : {}),
+    });
     const order = await orderModel.findByOndcOrderId(ondcOrderId);
     await orderModel.transitionStatus(
       ondcOrderId,
@@ -147,13 +154,19 @@ export const fulfillmentService = {
       'seller',
       'Return initiated',
     );
-    ondcLogger.info('Return initiated', { ondcOrderId });
+    ondcLogger.info('Return initiated', { ondcOrderId, fulfillmentId, fulfillmentType });
     await flow4AService.pushOnUpdate(ondcOrderId, 'Return_Initiated');
   },
 
   /** Mark return initiated */
-  async markReturnInitiated(ondcOrderId: string, fulfillmentId = 'F1'): Promise<void> {
-    await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'Return_Initiated');
+  async markReturnInitiated(
+    ondcOrderId: string,
+    fulfillmentId = 'F1',
+    fulfillmentType?: string,
+  ): Promise<void> {
+    await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'Return_Initiated', {
+      ...(fulfillmentType ? { fulfillmentType } : {}),
+    });
     const order = await orderModel.findByOndcOrderId(ondcOrderId);
     await orderModel.transitionStatus(
       ondcOrderId,
@@ -163,13 +176,19 @@ export const fulfillmentService = {
       'seller',
       'Return initiated',
     );
-    ondcLogger.info('Return initiated', { ondcOrderId });
+    ondcLogger.info('Return initiated', { ondcOrderId, fulfillmentId, fulfillmentType });
     await flow4AService.pushOnUpdate(ondcOrderId, 'Return_Initiated');
   },
 
   /** Mark return approved */
-  async markReturnApproved(ondcOrderId: string, fulfillmentId = 'F1'): Promise<void> {
-    await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'Return_Approved');
+  async markReturnApproved(
+    ondcOrderId: string,
+    fulfillmentId = 'F1',
+    fulfillmentType?: string,
+  ): Promise<void> {
+    await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'Return_Approved', {
+      ...(fulfillmentType ? { fulfillmentType } : {}),
+    });
     const order = await orderModel.findByOndcOrderId(ondcOrderId);
     await orderModel.transitionStatus(
       ondcOrderId,
@@ -179,13 +198,19 @@ export const fulfillmentService = {
       'seller',
       'Return approved',
     );
-    ondcLogger.info('Return approved', { ondcOrderId });
+    ondcLogger.info('Return approved', { ondcOrderId, fulfillmentId, fulfillmentType });
     await flow4AService.pushOnUpdate(ondcOrderId, 'Return_Approved');
   },
 
   /** Mark return picked */
-  async markReturnPicked(ondcOrderId: string, fulfillmentId = 'F1'): Promise<void> {
-    await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'Return_Picked');
+  async markReturnPicked(
+    ondcOrderId: string,
+    fulfillmentId = 'F1',
+    fulfillmentType?: string,
+  ): Promise<void> {
+    await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'Return_Picked', {
+      ...(fulfillmentType ? { fulfillmentType } : {}),
+    });
     const order = await orderModel.findByOndcOrderId(ondcOrderId);
     await orderModel.transitionStatus(
       ondcOrderId,
@@ -195,13 +220,19 @@ export const fulfillmentService = {
       'seller',
       'Return picked',
     );
-    ondcLogger.info('Return picked', { ondcOrderId });
+    ondcLogger.info('Return picked', { ondcOrderId, fulfillmentId, fulfillmentType });
     await flow4AService.pushOnUpdate(ondcOrderId, 'Return_Picked');
   },
 
   /** Mark return delivered */
-  async markReturnDelivered(ondcOrderId: string, fulfillmentId = 'F1'): Promise<void> {
-    await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'Return_Delivered');
+  async markReturnDelivered(
+    ondcOrderId: string,
+    fulfillmentId = 'F1',
+    fulfillmentType?: string,
+  ): Promise<void> {
+    await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'Return_Delivered', {
+      ...(fulfillmentType ? { fulfillmentType } : {}),
+    });
     const order = await orderModel.findByOndcOrderId(ondcOrderId);
     await orderModel.transitionStatus(
       ondcOrderId,
@@ -211,8 +242,18 @@ export const fulfillmentService = {
       'seller',
       'Return delivered',
     );
-    ondcLogger.info('Return delivered', { ondcOrderId });
+    ondcLogger.info('Return delivered', { ondcOrderId, fulfillmentId, fulfillmentType });
     await flow4AService.pushOnUpdate(ondcOrderId, 'Return_Delivered');
+  },
+
+  /** Reject a buyer return (Flow 4B). */
+  async rejectReturn(
+    ondcOrderId: string,
+    fulfillmentId = 'F1',
+    reason = 'Return rejected',
+    fulfillmentType?: string,
+  ): Promise<void> {
+    await flow4BService.rejectReturn(ondcOrderId, reason, fulfillmentId, fulfillmentType);
   },
 
   /** Get current fulfillment state for an order */
