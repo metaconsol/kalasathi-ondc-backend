@@ -152,6 +152,13 @@ export async function updateFulfillment(req: Request, res: Response): Promise<vo
     case 'return_delivered':
       await fulfillmentService.markReturnDelivered(orderId, fulfillment_id);
       break;
+    case 'return_rejected':
+      await fulfillmentService.rejectReturn(
+        orderId,
+        fulfillment_id,
+        (req.body['reason'] as string) || 'Return rejected',
+      );
+      break;
     case 'rto':
       await fulfillmentService.initiateRto(
         orderId,

@@ -69,6 +69,7 @@ export const fulfillmentModel = {
     fulfillmentId: string,
     state: OndcFulfillmentState,
     details?: {
+      fulfillmentType?: string;
       url?: string;
       awb?: string;
       courier?: string;
@@ -78,6 +79,10 @@ export const fulfillmentModel = {
   ): Promise<void> {
     const sets = ['state = ?', 'updated_at = NOW()'];
     const params: unknown[] = [state];
+    if (details?.fulfillmentType) {
+      sets.push('fulfillment_type = ?');
+      params.push(details.fulfillmentType);
+    }
     if (details?.url) {
       sets.push('tracking_url = ?');
       params.push(details.url);

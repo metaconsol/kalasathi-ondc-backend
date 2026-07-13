@@ -12,6 +12,8 @@ import { txnLogModel } from '~/ondc/models/log.model';
 import { ondcExec } from '~/lib/ondcSql';
 import { ondcLogger } from '~/ondc/utils/logger.util';
 import type { BecknContext } from '~/ondc/types/beckn.types';
+import { fulfillmentService } from '~/ondc/services/fulfillment.service';
+import { flow4BService } from '~/ondc/flows/flow4B.service';
 
 export async function handleUpdate(req: Request, res: Response): Promise<void> {
   const { context: ctx, message } = req.body as {
@@ -36,6 +38,60 @@ export async function handleUpdate(req: Request, res: Response): Promise<void> {
 
       if (!dbOrder) {
         ondcLogger.warn('update: order not found', { orderId, txnId });
+        return;
+      }
+
+      // Flow 4 return requests carry their target lifecycle state in a
+      // fulfillment. Handle these before the generic item-update branch so
+      // the callback is rebuilt from the persisted Return_* state.
+      const requestedReturn = (order['fulfillments'] ?? []).find((fulfillment: any) =>
+        String(fulfillment?.state?.descriptor?.code ?? '').startsWith('Return_'),
+      );
+      if (requestedReturn) {
+        const fulfillmentId = String(requestedReturn.id ?? 'F1');
+        const fulfillmentType = typeof requestedReturn.type === 'string' ? requestedReturn.type : undefined;
+        const returnState = String(requestedReturn.state?.descriptor?.code);
+
+        switch (returnState) {
+          case 'Return_Initiated':
+            await fulfillmentService.initiateReturn(
+              dbOrder.ondc_order_id,
+              fulfillmentId,
+              fulfillmentType,
+            );
+            break;
+          case 'Return_Approved':
+            await fulfillmentService.markReturnApproved(
+              dbOrder.ondc_order_id,
+              fulfillmentId,
+              fulfillmentType,
+            );
+            break;
+          case 'Return_Picked':
+            await fulfillmentService.markReturnPicked(
+              dbOrder.ondc_order_id,
+              fulfillmentId,
+              fulfillmentType,
+            );
+            break;
+          case 'Return_Delivered':
+            await fulfillmentService.markReturnDelivered(
+              dbOrder.ondc_order_id,
+              fulfillmentId,
+              fulfillmentType,
+            );
+            break;
+          case 'Return_Rejected':
+            await flow4BService.rejectReturn(
+              dbOrder.ondc_order_id,
+              String(requestedReturn.reason?.id ?? 'Return rejected'),
+              fulfillmentId,
+              fulfillmentType,
+            );
+            break;
+          default:
+            break;
+        }
         return;
       }
 
