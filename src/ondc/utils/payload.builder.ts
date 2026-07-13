@@ -178,7 +178,7 @@ export function buildOnUpdate(incomingCtx: BecknContext, order: object): object 
 /**
  * BPP sends on_rating after receiving a /rating from BAP.
  * Per ONDC v1.2.5 spec, message contains an optional feedback_form.
- * We return an empty message ({}) which is the minimal valid response.
+ * Supplying it gives the BAP a concrete URL for collecting rating feedback.
  */
 export function buildOnRating(incomingCtx: BecknContext): object {
   const bpp_uri = ondcEnv.baseUri;
