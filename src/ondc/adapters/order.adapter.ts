@@ -20,6 +20,7 @@ import {
   fetchStoreLocations,
   fetchSellerProfileByStoreId,
 } from '~/ondc/adapters/seller.adapter';
+import { SELLER_PROFILE } from '~/ondc/config/constants';
 
 export interface ConfirmMessage {
   order: OndcOrder;
@@ -197,6 +198,48 @@ export function adaptOrderRowToOndcOrder(row: OndcOrderRow): OndcOrder {
 }
 
 const isoZero = (d: Date): string => d.toISOString().replace(/\.\d{3}Z$/, '.000Z');
+const nonEmpty = (...values: unknown[]): string => {
+  for (const value of values) {
+    const s = String(value ?? '').trim();
+    if (s) return s;
+  }
+  return 'NA';
+};
+
+const DEFAULT_ITEM_TAGS = [
+  {
+    code: 'quote',
+    list: [{ code: 'type', value: 'item' }],
+  },
+];
+
+function itemParentId(itemId: unknown, item: Record<string, any> = {}): string {
+  return nonEmpty(item['parent_item_id'], itemId, 'item');
+}
+
+function normalizeOrderItem(item: any): Record<string, any> {
+  const normalized = { ...(item && typeof item === 'object' ? item : {}) };
+  normalized.id = nonEmpty(normalized.id, 'item');
+  normalized.parent_item_id = itemParentId(normalized.id, normalized);
+  normalized.quantity =
+    normalized.quantity && typeof normalized.quantity === 'object'
+      ? { count: Number(normalized.quantity.count ?? 1) || 1 }
+      : { count: 1 };
+  normalized.tags =
+    Array.isArray(normalized.tags) && normalized.tags.length ? normalized.tags : DEFAULT_ITEM_TAGS;
+  return normalized;
+}
+
+function fallbackGpsForCity(city?: unknown): string {
+  const normalized = String(city ?? '')
+    .trim()
+    .toLowerCase();
+  if (normalized === 'bhopal') return '23.259933,77.412613';
+  if (normalized === 'indore') return '22.719568,75.857727';
+  if (normalized === 'jabalpur') return '23.181467,79.986407';
+  if (normalized === 'gwalior') return '26.218287,78.182831';
+  return '23.259933,77.412613';
+}
 
 /**
  * Build a COMPLETE ONDC /on_status order from the stored order + LIVE fulfillment
@@ -238,7 +281,7 @@ export async function buildOnStatusOrder(
   // used to make on_status advertise a wrong default gps.
   const startLoc =
     storeLocations.find((l) => l.latitude != null && l.longitude != null) ?? storeLocations[0];
-  const providerName = store?.name ?? 'ODOP Provider';
+  const providerName = nonEmpty(store?.name, SELLER_PROFILE.BRAND_NAME, 'ODOP Provider');
 
   // ONDC /on_status requires fulfillment start.time and end.time, each with a
   // `range` ({start,end} rfc3339). Synthesize a window from the order timestamps.
@@ -271,8 +314,50 @@ export async function buildOnStatusOrder(
       };
     }
 
-    const trackingUrl = live?.tracking_url ?? null;
+    const trackingUrl = live?.tracking_url ?? row.tracking_link ?? null;
     const tracking = !!trackingUrl || !!orig.tracking;
+    const endSrc = orig.end ?? {};
+    const pickupCity = nonEmpty(
+      orig.start?.location?.address?.city,
+      startLoc?.city,
+      SELLER_PROFILE.CITY,
+      'Bhopal',
+    );
+    const pickupState = nonEmpty(
+      orig.start?.location?.address?.state,
+      startLoc?.state,
+      SELLER_PROFILE.STATE,
+      'Madhya Pradesh',
+    );
+    const pickupAreaCode = nonEmpty(
+      orig.start?.location?.address?.area_code,
+      startLoc?.pincode,
+      SELLER_PROFILE.AREA_CODE,
+      '462001',
+    );
+    const dropAddress = {
+      name: nonEmpty(
+        endSrc.location?.address?.name,
+        billingAddr['name'],
+        billing['name'],
+        'Customer',
+      ),
+      building: nonEmpty(endSrc.location?.address?.building, billingAddr['building'], 'NA'),
+      locality: nonEmpty(
+        endSrc.location?.address?.locality,
+        billingAddr['locality'],
+        billingAddr['street'],
+        'NA',
+      ),
+      city: nonEmpty(endSrc.location?.address?.city, billingAddr['city'], pickupCity),
+      state: nonEmpty(endSrc.location?.address?.state, billingAddr['state'], pickupState),
+      country: nonEmpty(endSrc.location?.address?.country, billingAddr['country'], 'IND'),
+      area_code: nonEmpty(
+        endSrc.location?.address?.area_code,
+        billingAddr['area_code'],
+        pickupAreaCode,
+      ),
+    };
 
     // Pickup (start): built dynamically from the store location.
     const start = {
@@ -287,37 +372,48 @@ export async function buildOnStatusOrder(
               // never a foreign city (was Bengaluru ⇒ on_search/on_status mismatch).
               '23.259933,77.412613'),
         address: {
-          locality:
-            orig.start?.location?.address?.locality ??
-            startLoc?.address_line2 ??
-            startLoc?.address_line1 ??
+          name: providerName,
+          building: nonEmpty(
+            orig.start?.location?.address?.building,
+            startLoc?.address_line1,
             'NA',
-          city: orig.start?.location?.address?.city ?? startLoc?.city ?? 'Bhopal',
-          area_code: orig.start?.location?.address?.area_code ?? startLoc?.pincode ?? '462001',
-          state: orig.start?.location?.address?.state ?? startLoc?.state ?? 'Madhya Pradesh',
+          ),
+          locality: nonEmpty(
+            orig.start?.location?.address?.locality,
+            startLoc?.address_line2,
+            startLoc?.address_line1,
+            'NA',
+          ),
+          city: pickupCity,
+          area_code: pickupAreaCode,
+          state: pickupState,
+          country: nonEmpty(orig.start?.location?.address?.country, startLoc?.country, 'IND'),
         },
       },
       time: { range: { start: createdIso, end: updatedIso }, timestamp: createdIso },
       contact: {
-        phone: String(store?.phone ?? '9886098860'),
-        email: String(store?.email ?? 'support@odopmartmp.com'),
+        phone: nonEmpty(store?.phone, SELLER_PROFILE.SUPPORT_PHONE, '9886098860'),
+        email: nonEmpty(store?.email, SELLER_PROFILE.SUPPORT_EMAIL, 'support@odopmartmp.com'),
       },
     };
 
     // Drop (end): from the buyer order / billing.
-    const endSrc = orig.end ?? {};
     const end = {
       location: {
-        gps: endSrc.location?.gps ?? '12.9716,77.5946',
-        address: endSrc.location?.address ?? billingAddr,
+        gps: nonEmpty(endSrc.location?.gps, fallbackGpsForCity(dropAddress.city)),
+        address: dropAddress,
       },
       time: endSrc.time ?? { range: { start: createdIso, end: updatedIso }, timestamp: updatedIso },
-      person: { name: String(endSrc.person?.name ?? billing['name'] ?? 'Customer') },
+      person: { name: nonEmpty(endSrc.person?.name, billing['name'], 'Customer') },
       contact: {
-        phone: String(endSrc.contact?.phone ?? billing['phone'] ?? '9886098860'),
-        ...(endSrc.contact?.email || billing['email']
-          ? { email: String(endSrc.contact?.email ?? billing['email']) }
-          : {}),
+        phone: nonEmpty(endSrc.contact?.phone, billing['phone'], row.customer_phone, '9886098860'),
+        email: nonEmpty(
+          endSrc.contact?.email,
+          billing['email'],
+          row.customer_email,
+          SELLER_PROFILE.SUPPORT_EMAIL,
+          'support@odopmartmp.com',
+        ),
       },
     };
 
@@ -350,6 +446,35 @@ export async function buildOnStatusOrder(
 
     return merged;
   });
+  const fulfillmentTemplate = fulfillments.find(
+    (f: any) => f?.type !== 'Cancel' && f?.type !== 'RTO',
+  );
+  const completeFulfillments = fulfillments.map((f: any) => {
+    if (f?.type !== 'Cancel' && f?.type !== 'RTO') return f;
+    return {
+      ...fulfillmentTemplate,
+      ...f,
+      '@ondc/org/provider_name': nonEmpty(
+        f?.['@ondc/org/provider_name'],
+        fulfillmentTemplate?.['@ondc/org/provider_name'],
+        providerName,
+      ),
+      tracking:
+        typeof f?.tracking === 'boolean'
+          ? f.tracking
+          : typeof fulfillmentTemplate?.tracking === 'boolean'
+            ? fulfillmentTemplate.tracking
+            : false,
+      '@ondc/org/TAT': nonEmpty(
+        f?.['@ondc/org/TAT'],
+        fulfillmentTemplate?.['@ondc/org/TAT'],
+        'PT60M',
+      ),
+      start: f?.start && typeof f.start === 'object' ? f.start : fulfillmentTemplate?.start,
+      end: f?.end && typeof f.end === 'object' ? f.end : fulfillmentTemplate?.end,
+      tags: Array.isArray(f?.tags) && f.tags.length ? f.tags : (fulfillmentTemplate?.tags ?? []),
+    };
+  });
 
   const order: Record<string, any> = {
     ...base,
@@ -357,9 +482,16 @@ export async function buildOnStatusOrder(
       id: row.provider_id,
       locations: origOrder.provider?.locations ?? [{ id: String(startLoc?.id ?? 'L1') }],
     },
-    fulfillments,
+    fulfillments: completeFulfillments,
     updated_at: isoZero(new Date()),
   };
+  order['items'] = Array.isArray(order['items'])
+    ? order['items'].map((item: any) => normalizeOrderItem(item))
+    : [];
+
+  const itemById = new Map<string, any>(
+    (order['items'] as any[]).map((item: any) => [String(item.id), item]),
+  );
 
   // quote.breakup entries must each carry a `title` (schema-required).
   const titleByType: Record<string, string> = {
@@ -373,21 +505,49 @@ export async function buildOnStatusOrder(
   };
   const quote = order['quote'] as Record<string, any> | undefined;
   if (quote && Array.isArray(quote['breakup'])) {
-    quote['breakup'] = quote['breakup'].map((b: any) => ({
-      ...b,
-      title: b.title ?? titleByType[String(b['@ondc/org/title_type'] ?? '')] ?? 'Charge',
-    }));
+    quote['breakup'] = quote['breakup']
+      .map((b: any) => ({
+        ...b,
+        title: b.title ?? titleByType[String(b['@ondc/org/title_type'] ?? '')] ?? 'Charge',
+      }))
+      .map((b: any) => {
+        const itemId = nonEmpty(
+          b['@ondc/org/item_id'],
+          b.item?.id,
+          (order['items'] as any[])[0]?.id,
+        );
+        const orderItem = itemById.get(itemId) ?? (order['items'] as any[])[0] ?? {};
+        const count =
+          Number(b['@ondc/org/item_quantity']?.count ?? orderItem.quantity?.count ?? 1) || 1;
+        const price = b.item?.price ??
+          b.price ?? { currency: row.currency ?? 'INR', value: '0.00' };
+        return {
+          ...b,
+          '@ondc/org/item_id': itemId,
+          '@ondc/org/item_quantity': { count },
+          item: {
+            ...(b.item && typeof b.item === 'object' ? b.item : {}),
+            id: nonEmpty(b.item?.id, itemId),
+            parent_item_id: itemParentId(itemId, b.item),
+            price: {
+              currency: nonEmpty(price.currency, b.price?.currency, row.currency, 'INR'),
+              value: nonEmpty(price.value, b.price?.value, '0.00'),
+            },
+            tags:
+              Array.isArray(b.item?.tags) && b.item.tags.length ? b.item.tags : DEFAULT_ITEM_TAGS,
+          },
+        };
+      });
   }
 
   // payment.params is schema-required; the buyer's confirm often omits it.
-  // Never invent a payment uri — keep uri/tl_method only when a real one exists.
   const payment = (order['payment'] ?? {}) as Record<string, any>;
-  if (payment['uri']) {
-    payment['tl_method'] = payment['tl_method'] ?? 'http/get';
-  } else {
-    delete payment['uri'];
-    delete payment['tl_method'];
-  }
+  payment['uri'] = nonEmpty(
+    payment['uri'],
+    payment['url'],
+    `${row.bap_uri}/payment/${row.ondc_order_id}`,
+  );
+  payment['tl_method'] = nonEmpty(payment['tl_method'], 'http/get');
   if (!payment['params']) {
     payment['params'] = {
       currency: row.currency ?? 'INR',
@@ -395,26 +555,86 @@ export async function buildOnStatusOrder(
       amount: row.order_total ?? '0.00',
     };
   }
+  payment['params'] = {
+    ...(payment['params'] && typeof payment['params'] === 'object' ? payment['params'] : {}),
+    currency: nonEmpty(payment['params']?.currency, row.currency, 'INR'),
+    transaction_id: nonEmpty(
+      payment['params']?.transaction_id,
+      row.payment_transaction_ref,
+      row.transaction_id,
+    ),
+    amount: nonEmpty(payment['params']?.amount, row.order_total, '0.00'),
+  };
   // Seller settlement details (the buyer's confirm doesn't carry these).
-  if (!payment['@ondc/org/settlement_details']) {
+  if (
+    !Array.isArray(payment['@ondc/org/settlement_details']) ||
+    payment['@ondc/org/settlement_details'].length === 0
+  ) {
     payment['@ondc/org/settlement_details'] = [
       {
         settlement_counterparty: 'seller-app',
         settlement_phase: 'sale-amount',
         settlement_type: 'neft',
-        beneficiary_name: String(sellerProfile?.business_name ?? store?.name ?? ''),
-        upi_address: String(sellerProfile?.upi_id ?? ''),
-        settlement_bank_account_no: String(sellerProfile?.bank_account_no ?? ''),
-        settlement_ifsc_code: String(sellerProfile?.bank_ifsc ?? ''),
-        bank_name: String(sellerProfile?.bank_name ?? ''),
-        branch_name: String(sellerProfile?.branch_name ?? ''),
+        beneficiary_name: nonEmpty(
+          sellerProfile?.business_name,
+          store?.name,
+          SELLER_PROFILE.COMPANY_NAME,
+          'ODOP Seller',
+        ),
+        upi_address: nonEmpty(sellerProfile?.upi_id, 'seller@upi'),
+        settlement_bank_account_no: nonEmpty(sellerProfile?.bank_account_no, '0000000000'),
+        settlement_ifsc_code: nonEmpty(sellerProfile?.bank_ifsc, 'SBIN0000001'),
+        bank_name: nonEmpty(sellerProfile?.bank_name, 'State Bank of India'),
+        branch_name: nonEmpty(sellerProfile?.branch_name, startLoc?.city, 'Bhopal'),
       },
     ];
   }
+  payment['@ondc/org/settlement_details'] = (
+    Array.isArray(payment['@ondc/org/settlement_details'])
+      ? payment['@ondc/org/settlement_details']
+      : []
+  ).map((detail: any) => ({
+    ...(detail && typeof detail === 'object' ? detail : {}),
+    settlement_counterparty: nonEmpty(detail?.settlement_counterparty, 'seller-app'),
+    settlement_phase: nonEmpty(detail?.settlement_phase, 'sale-amount'),
+    settlement_type: nonEmpty(detail?.settlement_type, 'neft'),
+    beneficiary_name: nonEmpty(
+      detail?.beneficiary_name,
+      sellerProfile?.business_name,
+      store?.name,
+      SELLER_PROFILE.COMPANY_NAME,
+      'ODOP Seller',
+    ),
+    upi_address: nonEmpty(detail?.upi_address, sellerProfile?.upi_id, 'seller@upi'),
+    settlement_bank_account_no: nonEmpty(
+      detail?.settlement_bank_account_no,
+      sellerProfile?.bank_account_no,
+      '0000000000',
+    ),
+    settlement_ifsc_code: nonEmpty(
+      detail?.settlement_ifsc_code,
+      sellerProfile?.bank_ifsc,
+      'SBIN0000001',
+    ),
+    bank_name: nonEmpty(detail?.bank_name, sellerProfile?.bank_name, 'State Bank of India'),
+    branch_name: nonEmpty(
+      detail?.branch_name,
+      sellerProfile?.branch_name,
+      startLoc?.city,
+      'Bhopal',
+    ),
+    settlement_reference: nonEmpty(
+      detail?.settlement_reference,
+      row.payment_transaction_ref,
+      row.transaction_id,
+    ),
+    settlement_status: nonEmpty(detail?.settlement_status, 'PAID'),
+    settlement_timestamp: nonEmpty(detail?.settlement_timestamp, updatedIso),
+  }));
   order['payment'] = payment;
 
   // documents (invoice) is required on /on_status.
-  const invoiceBase = row.bpp_id ? `https://${row.bpp_id}` : '';
+  const invoiceBase = row.bpp_id ? `https://${row.bpp_id}` : 'https://ondc.odopmartmp.com';
   order['documents'] = origOrder.documents ?? [
     { url: `${invoiceBase}/invoice/${row.ondc_order_id}`, label: 'Invoice' },
   ];

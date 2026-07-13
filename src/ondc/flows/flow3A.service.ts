@@ -228,10 +228,21 @@ export const flow3AService = {
       remainingById,
     );
 
+    const fulfillmentTemplate =
+      ((base['fulfillments'] as any[]) ?? []).find(
+        (f: any) => f?.type !== 'Cancel' && f?.type !== 'RTO',
+      ) ?? {};
     const cancelFulfillment = {
+      ...fulfillmentTemplate,
       id: cancelFulfId,
       type: 'Cancel',
+      '@ondc/org/provider_name': fulfillmentTemplate['@ondc/org/provider_name'] ?? 'ODOP Provider',
+      tracking:
+        typeof fulfillmentTemplate.tracking === 'boolean' ? fulfillmentTemplate.tracking : false,
+      '@ondc/org/TAT': fulfillmentTemplate['@ondc/org/TAT'] ?? 'PT60M',
       state: { descriptor: { code: 'Cancelled' }, updated_at: nowIso() },
+      start: fulfillmentTemplate.start,
+      end: fulfillmentTemplate.end,
       tags: [{ code: 'quote_trail', list: quoteTrail }],
     };
 
