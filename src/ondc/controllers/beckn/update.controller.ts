@@ -8,6 +8,7 @@ import { buildAck, buildOnUpdate, nowIso } from '~/ondc/utils/payload.builder';
 import { becknService } from '~/ondc/services/beckn.service';
 import { observabilityService } from '~/ondc/services/observability.service';
 import { orderModel } from '~/ondc/models/order.model';
+import { buildOnStatusOrder } from '~/ondc/adapters/order.adapter';
 import { txnLogModel } from '~/ondc/models/log.model';
 import { ondcExec } from '~/lib/ondcSql';
 import { ondcLogger } from '~/ondc/utils/logger.util';
@@ -71,20 +72,21 @@ export async function handleUpdate(req: Request, res: Response): Promise<void> {
       const items = await orderModel.getItems(dbOrder.ondc_order_id);
       const fulfillments = await orderModel.getFulfillments(dbOrder.ondc_order_id);
 
-      const updatedOrder = {
-        id: dbOrder.ondc_order_id,
-        state: dbOrder.status,
-        provider: { id: dbOrder.provider_id },
-        items: items.map((i) => ({ id: i.item_id, quantity: { count: i.quantity } })),
-        fulfillments: fulfillments.map((f) => ({
-          id: f.fulfillment_id,
-          type: f.fulfillment_type,
-          state: { descriptor: { code: f.state } },
-        })),
-        billing: JSON.parse(dbOrder.billing_json ?? '{}'),
-        payment: JSON.parse(dbOrder.payment_json ?? '{}'),
-        updated_at: nowIso(),
-      };
+      const updatedOrder = (await buildOnStatusOrder(dbOrder, fulfillments)) as Record<string, any>;
+      const incomingQtyById = new Map(
+        ((order['items'] as any[]) ?? []).map((item: any) => [
+          String(item?.id ?? ''),
+          parseInt(item?.quantity?.count ?? '1', 10) || 1,
+        ]),
+      );
+      updatedOrder['items'] = ((updatedOrder['items'] as any[]) ?? items).map((item: any) => ({
+        ...item,
+        quantity: {
+          ...(item?.quantity ?? {}),
+          count: incomingQtyById.get(String(item?.id ?? '')) ?? item?.quantity?.count ?? 1,
+        },
+      }));
+      updatedOrder['updated_at'] = nowIso();
 
       // Check the intent of the /update request
       if (target === 'item' || target === 'fulfillment') {

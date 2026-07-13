@@ -43,12 +43,14 @@ export async function handleStatus(req: Request, res: Response): Promise<void> {
         dbOrder.status,
       );
       if (!shouldSendSolicitedOnStatus) {
-        ondcLogger.info('status: duplicate buyer status poll ACKed without on_status callback', {
-          orderId: dbOrder.ondc_order_id,
-          txnId,
-          status: dbOrder.status,
-        });
-        return;
+        ondcLogger.info(
+          'status: duplicate buyer status poll will still receive on_status callback',
+          {
+            orderId: dbOrder.ondc_order_id,
+            txnId,
+            status: dbOrder.status,
+          },
+        );
       }
 
       const liveFulfillments = await orderModel.getFulfillments(dbOrder.ondc_order_id);
