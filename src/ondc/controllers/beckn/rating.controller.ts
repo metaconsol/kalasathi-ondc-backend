@@ -42,6 +42,17 @@ export async function handleRating(req: Request, res: Response): Promise<void> {
     const bapUri = String(ctx.bap_uri ?? '');
     const orderId = message?.order_id ?? '';
     const ratingsArray = Array.isArray(message?.ratings) ? message.ratings : [];
+    const payload = buildOnRating(ctx) as any;
+
+    // The ONDC callback must not depend on local persistence.  In particular,
+    // a missing/temporarily unavailable ratings table must not turn a valid
+    // /on_rating into an absent (and consequently empty) callback at the BAP.
+    const { statusCode, error: cbErr } = await becknService.sendCallback(
+      becknService.buildCallbackUrl(bapUri, 'on_rating'),
+      'on_rating',
+      payload,
+      txnId,
+    );
 
     try {
       // Inbound request is logged centrally by ondcRequestLogger middleware.
@@ -74,14 +85,6 @@ export async function handleRating(req: Request, res: Response): Promise<void> {
         });
       }
 
-      const payload = buildOnRating(ctx) as any;
-      const { statusCode, error: cbErr } = await becknService.sendCallback(
-        becknService.buildCallbackUrl(bapUri, 'on_rating'),
-        'on_rating',
-        payload,
-        txnId,
-      );
-
       await txnLogModel.insert({
         transaction_id: txnId,
         message_id: payload.context.message_id,
@@ -98,7 +101,9 @@ export async function handleRating(req: Request, res: Response): Promise<void> {
 
       observabilityService.push('on_rating', payload);
     } catch (err) {
-      ondcLogger.error('rating async error', { txnId, err });
+      // The callback was already sent above. Keep persistence failures visible
+      // without allowing them to affect ONDC protocol delivery.
+      ondcLogger.error('rating persistence error after on_rating callback', { txnId, err });
     }
   });
 }

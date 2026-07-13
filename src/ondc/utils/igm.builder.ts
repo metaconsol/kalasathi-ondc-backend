@@ -452,21 +452,27 @@ export function appendIgmV2Action(
 ): string {
   const actionId = `A${randomUUID().replace(/-/g, '').slice(0, 8)}`;
   const ts = nowIso();
+  // Link a new seller action to the previous action unless it already has a
+  // more specific reference (for example, a resolution parent). This keeps
+  // the IGM action history connected for consumers that validate ref_id.
+  const previousActionId = String(issue['last_action_id'] ?? '') || undefined;
+  const refId = params.ref_id ?? previousActionId;
+  const refType = params.ref_type ?? (refId ? 'ACTION' : undefined);
   const action: Record<string, unknown> = {
     id: actionId,
     descriptor: {
       code: params.code,
       short_desc: params.short_desc,
-      ...(params.name ? { name: params.name } : {}),
+      name: params.name ?? params.code,
       ...(params.extra_descriptor ?? {}),
     },
     updated_at: ts,
     action_by: params.action_by,
     actor_details: { name: params.actor_name ?? SELLER_PROFILE.BRAND_NAME ?? 'Support' },
   };
-  if (params.ref_id) {
-    action['ref_id'] = params.ref_id;
-    if (params.ref_type) action['ref_type'] = params.ref_type;
+  if (refId) {
+    action['ref_id'] = refId;
+    if (refType) action['ref_type'] = refType;
   }
   issue['actions'] = [...((issue['actions'] as any[]) ?? []), action];
   issue['last_action_id'] = actionId;
