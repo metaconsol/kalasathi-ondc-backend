@@ -33,19 +33,12 @@ export const catalogService = {
    * Build /on_search catalog live — one provider per active store, expanded
    * into one item per leaf variant (or one per product if no variants).
    * Skips items whose resolved ONDC domain doesn't match the requested one.
-   *
-   * @param storeIds When set, only those store ids are built (seller admin
-   *   preview). Omitted for network /on_search (full active catalog).
    */
-  async buildSearchCatalog(domain: string, storeIds?: number[]): Promise<OnSearchCatalog> {
+  async buildSearchCatalog(domain: string): Promise<OnSearchCatalog> {
     const providers: object[] = [];
     const requestedDomain = (domain || 'ONDC:RET12') as OndcRetailDomain;
 
-    let stores = await getActiveStores();
-    if (storeIds && storeIds.length > 0) {
-      const allow = new Set(storeIds);
-      stores = stores.filter((s) => allow.has(s.id));
-    }
+    const stores = await getActiveStores();
 
     for (const store of stores) {
       const providerId = String(store.id);

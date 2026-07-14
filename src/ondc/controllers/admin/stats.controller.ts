@@ -111,22 +111,13 @@ export async function getDashboardStats(req: Request, res: Response): Promise<vo
 
   // ---- Synced catalog items (live build, matching the Catalog page) ----
   // Wrapped so a catalog-build failure degrades to 0 rather than failing the dashboard.
-  // Sellers only build their own stores — full-network build was timing out on live.
   let syncedItems = 0;
   try {
-    if (sellerId !== undefined && providerIds.length === 0) {
-      syncedItems = 0;
-    } else {
-      const storeFilter =
-        providerIds.length > 0
-          ? providerIds.map((id) => parseInt(id, 10)).filter((n) => Number.isFinite(n))
-          : undefined;
-      const catalog = await catalogService.buildSearchCatalog('ONDC:RET12', storeFilter);
-      const providers = (catalog['bpp/providers'] as Array<{ id: string; items?: unknown[] }>) ?? [];
-      for (const p of providers) {
-        if (providerIds.length && !providerIds.includes(p.id)) continue;
-        syncedItems += p.items?.length ?? 0;
-      }
+    const catalog = await catalogService.buildSearchCatalog('ONDC:RET12');
+    const providers = (catalog['bpp/providers'] as Array<{ id: string; items?: unknown[] }>) ?? [];
+    for (const p of providers) {
+      if (providerIds.length && !providerIds.includes(p.id)) continue;
+      syncedItems += p.items?.length ?? 0;
     }
   } catch {
     syncedItems = 0;
