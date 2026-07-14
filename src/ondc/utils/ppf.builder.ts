@@ -202,7 +202,8 @@ export function buildSettlementsFromOrder(
   const withholding = money(payment['@ondc/org/withholding_amount'] ?? 0);
   const settleAmount = money(total - parseFloat(commission));
   const updatedAt = nowNtsIso();
-  // NTS recon request: counterparty_id is the receiver (BPP), per ONDC RSF reference.
+  // Kept for internal bookkeeping/logging only — confirmed NOT a valid wire
+  // field on /recon or on_recon (both formatters strip it before sending).
   const cpId = counterpartyId ?? order.bpp_id ?? ondcEnv.subscriberId;
 
   const settlementDetails = payment['@ondc/org/settlement_details'] ?? [];
@@ -286,14 +287,22 @@ function stripDiffFields(s: PpfSettlementItem): Record<string, unknown> {
   return out;
 }
 
-/** Omit empty optional fields; NTS schema rejects `type: ""`. */
+/**
+ * Omit empty optional fields; NTS schema rejects `type: ""`.
+ * Also strips `counterparty_id` — confirmed (live error:
+ * "orders[0].settlements[0].counterparty_id" is not allowed) that the
+ * settlements schema rejects this field on the OUTBOUND /recon request too,
+ * not just on on_recon responses (the field is kept on the internal
+ * PpfSettlementItem for our own bookkeeping/logging, just never serialized).
+ */
 function formatSettlementForRecon(s: PpfSettlementItem): Record<string, unknown> {
   const out = stripDiffFields(s);
   if (!out.type) delete out.type;
+  delete out.counterparty_id;
   return out;
 }
 
-/** Fields allowed on on_recon settlements — counterparty_id is recon-request only. */
+/** Fields allowed on on_recon settlements — counterparty_id is not a valid field on either direction. */
 const ON_RECON_SETTLEMENT_KEYS = [
   'id',
   'payment_id',
@@ -321,7 +330,8 @@ const MONEY_KEYS = [
 
 /**
  * on_recon settlement shape — Pramaan/NTS rejects counterparty_id here
- * (it is valid on recon request only). Uses an allowlist so no extra keys leak through.
+ * (also stripped on the /recon request now — see formatSettlementForRecon).
+ * Uses an allowlist so no extra keys leak through.
  */
 function formatSettlementForOnRecon(
   s: Record<string, unknown>,

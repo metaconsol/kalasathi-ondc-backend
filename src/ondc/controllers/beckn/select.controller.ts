@@ -9,7 +9,7 @@ import type { Request, Response } from 'express';
 import { buildAck, buildOnSelect } from '~/ondc/utils/payload.builder';
 import { becknService } from '~/ondc/services/beckn.service';
 import { observabilityService } from '~/ondc/services/observability.service';
-import { resolveOndcCatalogRow } from '~/ondc/adapters/product.adapter';
+import { resolveOndcCatalogRow, resolveOndcCategory } from '~/ondc/adapters/product.adapter';
 import { checkProductServiceability } from '~/ondc/services/serviceability.service';
 import { estimateDeliveryCharge } from '~/ondc/services/delhivery.service';
 import { fetchStoreById, fetchStoreLocations } from '~/ondc/adapters/seller.adapter';
@@ -96,6 +96,15 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
       let firstItemId = '';
       let firstItemName = '';
       let itemCount = 0;
+      // resolveOndcCategory always returns a canonical uppercase domain
+      // (e.g. 'ONDC:RET12'); ctx.domain is only trimmed by the validator
+      // middleware, not case-normalized, so a lowercase/mixed-case but
+      // otherwise valid ctx.domain must be normalized here too — otherwise
+      // a strict comparison would reject every item in an order that
+      // actually matches.
+      const normalizedCtxDomain = String(ctx.domain ?? '')
+        .trim()
+        .toUpperCase();
       const fallbackFulfillmentId = String(order.fulfillments?.[0]?.id ?? 'F1');
       let selectedFulfillmentId = fallbackFulfillmentId;
       let resolvedStoreId: number | null =
@@ -130,6 +139,29 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
         }
         if (resolvedStoreId !== null && row.store_id !== resolvedStoreId) {
           itemErrors.push(`Item ${reqItem.id} does not belong to provider ${order.provider.id}`);
+          continue;
+        }
+        // Domain cross-check — mirrors what /on_search already does via
+        // buildOndcItemFromRow. A product's real domain comes from
+        // categories.domain (→ mappings → rules.json fallback chain), never
+        // from the incoming ctx.domain — an item from a different domain
+        // must not be selectable just because the BAP asked for it.
+        // Fail-safe: a transient DB error resolving ONE item's domain must
+        // not abort the whole /select (the outer catch has no callback
+        // path, so the buyer would see nothing until TTL expiry) — treat it
+        // like a mismatch (reject just this item) and keep going.
+        let itemDomain: string | null = null;
+        try {
+          itemDomain = (await resolveOndcCategory(row)).domain;
+        } catch (err) {
+          ondcLogger.error('resolveOndcCategory failed — treating item as unavailable', {
+            txnId,
+            itemId: reqItem.id,
+            err,
+          });
+        }
+        if (itemDomain !== normalizedCtxDomain) {
+          itemErrors.push(`Item ${reqItem.id} is not available in domain ${ctx.domain}`);
           continue;
         }
         resolvedStoreId = row.store_id;

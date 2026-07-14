@@ -48,8 +48,8 @@ export async function handleTrack(req: Request, res: Response): Promise<void> {
     const trackingUrl = primaryFulfillment?.tracking_url ?? null;
 
     if (!trackingUrl) {
-      // If tracking is disabled/not available, persist the failed track attempt
-      // and return a synchronous NACK so the dashboard can reflect that state.
+      // Per spec: rider not yet assigned OR tracking not enabled
+      // (gps_enabled/url_enabled both "no") → NACK 40005 (not 40003).
       try {
         await overallTxnsModel.upsert(txnId, ctx.bpp_id ?? null);
         await overallTxnsModel.patch(txnId, { on_track: 0, track_link: null });
@@ -59,14 +59,15 @@ export async function handleTrack(req: Request, res: Response): Promise<void> {
 
       res.status(200).json(
         buildAck(ctx, {
-          // 40003 (tracking not enabled) is a BPP core error, not a context error.
           type: 'CORE-ERROR',
-          code: '40003',
-          message: 'Tracking is not available for this order',
+          code: '40005',
+          message: 'Tracking is not available — no rider assigned yet or tracking not enabled',
         }),
       );
       return;
     }
+    // Guard above ensures both are non-null past this point.
+    const trackedFulfillment = primaryFulfillment!;
 
     // Tracking is available, send sync ACK
     res.status(200).json(buildAck(ctx));
@@ -74,10 +75,46 @@ export async function handleTrack(req: Request, res: Response): Promise<void> {
     // Process the async /on_track callback
     setImmediate(async () => {
       try {
-        const tracking = {
-          id: `TRK-${orderId}`,
+        // Per spec: "active" once a rider is assigned & tracking enabled,
+        // "inactive" (with an empty location) once the order is delivered/
+        // terminal. Pending (no rider yet) can't reach here — the no-AWB
+        // guard above already NACKs 40005 before a fulfillment exists.
+        const TERMINAL_STATES = new Set([
+          'Order-delivered',
+          'Cancelled',
+          'RTO-Delivered',
+          'RTO-Disposed',
+          'Return_Delivered',
+          'Return_Rejected',
+          'Liquidated',
+        ]);
+        const isActive = !TERMINAL_STATES.has(trackedFulfillment.state);
+
+        // We track via Delhivery, which gives checkpoint/URL tracking, not
+        // live GPS telemetry — so this builds the spec's URL-tracking variant
+        // honestly rather than fabricating coordinates: url_enabled path,
+        // config.attr="tracking.url" + type="deferred" (both mandated by the
+        // spec's own enum note for that attr), no location/path block. If a
+        // future courier integration provides real-time lat/lng, extend this
+        // with location.gps + tags.path and switch config to
+        // attr="tracking.location.gps"/type="live_poll".
+        const tracking: Record<string, unknown> = {
+          id: trackedFulfillment.fulfillment_id,
           url: trackingUrl,
-          status: 'active',
+          status: isActive ? 'active' : 'inactive',
+          tags: [
+            {
+              code: 'order',
+              list: [{ code: 'id', value: dbOrder?.ondc_order_id ?? orderId }],
+            },
+            {
+              code: 'config',
+              list: [
+                { code: 'attr', value: 'tracking.url' },
+                { code: 'type', value: 'deferred' },
+              ],
+            },
+          ],
         };
         // buildOnTrack (like the other payload builders) is typed `object`;
         // cast so context/message access + callback typing resolve, matching

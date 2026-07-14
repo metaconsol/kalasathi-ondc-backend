@@ -10,6 +10,7 @@ import { flow1AService } from '~/ondc/flows/flow1A.service';
 import { flow3AService } from '~/ondc/flows/flow3A.service';
 import { AppError } from '~/lib/response';
 import type { OndcOrderStatus } from '~/ondc/types/order.types';
+import { ondcExec } from '~/lib/ondcSql';
 
 /**
  * Sellers may only see/modify their own orders (admins see all). Responds 404
@@ -93,19 +94,54 @@ export async function updateFulfillment(req: Request, res: Response): Promise<vo
     throw new AppError('Cannot update fulfillment for a cancelled order', 400);
   }
 
+  // A courier shipment must be booked before the order can move past
+  // "packed" — normal ecommerce takes live status from the logistics
+  // partner from here on, so these transitions must reflect a real,
+  // trackable shipment (tracking_number is only set once bookShipment
+  // succeeds). 'packed' itself, and cancel/return/RTO actions, stay
+  // unrestricted.
+  const REQUIRES_BOOKED_SHIPMENT = new Set([
+    'agent_assigned',
+    'picked_up',
+    'out_for_delivery',
+    'delivered',
+  ]);
+  if (REQUIRES_BOOKED_SHIPMENT.has(String(action)) && !dbOrder.tracking_number) {
+    throw new AppError(
+      'Book a Delhivery shipment for this order before updating this status. Once booked, tracking updates are applied automatically as the courier reports progress.',
+      400,
+    );
+  }
+
   switch (action) {
     case 'confirmed':
+      // The very first on_status (Pending) now fires automatically from
+      // handleConfirm as soon as the BAP ACKs on_confirm. This action is
+      // kept only so older UI calls don't break. It can race handleConfirm's
+      // own automatic transition (both do the identical write) — a plain
+      // status-then-write here would let both fire, sending a duplicate
+      // on_status and a corrupted status_history row. A conditional UPDATE
+      // (only flips CREATED→CONFIRMED if it's still CREATED) makes this
+      // atomic at the DB level, so only whichever path gets there first
+      // actually transitions/pushes.
       {
-        const order = await orderModel.findByOndcOrderId(orderId);
-        await orderModel.transitionStatus(
-          orderId,
-          order?.status ?? null,
-          'CONFIRMED',
-          'Pending',
-          'seller',
-          'Order confirmed by seller',
+        const casResult = await ondcExec(
+          `UPDATE ondc_orders SET status = 'CONFIRMED', status_updated_at = NOW(), updated_at = NOW()
+           WHERE ondc_order_id = ? AND status = 'CREATED'`,
+          [orderId],
         );
-        await flow1AService.pushOnStatus(orderId, 'Pending');
+        if (casResult.affectedRows > 0) {
+          await orderModel.addStatusHistory({
+            ondc_order_id: orderId,
+            from_status: 'CREATED',
+            to_status: 'CONFIRMED',
+            fulfillment_state: 'Pending',
+            triggered_by: 'seller',
+            note: 'Order confirmed by seller',
+            payload_json: null,
+          });
+          await flow1AService.pushOnStatus(orderId, 'Pending');
+        }
       }
       break;
     case 'packed':

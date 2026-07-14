@@ -620,8 +620,27 @@ function normalizeOndcDomain(raw: string | null | undefined): OndcRetailDomain |
   return lookup[key] ?? null;
 }
 
-async function resolveOndcCategory(
-  row: OndcCatalogRow,
+/** Minimal shape needed to resolve a product's real ONDC domain/category —
+ * a subset of OndcCatalogRow so select/init/confirm's lighter row types
+ * (which don't carry price/images/etc) can be domain-checked too. */
+export interface DomainResolvableRow {
+  product_id: number;
+  category_id: number | null;
+  category_name: string | null;
+  category_domain: string | null;
+  ondc_subcategory: string | null;
+}
+
+/**
+ * Resolve a product's REAL ONDC domain (from categories.domain →
+ * ondc_category_mappings → categoryRules.json → category name → default).
+ * This is the single source of truth for "what domain does this product
+ * actually belong to" — /select, /init, /confirm must cross-check their
+ * incoming ctx.domain against this before accepting an item_id, exactly as
+ * /on_search already does via buildOndcItemFromRow.
+ */
+export async function resolveOndcCategory(
+  row: DomainResolvableRow,
 ): Promise<{ domain: OndcRetailDomain; categoryId: string }> {
   if (row.category_domain && row.ondc_subcategory) {
     const dom = normalizeOndcDomain(row.category_domain);
@@ -630,8 +649,18 @@ async function resolveOndcCategory(
 
   // ondc_category_mappings.ondc_category_id is an FK to ondc_categories.id;
   // join through to get the canonical ondc_category_code that goes into payloads.
-  const dbRows = await ondcQuery<{ domain: string | null; category_code: string | null }>(
-    `SELECT ocm.domain AS domain, oc.ondc_category_code AS category_code
+  // ondc_category_mappings.domain is populated out-of-band and can be NULL —
+  // prefer the joined ondc_categories.domain (the category the resolved code
+  // actually belongs to) over the JSON default before falling all the way
+  // back, so a NULL mapping.domain never produces a categoryId/domain pair
+  // that don't correspond to the same category.
+  const dbRows = await ondcQuery<{
+    domain: string | null;
+    category_table_domain: string | null;
+    category_code: string | null;
+  }>(
+    `SELECT ocm.domain AS domain, oc.domain AS category_table_domain,
+            oc.ondc_category_code AS category_code
      FROM ondc_category_mappings ocm
      LEFT JOIN ondc_categories oc ON oc.id = ocm.ondc_category_id
      WHERE ocm.product_id = ? AND ocm.ondc_category_id IS NOT NULL
@@ -640,7 +669,9 @@ async function resolveOndcCategory(
   );
   if (dbRows[0]?.category_code) {
     const dom =
-      normalizeOndcDomain(dbRows[0].domain) ?? (rules.default.ondc_domain as OndcRetailDomain);
+      normalizeOndcDomain(dbRows[0].domain) ??
+      normalizeOndcDomain(dbRows[0].category_table_domain) ??
+      (rules.default.ondc_domain as OndcRetailDomain);
     return { domain: dom, categoryId: dbRows[0].category_code };
   }
 
@@ -656,9 +687,20 @@ async function resolveOndcCategory(
   // Try category_name as a last resort before defaulting
   const fallbackDom = normalizeOndcDomain(row.category_name);
   if (fallbackDom) {
+    // rules.default.ondc_category_id ("Handicrafts") only belongs to
+    // ONDC:RET12 — using it verbatim here would reproduce the same
+    // domain/categoryId inconsistency the ondc_category_mappings branch
+    // above was fixed for, whenever category_name resolves to a different
+    // domain (e.g. RET10/RET16). Prefer a category_id from rules.mappings
+    // that's actually paired with fallbackDom before falling back to the
+    // domain-agnostic default.
+    const domainMatch = rules.mappings.find(
+      (r) => normalizeOndcDomain(r.ondc_domain) === fallbackDom,
+    );
     return {
       domain: fallbackDom,
-      categoryId: row.ondc_subcategory ?? rules.default.ondc_category_id,
+      categoryId:
+        row.ondc_subcategory ?? domainMatch?.ondc_category_id ?? rules.default.ondc_category_id,
     };
   }
 
