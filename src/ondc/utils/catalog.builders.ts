@@ -42,7 +42,8 @@ export interface ProviderBuildInfo {
 const DEFAULT_PROVIDER_SHORT_DESC = 'ODOP store on ONDC';
 const DEFAULT_PROVIDER_LONG_DESC =
   'ODOP seller storefront with products available for discovery and fulfillment on ONDC.';
-const DEFAULT_CONTACT_PHONE = '+91 9201838159';
+/** Must match ONDC workbench `^[0-9]{10}$` (no +91 / spaces). */
+const DEFAULT_CONTACT_PHONE = '9201838159';
 const DEFAULT_CONTACT_EMAIL = 'info@odopmartmp.com';
 const DEFAULT_LOCALITY = 'Bhopal';
 
@@ -70,8 +71,22 @@ export function resolveProviderLongDesc(value: unknown, providerName?: unknown):
   );
 }
 
+/**
+ * Normalize to a 10-digit Indian mobile for ONDC contact.phone fields
+ * (FULFILLMENTS_CONTACT_PHONE: ^[0-9]{10}$).
+ */
 export function resolveOndcPhone(value: unknown): string {
-  return nonEmptyString(value, SELLER_PROFILE.SUPPORT_PHONE) ?? DEFAULT_CONTACT_PHONE;
+  const candidates = [value, SELLER_PROFILE.SUPPORT_PHONE, DEFAULT_CONTACT_PHONE];
+  for (const candidate of candidates) {
+    const digits = String(candidate ?? '').replace(/\D/g, '');
+    let ten = '';
+    if (digits.length === 10) ten = digits;
+    else if (digits.length === 12 && digits.startsWith('91')) ten = digits.slice(2);
+    else if (digits.length === 11 && digits.startsWith('0')) ten = digits.slice(1);
+    else if (digits.length > 10) ten = digits.slice(-10);
+    if (/^\d{10}$/.test(ten)) return ten;
+  }
+  return DEFAULT_CONTACT_PHONE;
 }
 
 export function resolveOndcEmail(value: unknown): string {

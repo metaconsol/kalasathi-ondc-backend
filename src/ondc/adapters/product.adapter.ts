@@ -12,7 +12,7 @@ import { ondcQuery } from '~/lib/ondcSql';
 import categoryRules from '~/ondc/config/categoryRules.json' with { type: 'json' };
 import { ondcEnv } from '~/config/ondc.config';
 import { SELLER_PROFILE } from '~/ondc/config/constants';
-import { buildOndcItem, type ItemTagInputs } from '~/ondc/utils/catalog.builders';
+import { buildOndcItem, resolveOndcPhone, type ItemTagInputs } from '~/ondc/utils/catalog.builders';
 import { getDomainConfig, type OndcRetailDomain } from '~/ondc/config/domain.config';
 import type { OndcItem } from '~/ondc/types/ondc.types';
 
@@ -908,7 +908,7 @@ export async function buildOndcItemFromRow(
     consumerCareContact: [
       ctx.storeName ?? SELLER_PROFILE.SUPPORT_NAME,
       ctx.storeEmail ?? SELLER_PROFILE.SUPPORT_EMAIL,
-      ctx.storePhone ?? SELLER_PROFILE.SUPPORT_PHONE,
+      resolveOndcPhone(ctx.storePhone ?? SELLER_PROFILE.SUPPORT_PHONE),
     ].join(','),
     rating: row.item_rating,
     attributes: attrs,
