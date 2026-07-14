@@ -2,8 +2,12 @@
  * Admin Catalog Controller — read-only.
  *
  * GET /catalog/items[/:providerId] — flattened list of items that /on_search
- *   would emit live, for admin visibility (no cache).
+ *   would emit live, for admin/seller visibility (no cache).
  * GET /catalog/debug                — pipeline diagnostics, no writes.
+ *
+ * Role scoping (mirrors orders / dashboard stats):
+ *   ADMIN / SUPER_ADMIN → all active providers (optional providerId filter).
+ *   SELLER              → only stores where stores.seller_user_id = req.user.id.
  */
 
 import type { Request, Response } from 'express';
@@ -11,6 +15,7 @@ import { ApiResponse } from '~/lib/response';
 import { catalogService } from '~/ondc/services/catalog.service';
 import { getActiveStores } from '~/ondc/adapters/seller.adapter';
 import { ondcQuery } from '~/lib/ondcSql';
+import { SUPPORTED_DOMAINS, type OndcRetailDomain } from '~/ondc/config/domain.config';
 
 interface OndcItem {
   id: string;
@@ -20,31 +25,70 @@ interface OndcItem {
   category_id?: string;
 }
 
+/** Resolve provider ids (store ids) owned by the authenticated seller. */
+async function getSellerProviderIds(sellerId: number): Promise<string[]> {
+  const storeRows = await ondcQuery<{ id: number }>(
+    `SELECT id FROM stores WHERE seller_user_id = ?`,
+    [sellerId],
+  );
+  return storeRows.map((r) => String(r.id));
+}
+
+/**
+ * Domains to build. Default remains RET12 (existing callers).
+ * Pass domain=all to build every supported retail domain (seller/admin catalog UI).
+ */
+function resolveCatalogDomains(raw: string | undefined): OndcRetailDomain[] {
+  if (!raw) return ['ONDC:RET12'];
+  if (raw.toLowerCase() === 'all') return [...SUPPORTED_DOMAINS];
+  return [raw as OndcRetailDomain];
+}
+
 /** GET /api/v1/ondc/admin/catalog/items[/:providerId] */
 export async function listCatalogItems(req: Request, res: Response): Promise<void> {
   const providerId = req.params.providerId as string | undefined;
-  const domain = (req.query.domain as string | undefined) ?? 'ONDC:RET12';
+  const domains = resolveCatalogDomains(req.query.domain as string | undefined);
 
-  const catalog = await catalogService.buildSearchCatalog(domain);
+  const isSeller = req.user?.role === 'SELLER';
+  const sellerId = isSeller ? req.user?.id : undefined;
+
+  // Sellers may only see their own stores. Admins see the full network catalog.
+  let allowedProviderIds: string[] | null = null;
+  if (sellerId !== undefined) {
+    allowedProviderIds = await getSellerProviderIds(sellerId);
+    if (providerId && !allowedProviderIds.includes(providerId)) {
+      ApiResponse.success(res, 'Catalog items (live)', []);
+      return;
+    }
+    if (allowedProviderIds.length === 0) {
+      ApiResponse.success(res, 'Catalog items (live)', []);
+      return;
+    }
+  }
+
   const flat: object[] = [];
-  for (const provider of catalog['bpp/providers'] as Array<{
-    id: string;
-    items: OndcItem[];
-    descriptor: { name: string };
-  }>) {
-    if (providerId && provider.id !== providerId) continue;
-    for (const item of provider.items ?? []) {
-      flat.push({
-        ondc_item_id: item.id,
-        parent_item_id: item.parent_item_id ?? null,
-        name: item.descriptor?.name ?? '',
-        price: item.price?.value ?? null,
-        mrp: item.price?.maximum_value ?? null,
-        ondc_category_code: item.category_id ?? null,
-        provider_id: provider.id,
-        provider_name: provider.descriptor?.name ?? '',
-        domain,
-      });
+  for (const domain of domains) {
+    const catalog = await catalogService.buildSearchCatalog(domain);
+    for (const provider of catalog['bpp/providers'] as Array<{
+      id: string;
+      items: OndcItem[];
+      descriptor: { name: string };
+    }>) {
+      if (providerId && provider.id !== providerId) continue;
+      if (allowedProviderIds && !allowedProviderIds.includes(provider.id)) continue;
+      for (const item of provider.items ?? []) {
+        flat.push({
+          ondc_item_id: item.id,
+          parent_item_id: item.parent_item_id ?? null,
+          name: item.descriptor?.name ?? '',
+          price: item.price?.value ?? null,
+          mrp: item.price?.maximum_value ?? null,
+          ondc_category_code: item.category_id ?? null,
+          provider_id: provider.id,
+          provider_name: provider.descriptor?.name ?? '',
+          domain,
+        });
+      }
     }
   }
   ApiResponse.success(res, 'Catalog items (live)', flat);
