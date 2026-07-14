@@ -28,7 +28,7 @@ interface OndcItem {
 /** Resolve provider ids (store ids) owned by the authenticated seller. */
 async function getSellerProviderIds(sellerId: number): Promise<string[]> {
   const storeRows = await ondcQuery<{ id: number }>(
-    `SELECT id FROM stores WHERE seller_user_id = ?`,
+    `SELECT id FROM stores WHERE seller_user_id = ? AND (deleted_at IS NULL)`,
     [sellerId],
   );
   return storeRows.map((r) => String(r.id));
@@ -44,17 +44,23 @@ function resolveCatalogDomains(raw: string | undefined): OndcRetailDomain[] {
   return [raw as OndcRetailDomain];
 }
 
+/** Empty path segment from `/catalog/items/` must not become a provider filter. */
+function normalizeProviderId(raw: string | undefined): string | undefined {
+  const id = raw?.trim();
+  return id ? id : undefined;
+}
+
 /** GET /api/v1/ondc/admin/catalog/items[/:providerId] */
 export async function listCatalogItems(req: Request, res: Response): Promise<void> {
-  const providerId = req.params.providerId as string | undefined;
+  const providerId = normalizeProviderId(req.params.providerId as string | undefined);
   const domains = resolveCatalogDomains(req.query.domain as string | undefined);
 
   const isSeller = req.user?.role === 'SELLER';
-  const sellerId = isSeller ? req.user?.id : undefined;
+  const sellerId = isSeller ? Number(req.user?.id) : undefined;
 
   // Sellers may only see their own stores. Admins see the full network catalog.
   let allowedProviderIds: string[] | null = null;
-  if (sellerId !== undefined) {
+  if (sellerId !== undefined && Number.isFinite(sellerId)) {
     allowedProviderIds = await getSellerProviderIds(sellerId);
     if (providerId && !allowedProviderIds.includes(providerId)) {
       ApiResponse.success(res, 'Catalog items (live)', []);
@@ -66,9 +72,20 @@ export async function listCatalogItems(req: Request, res: Response): Promise<voi
     }
   }
 
+  // Build only the stores we will emit — sellers were timing out because every
+  // catalog preview rebuilt the full multi-store BPP catalog first.
+  let buildStoreIds: number[] | undefined;
+  if (providerId) {
+    buildStoreIds = [parseInt(providerId, 10)].filter((n) => Number.isFinite(n));
+  } else if (allowedProviderIds) {
+    buildStoreIds = allowedProviderIds
+      .map((id) => parseInt(id, 10))
+      .filter((n) => Number.isFinite(n));
+  }
+
   const flat: object[] = [];
   for (const domain of domains) {
-    const catalog = await catalogService.buildSearchCatalog(domain);
+    const catalog = await catalogService.buildSearchCatalog(domain, buildStoreIds);
     for (const provider of catalog['bpp/providers'] as Array<{
       id: string;
       items: OndcItem[];
