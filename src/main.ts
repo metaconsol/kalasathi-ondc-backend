@@ -4,6 +4,7 @@ import { logger } from '~/lib/logger';
 import { env } from '~/config/env.config';
 import { createApp } from './app';
 import { sqlQuery } from '~/lib/sql';
+import { startTrackingPoller } from '~/ondc/services/tracking-poller.service';
 
 async function startServer() {
   const app = createApp();
@@ -20,6 +21,7 @@ async function startServer() {
     // 3. Start Server
     server.listen(port, () => {
       logger.info(`Server is running on port ${port} in ${env.nodeEnv} mode`);
+      startTrackingPoller();
     });
 
     server.on('error', (err) => {

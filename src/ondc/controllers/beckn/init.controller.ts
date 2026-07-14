@@ -10,7 +10,7 @@ import type { Request, Response } from 'express';
 import { buildAck, buildOnInit } from '~/ondc/utils/payload.builder';
 import { becknService } from '~/ondc/services/beckn.service';
 import { observabilityService } from '~/ondc/services/observability.service';
-import { resolveOndcCatalogRow } from '~/ondc/adapters/product.adapter';
+import { resolveOndcCatalogRow, resolveOndcCategory } from '~/ondc/adapters/product.adapter';
 import { estimateDeliveryCharge } from '~/ondc/services/delhivery.service';
 import {
   fetchSellerProfileByStoreId,
@@ -35,6 +35,7 @@ const DEFAULT_QUOTE_ITEM_TAGS = [
 ];
 
 interface FallbackCatalogRow {
+  product_id: number;
   store_id: number;
   name: string;
   price: number;
@@ -42,6 +43,10 @@ interface FallbackCatalogRow {
   gst_percent: number;
   time_to_ship_value: number | null;
   time_to_ship_unit: string | null;
+  category_id: number | null;
+  category_name: string | null;
+  category_domain: string | null;
+  ondc_subcategory: string | null;
 }
 
 async function resolveFallbackCatalogRow(
@@ -50,15 +55,21 @@ async function resolveFallbackCatalogRow(
 ): Promise<FallbackCatalogRow | null> {
   const rows = await ondcQuery<any>(
     `SELECT
+       p.id AS product_id,
        p.store_id,
        p.product_name AS name,
        COALESCE(p.default_price, p.mrp, 0) AS price,
        COALESCE(p.stock, 0) AS stock,
        COALESCE(p.gst_percent, 0) AS gst_percent,
        p.time_to_ship_value,
-       p.time_to_ship_unit
+       p.time_to_ship_unit,
+       p.category_id,
+       c.name   AS category_name,
+       c.domain AS category_domain,
+       p.ondc_subcategory
      FROM ondc_catalog_items oci
      INNER JOIN products p ON p.id = oci.main_db_product_id
+     LEFT JOIN categories c ON c.id = p.category_id
      WHERE oci.ondc_item_id = ?
        AND oci.sync_status = 'synced'
        AND (? = '' OR oci.provider_id = ?)
@@ -69,6 +80,7 @@ async function resolveFallbackCatalogRow(
 
   if (!rows[0]) return null;
   return {
+    product_id: Number(rows[0].product_id),
     store_id: Number(rows[0].store_id),
     name: String(rows[0].name ?? ''),
     price: Number(rows[0].price ?? 0),
@@ -77,6 +89,10 @@ async function resolveFallbackCatalogRow(
     time_to_ship_value:
       rows[0].time_to_ship_value != null ? Number(rows[0].time_to_ship_value) : null,
     time_to_ship_unit: rows[0].time_to_ship_unit ?? null,
+    category_id: rows[0].category_id != null ? Number(rows[0].category_id) : null,
+    category_name: rows[0].category_name ?? null,
+    category_domain: rows[0].category_domain ?? null,
+    ondc_subcategory: rows[0].ondc_subcategory ?? null,
   };
 }
 
@@ -247,6 +263,15 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
       const quoteLines: QuoteLineInput[] = [];
       const shippingItems: Array<{ productId: number; quantity: number }> = [];
       let resolvedStoreId: number | null = storeIdFromProvider;
+      // resolveOndcCategory always returns a canonical uppercase domain
+      // (e.g. 'ONDC:RET12'); ctx.domain is only trimmed by the validator
+      // middleware, not case-normalized, so a lowercase/mixed-case but
+      // otherwise valid ctx.domain must be normalized here too — otherwise
+      // a strict comparison would reject every item in an order that
+      // actually matches.
+      const normalizedCtxDomain = String(ctx.domain ?? '')
+        .trim()
+        .toUpperCase();
       const normalizedItems: Array<{
         id: string;
         fulfillment_id: string;
@@ -271,6 +296,27 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
           ));
         if (!catalogRow) continue;
         if (resolvedStoreId !== null && catalogRow.store_id !== resolvedStoreId) continue;
+        // Domain cross-check — same rule as /select: a product's real domain
+        // comes from categories.domain (→ mappings → rules.json), never from
+        // the incoming ctx.domain. Skip enriching the quote for a mismatched
+        // item (mirrors the silent-skip convention already used for store_id
+        // above); the item id itself is still echoed in normalizedItems since
+        // on_init must reflect back what the buyer sent in /init.
+        // Fail-safe: a transient DB error resolving ONE item's domain must
+        // not abort the whole /init (the outer catch has no callback path,
+        // so the buyer would see nothing until TTL expiry) — treat it like a
+        // mismatch (skip just this item) and keep going.
+        let itemDomain: string | null = null;
+        try {
+          itemDomain = (await resolveOndcCategory(catalogRow)).domain;
+        } catch (err) {
+          ondcLogger.error('resolveOndcCategory failed — excluding item from init quote', {
+            txnId,
+            itemId: rawItem.id,
+            err,
+          });
+        }
+        if (itemDomain !== normalizedCtxDomain) continue;
 
         resolvedStoreId = catalogRow.store_id;
         if ('product_id' in catalogRow && catalogRow.product_id) {

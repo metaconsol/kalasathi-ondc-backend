@@ -16,8 +16,9 @@ import { buildAck, buildOnConfirm, nowIso, safeJsonParse } from '~/ondc/utils/pa
 import { becknService } from '~/ondc/services/beckn.service';
 import { observabilityService } from '~/ondc/services/observability.service';
 import { orderModel } from '~/ondc/models/order.model';
+import { flow1AService } from '~/ondc/flows/flow1A.service';
 import { providerModel } from '~/ondc/models/provider.model';
-import { resolveOndcCatalogRow } from '~/ondc/adapters/product.adapter';
+import { resolveOndcCatalogRow, resolveOndcCategory } from '~/ondc/adapters/product.adapter';
 import {
   fetchSellerProfileByStoreId,
   fetchStoreById,
@@ -30,7 +31,7 @@ import { overallTxnsModel } from '~/ondc/models/overall_txns.model';
 import { bapTermsModel } from '~/ondc/models/bap_terms.model';
 import { ondcLogger } from '~/ondc/utils/logger.util';
 import { ondcEnv } from '~/config/ondc.config';
-import { ondcQuery, withOndcTransaction } from '~/lib/ondcSql';
+import { ondcExec, ondcQuery, withOndcTransaction } from '~/lib/ondcSql';
 import {
   buildQuote,
   resolveOndcEmail,
@@ -99,6 +100,7 @@ const DEFAULT_STATIC_TERMS_URL =
 type LooseObject = Record<string, any>;
 
 interface FallbackCatalogRow {
+  product_id: number;
   store_id: number;
   name: string;
   price: number;
@@ -106,6 +108,10 @@ interface FallbackCatalogRow {
   gst_percent: number;
   time_to_ship_value: number | null;
   time_to_ship_unit: string | null;
+  category_id: number | null;
+  category_name: string | null;
+  category_domain: string | null;
+  ondc_subcategory: string | null;
 }
 
 async function resolveFallbackCatalogRow(
@@ -114,15 +120,21 @@ async function resolveFallbackCatalogRow(
 ): Promise<FallbackCatalogRow | null> {
   const rows = await ondcQuery<any>(
     `SELECT
+       p.id AS product_id,
        p.store_id,
        p.product_name AS name,
        COALESCE(p.default_price, p.mrp, 0) AS price,
        COALESCE(p.stock, 0) AS stock,
        COALESCE(p.gst_percent, 0) AS gst_percent,
        p.time_to_ship_value,
-       p.time_to_ship_unit
+       p.time_to_ship_unit,
+       p.category_id,
+       c.name   AS category_name,
+       c.domain AS category_domain,
+       p.ondc_subcategory
      FROM ondc_catalog_items oci
      INNER JOIN products p ON p.id = oci.main_db_product_id
+     LEFT JOIN categories c ON c.id = p.category_id
      WHERE oci.ondc_item_id = ?
        AND oci.sync_status = 'synced'
        AND (? = '' OR oci.provider_id = ?)
@@ -133,6 +145,7 @@ async function resolveFallbackCatalogRow(
 
   if (!rows[0]) return null;
   return {
+    product_id: Number(rows[0].product_id),
     store_id: Number(rows[0].store_id),
     name: String(rows[0].name ?? ''),
     price: Number(rows[0].price ?? 0),
@@ -141,6 +154,10 @@ async function resolveFallbackCatalogRow(
     time_to_ship_value:
       rows[0].time_to_ship_value != null ? Number(rows[0].time_to_ship_value) : null,
     time_to_ship_unit: rows[0].time_to_ship_unit ?? null,
+    category_id: rows[0].category_id != null ? Number(rows[0].category_id) : null,
+    category_name: rows[0].category_name ?? null,
+    category_domain: rows[0].category_domain ?? null,
+    ondc_subcategory: rows[0].ondc_subcategory ?? null,
   };
 }
 
@@ -241,7 +258,10 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
       const payment = order['payment'] ?? {};
       const items: any[] = Array.isArray(order['items']) ? order['items'] : [];
       const fulfillments: any[] = Array.isArray(order['fulfillments']) ? order['fulfillments'] : [];
-      const itemCount = itemQtyTotal(items);
+      // Reassigned below to itemQtyTotal(confirmedItems) once that's known —
+      // a domain-mismatched item's quantity must not inflate the persisted
+      // item_count even though it's correctly excluded from the item rows.
+      let itemCount = 0;
       const inboundBreakup: any[] = safeJsonParse(
         JSON.stringify(order['quote']?.['breakup'] ?? []),
         [],
@@ -250,12 +270,27 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
       const quoteLines: QuoteLineInput[] = [];
       let resolvedStoreId: number | null =
         Number.parseInt(String(order['provider']?.['id'] ?? ''), 10) || null;
+      // resolveOndcCategory always returns a canonical uppercase domain
+      // (e.g. 'ONDC:RET12'); ctx.domain is only trimmed by the validator
+      // middleware, not case-normalized, so a lowercase/mixed-case but
+      // otherwise valid ctx.domain must be normalized here too — otherwise
+      // a strict comparison would reject every item in an order that
+      // actually matches.
+      const normalizedCtxDomain = String(ctx.domain ?? '')
+        .trim()
+        .toUpperCase();
       const normalizedItems: Array<{
         id: string;
         fulfillment_id: string;
         quantity: { count: number };
       }> = [];
+      // Items that pass store + domain validation — normalizedItems/breakup
+      // are filtered down to this set below so an excluded item is actually
+      // excluded from persistence/pricing/on_confirm, not just from
+      // quoteLines (a mismatched item must not be a $0 order line either).
+      const validItemIds = new Set<string>();
       let firstTat = 'P1D';
+      let firstTatSet = false;
       for (const item of items) {
         const qty = parseInt(item?.quantity?.count ?? '1', 10) || 1;
         if (!item?.id || qty <= 0) continue;
@@ -273,8 +308,35 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
           ));
         if (!catalogRow) continue;
         if (resolvedStoreId !== null && catalogRow.store_id !== resolvedStoreId) continue;
+        // Domain cross-check — same rule as /select and /init: a product's
+        // real domain comes from categories.domain (→ mappings → rules.json),
+        // never from the incoming ctx.domain. Excludes the item from
+        // validItemIds (and therefore from normalizedItems/breakup/
+        // persistence below) rather than NACKing the whole /confirm — by
+        // this point /select and /init should already have kept a
+        // mismatched item out of the buyer's quote, so this is a last-resort
+        // safety net, not the primary enforcement point.
+        // Fail-safe: a transient DB error resolving ONE item's domain must
+        // not abort the whole order (the outer catch has no callback path,
+        // so the buyer would see nothing until TTL expiry) — treat it as a
+        // mismatch (exclude just this item) and keep going.
+        let itemDomain: string | null = null;
+        try {
+          itemDomain = (await resolveOndcCategory(catalogRow)).domain;
+        } catch (err) {
+          ondcLogger.error('resolveOndcCategory failed — excluding item from confirm', {
+            txnId,
+            itemId: item.id,
+            err,
+          });
+        }
+        if (itemDomain !== normalizedCtxDomain) continue;
+        validItemIds.add(String(item.id));
         resolvedStoreId = catalogRow.store_id;
-        firstTat = buildTimeToShip(catalogRow.time_to_ship_value, catalogRow.time_to_ship_unit);
+        if (!firstTatSet) {
+          firstTat = buildTimeToShip(catalogRow.time_to_ship_value, catalogRow.time_to_ship_unit);
+          firstTatSet = true;
+        }
         quoteLines.push({
           itemId: String(item.id),
           itemName: catalogRow.name,
@@ -285,6 +347,10 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
           taxPercent: catalogRow.gst_percent,
         });
       }
+      // Actually enforce the exclusion decided above — persistOrder and the
+      // outbound on_confirm payload both read from this filtered list.
+      const confirmedItems = normalizedItems.filter((ni) => validItemIds.has(ni.id));
+      itemCount = itemQtyTotal(confirmedItems);
       // Buyer's confirm normally carries the agreed quote; when it doesn't,
       // rebuild with the SAME delivery charge quoted at /select (quote trail).
       const fallbackDelivery =
@@ -296,9 +362,24 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
         if (inboundBreakup.length === 0) {
           return sanitizeQuoteBreakup((computedQuote.breakup as any[]) ?? []);
         }
-        const merged = [...inboundBreakup];
+        // Drop any inbound breakup entry that prices an excluded item —
+        // otherwise a domain-mismatched item's buyer-supplied price still
+        // leaks into itemTotal/order_total/the persisted order even though
+        // the item itself was excluded above. Gate on title_type === 'item'
+        // specifically, NOT merely a truthy item_id — buildQuote() (and
+        // ppf.builder.ts's buildQuoteFromOrder) also stamp delivery/packing/
+        // tax/misc breakup lines with '@ondc/org/item_id' = the fulfillment
+        // id, so filtering on item_id alone would incorrectly drop those
+        // legitimate charges (zeroing delivery_charges/tax_total/etc.) on
+        // every ordinary order, not just domain-mismatch cases.
+        const filteredInbound = inboundBreakup.filter((entry: any) => {
+          if (String(entry?.['@ondc/org/title_type'] ?? '') !== 'item') return true;
+          const itemId = entry?.['@ondc/org/item_id'];
+          return !itemId || validItemIds.has(String(itemId));
+        });
+        const merged = [...filteredInbound];
         const seen = new Set(
-          inboundBreakup.map((entry: any) =>
+          filteredInbound.map((entry: any) =>
             [
               String(entry?.['@ondc/org/item_id'] ?? ''),
               String(entry?.['@ondc/org/title_type'] ?? ''),
@@ -412,8 +493,9 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
             tx,
           );
 
-          // Line items
-          for (const item of normalizedItems) {
+          // Line items — confirmedItems, NOT normalizedItems: a domain-
+          // mismatched item must never actually be persisted/priced.
+          for (const item of confirmedItems) {
             const qty = parseInt(String(item?.quantity?.count ?? '1'), 10) || 1;
             const price =
               parseFloat(
@@ -565,7 +647,7 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
           id: providerId,
           locations: providerLocationIds.length ? providerLocationIds : [{ id: '' }],
         },
-        items: normalizedItems,
+        items: confirmedItems,
         billing: normalizeBilling(billing, true),
         fulfillments: (fulfillments.length
           ? fulfillments
@@ -666,16 +748,34 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
 
       const ackOk = statusCode !== undefined && statusCode >= 200 && statusCode < 300;
 
-      // If BAP ACKed → confirm the order
+      // If BAP ACKed → confirm the order, and fire the very first unsolicited
+      // on_status automatically — like normal ecommerce, the buyer shouldn't
+      // need to poll to learn the order was confirmed. The seller's manual
+      // 'confirmed' action in orders.controller.ts can race this (it does
+      // the identical transition+push, guarded by its own CAS) — a plain
+      // status-then-write here would let both fire, sending a duplicate
+      // on_status and a corrupted status_history row. A conditional UPDATE
+      // (only flips CREATED→CONFIRMED if it's still CREATED) makes this
+      // atomic at the DB level, so only whichever of the two paths gets
+      // there first actually transitions/pushes.
       if (ackOk) {
-        await orderModel.transitionStatus(
-          ondcOrderId,
-          'CREATED',
-          'CONFIRMED',
-          null,
-          'buyer',
-          'BAP ACKed on_confirm',
+        const casResult = await ondcExec(
+          `UPDATE ondc_orders SET status = 'CONFIRMED', status_updated_at = NOW(), updated_at = NOW()
+           WHERE ondc_order_id = ? AND status = 'CREATED'`,
+          [ondcOrderId],
         );
+        if (casResult.affectedRows > 0) {
+          await orderModel.addStatusHistory({
+            ondc_order_id: ondcOrderId,
+            from_status: 'CREATED',
+            to_status: 'CONFIRMED',
+            fulfillment_state: null,
+            triggered_by: 'buyer',
+            note: 'BAP ACKed on_confirm',
+            payload_json: null,
+          });
+          await flow1AService.pushOnStatus(ondcOrderId, 'Pending');
+        }
       }
 
       await txnLogModel.insert({

@@ -45,9 +45,50 @@ const RESPONDENT_ACTION = {
   PROCESSING: 'PROCESSING',
   INFO_REQUEST: 'NEED-MORE-INFO',
   RESOLVED: 'RESOLVED',
+  // Internal-only marker for "a resolution was proposed" — igm.builder.ts's
+  // buildIgmV1RespondentActions currently collapses this to PROCESSING before
+  // it hits the wire (unverified whether IGM 1.0's respondent_action enum
+  // actually allows RESOLUTION_PROPOSED on a live BAP; left collapsed to avoid
+  // risking a NACK). Using this distinct value internally still lets our own
+  // ticket history / mirror-extraction (RESOLUTION_ACTION_CODES in
+  // igm.builder.ts already expects it) tell "proposed" apart from "generic
+  // processing update" — which is what actually breaks the resolution/accept
+  // double-loop; the wire code staying as PROCESSING doesn't block that.
+  RESOLUTION_PROPOSED: 'RESOLUTION_PROPOSED',
 } as const;
 
 const nowIso = () => new Date().toISOString();
+
+/**
+ * Per-ticket async mutex. handleIgmV1Issue does a read-check-append
+ * sequence (read the ticket, check a dedup key against its message list,
+ * append) with no DB-level row lock or unique constraint backing it — a
+ * retried/duplicated /issue callback for the same ticket can interleave two
+ * concurrent invocations, both pass the dedup check against the same stale
+ * snapshot, and both append a duplicate message (and, for an escalation,
+ * both fire the GRO auto-response and send a duplicate on_issue). This
+ * serializes all handling for a given ticket_id within this process so the
+ * second call always sees the first call's completed write before running
+ * its own dedup check. Only guards against in-process races — it does not
+ * help across multiple server instances, since there's no cross-process
+ * lock here.
+ */
+const ticketLocks = new Map<string, Promise<void>>();
+
+async function withTicketLock<T>(ticketId: string, fn: () => Promise<T>): Promise<T> {
+  const prior = ticketLocks.get(ticketId) ?? Promise.resolve();
+  const waitForPrior = prior.catch(() => undefined);
+  const ourTurn = waitForPrior.then(fn);
+  const tail: Promise<void> = ourTurn.then(
+    () => undefined,
+    () => undefined,
+  );
+  ticketLocks.set(ticketId, tail);
+  void tail.finally(() => {
+    if (ticketLocks.get(ticketId) === tail) ticketLocks.delete(ticketId);
+  });
+  return ourTurn;
+}
 
 type TicketRow = NonNullable<Awaited<ReturnType<typeof customerTicketModel.getById>>>;
 
@@ -321,6 +362,22 @@ async function handleIgmV1Issue(
   desc: Record<string, any>,
 ): Promise<void> {
   const issueId = String(issue['id'] ?? randomUUID());
+  // Serialize per-ticket — see withTicketLock's docblock. Without this, a
+  // retried/duplicated /issue callback for the same ticket can double-fire
+  // the dedup-then-append sequence below (and, for an escalation, the GRO
+  // auto-response + a duplicate on_issue push).
+  await withTicketLock(issueId, () =>
+    handleIgmV1IssueLocked(issueId, context, issue, complainant, desc),
+  );
+}
+
+async function handleIgmV1IssueLocked(
+  issueId: string,
+  context: BecknContext,
+  issue: IgmIssue,
+  complainant: Record<string, any>,
+  desc: Record<string, any>,
+): Promise<void> {
   const images = extractIgmImages(issue, desc);
   const attachments = extractIgmAttachments(issue, desc);
 
@@ -384,6 +441,10 @@ async function handleIgmV1Issue(
     const code = String(latest?.complainant_action ?? 'INFO_PROVIDED');
     const key = `${code}|${latest?.updated_at ?? ''}`;
     const existing = customerTicketModel.parseMessages(row);
+    // Buyer apps may send either the verb ('ESCALATE') or the state
+    // ('ESCALATED') form of the complainant_action — accept both.
+    const isEscalation = code === 'ESCALATE' || code === 'ESCALATED';
+    let newlyLogged = false;
     if (!existing.some((m) => (m as any)._key === key)) {
       await customerTicketModel.appendMessage({ id: row.id }, {
         id: randomUUID(),
@@ -398,14 +459,43 @@ async function handleIgmV1Issue(
         created_at: nowIso(),
         _key: key,
       } as TicketMessage);
+      newlyLogged = true;
       if (code === 'CLOSE') await customerTicketModel.setStatus(row.id, 'CLOSED', 'CLOSED');
     }
     const storedPayload = row.payload_json ? JSON.parse(row.payload_json) : issue;
     const mergedIssue = { ...storedPayload, ...issue };
-    await customerTicketModel.saveIgmIssueState(row.id, mergedIssue, {
-      displayStatus: code === 'CLOSE' ? 'CLOSED' : row.display_status,
-      ...(code === 'CLOSE' ? { igmStatusRaw: 'CLOSED' } : {}),
-    });
+
+    // Flow 6a escalation (previously unhandled — the whole reason a buyer's
+    // ESCALATE just silently vanished into a generic chat message with no
+    // status change or seller-side response, making a second resolution
+    // proposal indistinguishable from the first). Mirrors the v2 flow: mark
+    // ESCALATED, then immediately auto-acknowledge via the seller's GRO so
+    // the buyer app sees a real state transition before the seller re-
+    // proposes a resolution.
+    if (isEscalation && newlyLogged) {
+      await customerTicketModel.saveIgmIssueState(row.id, mergedIssue, {
+        displayStatus: 'ESCALATED',
+        igmStatusRaw: 'ESCALATED',
+      });
+      await customerTicketModel.appendMessage(
+        { id: row.id },
+        {
+          id: randomUUID(),
+          actor: 'SELLER',
+          sender_role: 'SELLER',
+          sender_name: SELLER_PROFILE.SUPPORT_NAME || SELLER_PROFILE.BRAND_NAME || 'Support',
+          message: 'Escalation received and being reviewed by GRO',
+          action_code: RESPONDENT_ACTION.PROCESSING,
+          created_at: nowIso(),
+        },
+        { displayStatus: 'PROCESSING', igmStatusRaw: 'PROCESSING' },
+      );
+    } else {
+      await customerTicketModel.saveIgmIssueState(row.id, mergedIssue, {
+        displayStatus: code === 'CLOSE' ? 'CLOSED' : row.display_status,
+        ...(code === 'CLOSE' ? { igmStatusRaw: 'CLOSED' } : {}),
+      });
+    }
   }
 
   if (row) {
@@ -687,7 +777,7 @@ export const igmService = {
           displayStatus = 'PROCESSING';
           break;
         case 'resolution_options':
-          actionCode = RESPONDENT_ACTION.PROCESSING;
+          actionCode = RESPONDENT_ACTION.RESOLUTION_PROPOSED;
           displayStatus = 'PROCESSING';
           break;
         case 'resolve':
