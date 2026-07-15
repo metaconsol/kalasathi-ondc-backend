@@ -641,7 +641,7 @@ export interface DomainResolvableRow {
  */
 export async function resolveOndcCategory(
   row: DomainResolvableRow,
-): Promise<{ domain: OndcRetailDomain; categoryId: string }> {
+): Promise<{ domain: OndcRetailDomain; categoryId: string } | null> {
   if (row.category_domain && row.ondc_subcategory) {
     const dom = normalizeOndcDomain(row.category_domain);
     if (dom) return { domain: dom, categoryId: row.ondc_subcategory };
@@ -669,22 +669,19 @@ export async function resolveOndcCategory(
   );
   if (dbRows[0]?.category_code) {
     const dom =
-      normalizeOndcDomain(dbRows[0].domain) ??
-      normalizeOndcDomain(dbRows[0].category_table_domain) ??
-      (rules.default.ondc_domain as OndcRetailDomain);
-    return { domain: dom, categoryId: dbRows[0].category_code };
+      normalizeOndcDomain(dbRows[0].domain) ?? normalizeOndcDomain(dbRows[0].category_table_domain);
+    if (dom) return { domain: dom, categoryId: dbRows[0].category_code };
   }
 
   if (row.category_id !== null) {
     const match = rules.mappings.find((r) => r.internal_category_id === row.category_id);
     if (match) {
-      const dom =
-        normalizeOndcDomain(match.ondc_domain) ?? (rules.default.ondc_domain as OndcRetailDomain);
-      return { domain: dom, categoryId: match.ondc_category_id };
+      const dom = normalizeOndcDomain(match.ondc_domain);
+      if (dom) return { domain: dom, categoryId: match.ondc_category_id };
     }
   }
 
-  // Try category_name as a last resort before defaulting
+  // Try category_name as a last resort
   const fallbackDom = normalizeOndcDomain(row.category_name);
   if (fallbackDom) {
     // rules.default.ondc_category_id ("Handicrafts") only belongs to
@@ -693,7 +690,8 @@ export async function resolveOndcCategory(
     // above was fixed for, whenever category_name resolves to a different
     // domain (e.g. RET10/RET16). Prefer a category_id from rules.mappings
     // that's actually paired with fallbackDom before falling back to the
-    // domain-agnostic default.
+    // domain-agnostic default. (This is a categoryId-only fallback within
+    // an already-confirmed real domain, not a domain guess.)
     const domainMatch = rules.mappings.find(
       (r) => normalizeOndcDomain(r.ondc_domain) === fallbackDom,
     );
@@ -704,10 +702,15 @@ export async function resolveOndcCategory(
     };
   }
 
-  return {
-    domain: rules.default.ondc_domain as OndcRetailDomain,
-    categoryId: rules.default.ondc_category_id,
-  };
+  // Genuinely unresolvable — do NOT guess a domain. Silently defaulting to
+  // rules.default.ondc_domain (ONDC:RET12/Fashion) here previously caused
+  // ANY product with incomplete category mapping data to be mis-published
+  // under Fashion regardless of what it actually is — confirmed live via
+  // ONDC workbench returning an unrelated grocery item ("Gud"/jaggery)
+  // inside a RET12 (Fashion) catalog on_search response. Callers must treat
+  // null as "exclude this item from every domain" until its category
+  // mapping is actually completed — never as "assume Fashion."
+  return null;
 }
 
 // ─── Item builder (row → ONDC item) ────────────────────────────────────────
@@ -785,7 +788,17 @@ export async function buildOndcItemFromRow(
     storePhone?: string | null;
   },
 ): Promise<BuiltOndcItem> {
-  const { domain, categoryId } = await resolveOndcCategory(row);
+  const resolvedCategory = await resolveOndcCategory(row);
+  if (!resolvedCategory) {
+    // Caller (catalogService.buildSearchCatalog) already wraps this call in
+    // a try/catch that skips + logs a failed item rather than aborting the
+    // whole catalog build — reuse that path instead of publishing a guessed
+    // domain for a product with no resolvable category mapping.
+    throw new Error(
+      `Product ${row.product_id} (variant ${row.variant_id ?? 'none'}) has no resolvable ONDC domain — check its category mapping`,
+    );
+  }
+  const { domain, categoryId } = resolvedCategory;
   const cfg = getDomainConfig(domain);
 
   const baseUrl = ondcEnv.baseUri.replace(/\/api\/v1\/ondc$/, '');
@@ -873,7 +886,14 @@ export async function buildOndcItemFromRow(
     };
   }
 
-  const unit = row.weight_g ? { unit: 'gram', value: String(row.weight_g) } : undefined;
+  // ONDC's quantity.unitized is a required sub-object, not optional — omitting
+  // it entirely (as opposed to a sensible default) for items with no weight
+  // recorded breaks strict buyer-side/network schema validation of on_search
+  // (observed: ONDC workbench NACKs the whole on_search with "Cannot convert
+  // undefined or null to object" for a catalog containing such an item).
+  const unit = row.weight_g
+    ? { unit: 'gram', value: String(row.weight_g) }
+    : { unit: 'unit', value: '1' };
 
   // descriptor.code in "type:code" form (1-EAN, 2-ISBN, 3-GTIN, 4-HSN, 5-other).
   // Prefer HSN (products.hsn_sac_code → type 4); fall back to variant GTIN/EAN (type 3).

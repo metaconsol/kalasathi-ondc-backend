@@ -13,11 +13,13 @@
  */
 
 import type { Request, Response } from 'express';
-import { ApiResponse } from '~/lib/response';
+import { ApiResponse, AppError } from '~/lib/response';
 import { ppfService } from '~/ondc/services/ppf.service';
 import { ppfModel } from '~/ondc/models/ppf.model';
 import { buildNtsAck } from '~/ondc/utils/ppf.builder';
 import { ondcLogger } from '~/ondc/utils/logger.util';
+import { orderModel } from '~/ondc/models/order.model';
+import { assertOrderVisible } from '~/ondc/controllers/admin/orders.controller';
 
 function parsePpfRow(row: Awaited<ReturnType<typeof ppfModel.findByOrderId>>[number]) {
   const safeParse = (json: string | null) => {
@@ -85,7 +87,14 @@ export async function listPpfRecon(req: Request, res: Response): Promise<void> {
 
 /** GET /api/v1/ondc/admin/ppf/order/:orderId — recon history for one order */
 export async function getPpfReconByOrder(req: Request, res: Response): Promise<void> {
-  const rows = await ppfModel.findByOrderId(req.params['orderId'] as string);
+  const orderId = req.params['orderId'] as string;
+  // Recon rows carry financial settlement data and have no seller_id of
+  // their own — ownership is the underlying order's, same guard as every
+  // other per-order endpoint (orders/logistics).
+  const order = await orderModel.findByOndcOrderId(orderId);
+  if (!order) throw new AppError('Order not found', 404);
+  assertOrderVisible(req, order);
+  const rows = await ppfModel.findByOrderId(orderId);
   ApiResponse.success(res, 'PPF recon for order', rows.map(parsePpfRow));
 }
 
@@ -97,6 +106,14 @@ export async function triggerPpfRecon(req: Request, res: Response): Promise<void
     res.status(400).json({ error: 'ondc_order_id required' });
     return;
   }
+  const order = await orderModel.findByOndcOrderId(ondc_order_id);
+  if (!order) {
+    res.status(404).json({ error: 'Order not found or recon failed — check server logs' });
+    return;
+  }
+  // A seller must not be able to trigger recon actions on another seller's
+  // order (probing existence, or sending unwanted BAP recon messages).
+  assertOrderVisible(req, order);
   const rowId = await ppfService.sendRecon(ondc_order_id);
   if (rowId == null) {
     res.status(404).json({ error: 'Order not found or recon failed — check server logs' });

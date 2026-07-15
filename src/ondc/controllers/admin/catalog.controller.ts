@@ -25,6 +25,27 @@ export async function listCatalogItems(req: Request, res: Response): Promise<voi
   const providerId = req.params.providerId as string | undefined;
   const domain = (req.query.domain as string | undefined) ?? 'ONDC:RET12';
 
+  // Sellers may only ever see their own store's catalog — mirrors the
+  // scoping already enforced for orders/tickets/ppf recon/dashboard stats.
+  // Without this, a seller with no providerId in the URL saw every OTHER
+  // seller's live catalog too.
+  const isSeller = req.user?.role === 'SELLER';
+  const sellerId = isSeller ? req.user?.id : undefined;
+  let sellerProviderIds: string[] | null = null;
+  if (sellerId !== undefined) {
+    const storeRows = await ondcQuery<{ id: number }>(
+      `SELECT id FROM stores WHERE seller_user_id = ?`,
+      [sellerId],
+    );
+    sellerProviderIds = storeRows.map((r) => String(r.id));
+    // A seller asking for a providerId that isn't theirs gets nothing —
+    // the URL param must never be able to widen a seller's own scope (IDOR).
+    if (providerId && !sellerProviderIds.includes(providerId)) {
+      ApiResponse.success(res, 'Catalog items (live)', []);
+      return;
+    }
+  }
+
   const catalog = await catalogService.buildSearchCatalog(domain);
   const flat: object[] = [];
   for (const provider of catalog['bpp/providers'] as Array<{
@@ -33,6 +54,7 @@ export async function listCatalogItems(req: Request, res: Response): Promise<voi
     descriptor: { name: string };
   }>) {
     if (providerId && provider.id !== providerId) continue;
+    if (sellerProviderIds && !sellerProviderIds.includes(provider.id)) continue;
     for (const item of provider.items ?? []) {
       flat.push({
         ondc_item_id: item.id,

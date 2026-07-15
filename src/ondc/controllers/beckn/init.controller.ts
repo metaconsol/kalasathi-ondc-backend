@@ -308,7 +308,7 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
         // mismatch (skip just this item) and keep going.
         let itemDomain: string | null = null;
         try {
-          itemDomain = (await resolveOndcCategory(catalogRow)).domain;
+          itemDomain = (await resolveOndcCategory(catalogRow))?.domain ?? null;
         } catch (err) {
           ondcLogger.error('resolveOndcCategory failed — excluding item from init quote', {
             txnId,
