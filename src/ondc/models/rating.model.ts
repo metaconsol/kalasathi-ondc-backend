@@ -41,6 +41,7 @@ export const ratingModel = {
     order_id?: string;
     transaction_id?: string;
     rating_category?: string;
+    sellerId?: number;
     limit?: number;
     offset?: number;
   }): Promise<{ data: any[]; total: number }> {
@@ -62,6 +63,14 @@ export const ratingModel = {
       sql += ` AND rating_category = ?`;
       countSql += ` AND rating_category = ?`;
       params.push(filters.rating_category);
+    }
+    if (filters.sellerId !== undefined) {
+      // ondc_ratings has no seller_id of its own — ownership is the
+      // underlying order's, same EXISTS pattern as ppfModel.list.
+      const clause = ` AND EXISTS (SELECT 1 FROM ondc_orders o WHERE o.ondc_order_id = ondc_ratings.order_id AND o.seller_id = ?)`;
+      sql += clause;
+      countSql += clause;
+      params.push(filters.sellerId);
     }
 
     sql += ` ORDER BY created_at DESC`;

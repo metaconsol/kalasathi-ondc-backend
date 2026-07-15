@@ -152,7 +152,7 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
         // like a mismatch (reject just this item) and keep going.
         let itemDomain: string | null = null;
         try {
-          itemDomain = (await resolveOndcCategory(row)).domain;
+          itemDomain = (await resolveOndcCategory(row))?.domain ?? null;
         } catch (err) {
           ondcLogger.error('resolveOndcCategory failed — treating item as unavailable', {
             txnId,

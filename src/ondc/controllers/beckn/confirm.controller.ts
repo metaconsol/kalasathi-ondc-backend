@@ -322,7 +322,7 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
         // mismatch (exclude just this item) and keep going.
         let itemDomain: string | null = null;
         try {
-          itemDomain = (await resolveOndcCategory(catalogRow)).domain;
+          itemDomain = (await resolveOndcCategory(catalogRow))?.domain ?? null;
         } catch (err) {
           ondcLogger.error('resolveOndcCategory failed — excluding item from confirm', {
             txnId,
