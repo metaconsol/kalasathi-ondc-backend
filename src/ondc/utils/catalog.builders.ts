@@ -689,13 +689,15 @@ export function buildProviderEntry(
     locations: resolvedLocations,
     items,
     tags: buildProviderTags(providerRow, domain, firstLocId, cfg.defaultCategoryCode),
+    // `categories` (variant groups) must always be present per the ONDC
+    // Retail schema — omitting the key when a domain's catalog has no
+    // multi-variant products NACKs the whole on_search (observed: workbench
+    // rejected a categories-less provider with "categories[*].id must be
+    // present in the payload"). An empty array satisfies the "present" rule
+    // without violating the per-entry id requirement, since there are no
+    // entries to check.
+    categories: variantCategories,
   };
-
-  // Variant groups only — include `categories` solely when the product(s) here
-  // actually form variant groups; omit the key entirely otherwise.
-  if (variantCategories.length > 0) {
-    entry['categories'] = variantCategories;
-  }
 
   // FSSAI only for RET10 (grocery)
   if (cfg.requiresFssai) {
