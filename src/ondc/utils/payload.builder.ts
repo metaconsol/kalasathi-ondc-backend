@@ -202,9 +202,16 @@ export function buildOnRating(incomingCtx: BecknContext): object {
 export function newMessageId(): string {
   return randomUUID();
 }
-/** ONDC timestamps are millisecond-zeroed ISO-8601 (e.g. 2025-01-08T07:00:30.000Z). */
+/**
+ * Real millisecond-precision ISO-8601 UTC timestamp for context.timestamp.
+ * MUST NOT be millisecond-zeroed: workbench validates that each sequential
+ * action's context.timestamp is strictly greater than the previous one, and
+ * a same-second callback (e.g. /track → /on_track, often <1s round-trip)
+ * zeroed to .000Z can land BEFORE the real-millisecond request it's replying
+ * to, failing that check even though the response genuinely happened later.
+ */
 export function nowIso(): string {
-  return new Date().toISOString().replace(/\.\d{3}Z$/, '.000Z');
+  return new Date().toISOString();
 }
 
 export function formatPrice(value: number, decimals = 2): string {
