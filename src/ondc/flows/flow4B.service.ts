@@ -21,7 +21,7 @@ export const flow4BService = {
     if (!order) throw OndcError.orderNotFound(ondcOrderId);
 
     await fulfillmentModel.updateState(ondcOrderId, fulfillmentId, 'Return_Rejected', {
-      fulfillmentType,
+      ...(fulfillmentType ? { fulfillmentType } : {}),
     });
     await orderModel.transitionStatus(
       ondcOrderId,
