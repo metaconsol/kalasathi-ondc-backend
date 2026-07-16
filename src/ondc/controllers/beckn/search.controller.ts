@@ -17,6 +17,7 @@ import { buildAck, buildNack, buildOnSearch } from '~/ondc/utils/payload.builder
 import { catalogService } from '~/ondc/services/catalog.service';
 import { becknService } from '~/ondc/services/beckn.service';
 import { observabilityService } from '~/ondc/services/observability.service';
+import { incrementalCatalogService } from '~/ondc/services/incremental-catalog.service';
 import { bapTermsModel, extractBapTerms } from '~/ondc/models/bap_terms.model';
 import { transactionModel } from '~/ondc/models/transaction.model';
 import { txnLogModel } from '~/ondc/models/log.model';
@@ -26,6 +27,23 @@ import { ondcLogger } from '~/ondc/utils/logger.util';
 import type { BecknContext } from '~/ondc/types/beckn.types';
 
 const ALLOWED_DOMAINS = new Set<string>(SUPPORTED_DOMAINS);
+
+/**
+ * ONDC incremental catalog refresh signal: intent.tags[?(code=="catalog_inc"
+ * or "catalog_inc[<n>]")].list[?(code=="mode")].value — "start" opens a
+ * session (same transaction_id reused for every later push + "stop").
+ */
+function extractCatalogIncMode(intent: Record<string, any> | undefined): 'start' | 'stop' | null {
+  const tags = Array.isArray(intent?.['tags']) ? intent['tags'] : [];
+  for (const tag of tags) {
+    const code = String(tag?.code ?? '');
+    if (code !== 'catalog_inc' && !code.startsWith('catalog_inc[')) continue;
+    const list = Array.isArray(tag?.list) ? tag.list : [];
+    const mode = list.find((e: any) => e?.code === 'mode')?.value;
+    if (mode === 'start' || mode === 'stop') return mode;
+  }
+  return null;
+}
 
 export async function handleSearch(req: Request, res: Response): Promise<void> {
   const body = req.body as { context?: BecknContext; message?: { intent?: Record<string, any> } };
@@ -57,6 +75,8 @@ export async function handleSearch(req: Request, res: Response): Promise<void> {
   // Immediate ACK
   res.status(200).json(buildAck(ctx));
 
+  const incMode = extractCatalogIncMode(body.message?.intent);
+
   // Async processing (after ACK is flushed)
   setImmediate(async () => {
     const txnId = ctx.transaction_id;
@@ -87,19 +107,31 @@ export async function handleSearch(req: Request, res: Response): Promise<void> {
       await overallTxnsModel.upsert(txnId);
       await overallTxnsModel.patch(txnId, { on_search: 1 });
 
+      // A "stop" signal only closes the incremental session — it must not
+      // trigger a fresh catalog broadcast.
+      if (incMode === 'stop') {
+        incrementalCatalogService.stopSession(txnId);
+        return;
+      }
+
       // 4. Build catalog live — full catalog per ONDC contract; buyer filters
       //    on their side (mirrors PHP search.php / build_on_search_min).
       const catalog = await catalogService.buildSearchCatalog(ctx.domain);
 
-      // 5. Build on_search payload and send
+      // 5. Build on_search payload and send. For an incremental "start", this
+      //    initial push is the full snapshot the session's later delta pushes
+      //    diff against — tagged X-ONDC-Search-Response: full per the
+      //    incremental catalog refresh contract (delta pushes use "inc").
       const onSearchPayload = buildOnSearch(ctx, catalog) as any;
       const callbackUrl = becknService.buildCallbackUrl(bapUri, 'on_search');
+      const extraHeaders = incMode === 'start' ? { 'X-ONDC-Search-Response': 'full' } : undefined;
 
       const { statusCode, error: cbErr } = await becknService.sendCallback(
         callbackUrl,
         'on_search',
         onSearchPayload,
         txnId,
+        extraHeaders,
       );
 
       // 6. Log outbound
@@ -118,6 +150,10 @@ export async function handleSearch(req: Request, res: Response): Promise<void> {
       });
 
       observabilityService.push('on_search', onSearchPayload);
+
+      if (incMode === 'start') {
+        incrementalCatalogService.startSession(ctx, ctx.domain, catalog);
+      }
     } catch (err) {
       ondcLogger.error('search async error', { txnId, err });
     }
