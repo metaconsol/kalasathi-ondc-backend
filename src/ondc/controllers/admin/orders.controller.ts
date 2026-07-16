@@ -10,7 +10,7 @@ import { flow1AService } from '~/ondc/flows/flow1A.service';
 import { flow3AService } from '~/ondc/flows/flow3A.service';
 import { AppError } from '~/lib/response';
 import type { OndcOrderStatus } from '~/ondc/types/order.types';
-import { ondcExec } from '~/lib/ondcSql';
+import { ondcExec, ondcQuery } from '~/lib/ondcSql';
 
 /**
  * Sellers may only see/modify their own orders (admins see all). Responds 404
@@ -94,6 +94,77 @@ export async function updateFulfillment(req: Request, res: Response): Promise<vo
     throw new AppError('Cannot update fulfillment for a cancelled order', 400);
   }
 
+  // ── Strict forward ordering for the delivery chain ────────────────────
+  // The ONDC order state machine only moves forward — a seller must not be
+  // able to fire a state before its predecessor is reached, nor re-fire an
+  // earlier one. Each forward action requires the order to be at EXACTLY
+  // the listed status (the status its own success then advances past).
+  // Cancel / return / RTO actions are branch flows and stay unrestricted.
+  const STATUS_RANK: Record<string, number> = {
+    CREATED: 0,
+    CONFIRMED: 1,
+    PACKED: 2,
+    AGENT_ASSIGNED: 3,
+    ORDER_PICKED_UP: 4,
+    OUT_FOR_DELIVERY: 5,
+    DELIVERED: 6,
+  };
+  const RANK_LABEL = [
+    'Created',
+    'Confirmed',
+    'Packed',
+    'Agent Assigned',
+    'Order Picked Up',
+    'Out For Delivery',
+    'Delivered',
+  ];
+  const FORWARD_REQUIRES: Record<string, number> = {
+    confirmed: 0,
+    accepted: 1,
+    packed: 1,
+    agent_assigned: 2,
+    picked_up: 3,
+    out_for_delivery: 4,
+    delivered: 5,
+  };
+  // Acceptance (first unsolicited on_status) doesn't change the DB status —
+  // it's recorded as a status-history row and required before Packed.
+  const ACCEPTED_NOTE = 'Order accepted by seller — first on_status (Pending) sent';
+  const hasSellerAccepted = async (): Promise<boolean> => {
+    const rows = await ondcQuery<{ id: number }>(
+      `SELECT id FROM ondc_order_status_history
+       WHERE ondc_order_id = ? AND note = ? LIMIT 1`,
+      [orderId, ACCEPTED_NOTE],
+    );
+    return rows.length > 0;
+  };
+
+  const requiredRank = FORWARD_REQUIRES[String(action)];
+  if (requiredRank !== undefined) {
+    const currentRank = STATUS_RANK[dbOrder.status] ?? -1;
+    if (currentRank < requiredRank) {
+      throw new AppError(
+        `Cannot mark this order as '${String(action)}' yet — the order must be ${RANK_LABEL[requiredRank]} first (current status: ${dbOrder.status})`,
+        400,
+      );
+    }
+    if (currentRank > requiredRank) {
+      throw new AppError(
+        `Order is already ${RANK_LABEL[currentRank] ?? dbOrder.status} — cannot go back to '${String(action)}'`,
+        400,
+      );
+    }
+    if (action === 'accepted' && (await hasSellerAccepted())) {
+      throw new AppError('Order is already accepted — the first on_status was already sent', 400);
+    }
+    if (action === 'packed' && !(await hasSellerAccepted())) {
+      throw new AppError(
+        'Accept the order first — the buyer must receive the first on_status (Pending) before Packed',
+        400,
+      );
+    }
+  }
+
   // TEMP — DISABLED FOR TESTING, REVERT AFTER: normally a courier shipment
   // must be booked before the order can move past "packed" (see the
   // commented block below). Turned off while Delhivery's "duplicate order
@@ -115,15 +186,12 @@ export async function updateFulfillment(req: Request, res: Response): Promise<vo
 
   switch (action) {
     case 'confirmed':
-      // The very first on_status (Pending) now fires automatically from
-      // handleConfirm as soon as the BAP ACKs on_confirm. This action is
-      // kept only so older UI calls don't break. It can race handleConfirm's
-      // own automatic transition (both do the identical write) — a plain
-      // status-then-write here would let both fire, sending a duplicate
-      // on_status and a corrupted status_history row. A conditional UPDATE
-      // (only flips CREATED→CONFIRMED if it's still CREATED) makes this
-      // atomic at the DB level, so only whichever path gets there first
-      // actually transitions/pushes.
+      // CREATED→CONFIRMED normally happens automatically in handleConfirm
+      // when the BAP ACKs on_confirm; this action is the manual fallback.
+      // It can race that automatic transition — the conditional UPDATE
+      // (only flips CREATED→CONFIRMED if still CREATED) keeps it atomic.
+      // NOTE: no on_status here — the first unsolicited on_status is the
+      // seller's explicit 'accepted' action below.
       {
         const casResult = await ondcExec(
           `UPDATE ondc_orders SET status = 'CONFIRMED', status_updated_at = NOW(), updated_at = NOW()
@@ -140,9 +208,26 @@ export async function updateFulfillment(req: Request, res: Response): Promise<vo
             note: 'Order confirmed by seller',
             payload_json: null,
           });
-          await flow1AService.pushOnStatus(orderId, 'Pending');
         }
       }
+      break;
+    case 'accepted':
+      // Seller accepts the order: sends the FIRST unsolicited on_status
+      // (order.state Accepted, fulfillment Pending). Ordering + duplicate
+      // guards above ensure this fires exactly once, after CONFIRMED and
+      // before Packed. The DB status stays CONFIRMED (which already maps
+      // to ONDC order.state 'Accepted'); acceptance is recorded as a
+      // status-history row keyed by ACCEPTED_NOTE.
+      await orderModel.addStatusHistory({
+        ondc_order_id: orderId,
+        from_status: 'CONFIRMED',
+        to_status: 'CONFIRMED',
+        fulfillment_state: 'Pending',
+        triggered_by: 'seller',
+        note: ACCEPTED_NOTE,
+        payload_json: null,
+      });
+      await flow1AService.pushOnStatus(orderId, 'Pending');
       break;
     case 'packed':
       await fulfillmentService.markPacked(orderId, fulfillment_id);

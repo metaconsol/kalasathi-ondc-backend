@@ -16,7 +16,6 @@ import { buildAck, buildOnConfirm, nowIso, safeJsonParse } from '~/ondc/utils/pa
 import { becknService } from '~/ondc/services/beckn.service';
 import { observabilityService } from '~/ondc/services/observability.service';
 import { orderModel } from '~/ondc/models/order.model';
-import { flow1AService } from '~/ondc/flows/flow1A.service';
 import { providerModel } from '~/ondc/models/provider.model';
 import { resolveOndcCatalogRow, resolveOndcCategory } from '~/ondc/adapters/product.adapter';
 import {
@@ -748,16 +747,14 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
 
       const ackOk = statusCode !== undefined && statusCode >= 200 && statusCode < 300;
 
-      // If BAP ACKed → confirm the order, and fire the very first unsolicited
-      // on_status automatically — like normal ecommerce, the buyer shouldn't
-      // need to poll to learn the order was confirmed. The seller's manual
-      // 'confirmed' action in orders.controller.ts can race this (it does
-      // the identical transition+push, guarded by its own CAS) — a plain
-      // status-then-write here would let both fire, sending a duplicate
-      // on_status and a corrupted status_history row. A conditional UPDATE
-      // (only flips CREATED→CONFIRMED if it's still CREATED) makes this
-      // atomic at the DB level, so only whichever of the two paths gets
-      // there first actually transitions/pushes.
+      // If BAP ACKed → mark the order CONFIRMED. The FIRST unsolicited
+      // on_status (order.state Accepted / fulfillment Pending) is NOT sent
+      // here — it's the seller's explicit 'accepted' action on the order
+      // page (orders.controller.ts), so acceptance is a deliberate seller
+      // step like every later fulfillment state. The seller's manual
+      // 'confirmed' action can race this transition (identical write) — the
+      // conditional UPDATE (only flips CREATED→CONFIRMED if it's still
+      // CREATED) keeps it atomic so only one path writes history.
       if (ackOk) {
         const casResult = await ondcExec(
           `UPDATE ondc_orders SET status = 'CONFIRMED', status_updated_at = NOW(), updated_at = NOW()
@@ -774,7 +771,6 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
             note: 'BAP ACKed on_confirm',
             payload_json: null,
           });
-          await flow1AService.pushOnStatus(ondcOrderId, 'Pending');
         }
       }
 
