@@ -18,6 +18,7 @@ export const becknService = {
     action: string,
     payload: OndcApiResponse,
     transactionId: string,
+    extraHeaders?: Record<string, string>,
   ): Promise<{ statusCode: number | undefined; error: string | undefined }> {
     const bodyJson = JSON.stringify(payload);
     const digest = bodyDigest(bodyJson);
@@ -29,6 +30,7 @@ export const becknService = {
       'Content-Type': 'application/json',
       Digest: digest,
       Authorization: authHeader,
+      ...extraHeaders,
     };
 
     try {

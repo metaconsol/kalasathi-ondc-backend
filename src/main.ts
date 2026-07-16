@@ -5,6 +5,7 @@ import { env } from '~/config/env.config';
 import { createApp } from './app';
 import { sqlQuery } from '~/lib/sql';
 import { startTrackingPoller } from '~/ondc/services/tracking-poller.service';
+import { incrementalCatalogService } from '~/ondc/services/incremental-catalog.service';
 
 async function startServer() {
   const app = createApp();
@@ -22,6 +23,7 @@ async function startServer() {
     server.listen(port, () => {
       logger.info(`Server is running on port ${port} in ${env.nodeEnv} mode`);
       startTrackingPoller();
+      incrementalCatalogService.startScheduler();
     });
 
     server.on('error', (err) => {
