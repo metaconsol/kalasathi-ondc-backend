@@ -94,24 +94,24 @@ export async function updateFulfillment(req: Request, res: Response): Promise<vo
     throw new AppError('Cannot update fulfillment for a cancelled order', 400);
   }
 
-  // A courier shipment must be booked before the order can move past
-  // "packed" — normal ecommerce takes live status from the logistics
-  // partner from here on, so these transitions must reflect a real,
-  // trackable shipment (tracking_number is only set once bookShipment
-  // succeeds). 'packed' itself, and cancel/return/RTO actions, stay
-  // unrestricted.
-  const REQUIRES_BOOKED_SHIPMENT = new Set([
-    'agent_assigned',
-    'picked_up',
-    'out_for_delivery',
-    'delivered',
-  ]);
-  if (REQUIRES_BOOKED_SHIPMENT.has(String(action)) && !dbOrder.tracking_number) {
-    throw new AppError(
-      'Book a Delhivery shipment for this order before updating this status. Once booked, tracking updates are applied automatically as the courier reports progress.',
-      400,
-    );
-  }
+  // TEMP — DISABLED FOR TESTING, REVERT AFTER: normally a courier shipment
+  // must be booked before the order can move past "packed" (see the
+  // commented block below). Turned off while Delhivery's "duplicate order
+  // id" issue blocks repeat test bookings — restore this once testing is
+  // done.
+  //
+  // const REQUIRES_BOOKED_SHIPMENT = new Set([
+  //   'agent_assigned',
+  //   'picked_up',
+  //   'out_for_delivery',
+  //   'delivered',
+  // ]);
+  // if (REQUIRES_BOOKED_SHIPMENT.has(String(action)) && !dbOrder.tracking_number) {
+  //   throw new AppError(
+  //     'Book a Delhivery shipment for this order before updating this status. Once booked, tracking updates are applied automatically as the courier reports progress.',
+  //     400,
+  //   );
+  // }
 
   switch (action) {
     case 'confirmed':
