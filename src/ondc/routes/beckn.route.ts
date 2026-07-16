@@ -20,6 +20,7 @@ import { handleCancel } from '~/ondc/controllers/beckn/cancel.controller';
 import { handleUpdate } from '~/ondc/controllers/beckn/update.controller';
 import { handleRating } from '~/ondc/controllers/beckn/rating.controller';
 import { handleIssue, handleIssueStatus } from '~/ondc/controllers/issue.controller';
+import { handleCatalogRejection } from '~/ondc/controllers/beckn/catalog-rejection.controller';
 import {
   handleOnRecon,
   handleOnReceiverRecon,
@@ -99,6 +100,14 @@ router.post('/issue', ...becknMiddleware, handleIssue);
  * @desc Buyer checks issue status
  */
 router.post('/issue_status', ...becknMiddleware, handleIssueStatus);
+
+/**
+ * @route POST /api/v1/ondc/catalog_rejection
+ * @desc BNP reports catalog ingestion/quality errors (Catalog & Store
+ *       Rejection Framework). Skips ondcContextValidator: the body carries a
+ *       top-level `errors` array, not a `message` object.
+ */
+router.post('/catalog_rejection', ondcRequestLogger, ondcAuthMiddleware, handleCatalogRejection);
 
 /**
  * @route POST /api/v1/ondc/recon
