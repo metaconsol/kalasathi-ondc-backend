@@ -119,6 +119,7 @@ export function createApp(): Application {
     'rating',
     'issue',
     'issue_status',
+    'catalog_rejection',
     'recon',
     'on_recon',
     'on_receiver_recon',
