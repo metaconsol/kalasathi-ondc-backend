@@ -55,6 +55,9 @@ export const flow4AService = {
       transaction_id: order.transaction_id,
       message_id: newMessageId(),
       timestamp: new Date().toISOString(),
+      // Contract v1.2.5 callback examples carry ttl PT30S; include it on
+      // unsolicited pushes too (solicited replies inherit it by mirroring).
+      ttl: 'PT30S',
     };
     const responseContext = buildResponseContext(callbackContext as any, 'on_update');
 
