@@ -209,18 +209,6 @@ function normalizeBilling(billing: LooseObject = {}, includeEmpty = false): Loos
   };
 }
 
-/** ONDC v1.2.5: order.created_at in /on_confirm must echo /confirm (footnote 595). */
-function resolveConfirmOrderCreatedAt(
-  orderCreatedAt: unknown,
-  confirmContextTimestamp: string | undefined,
-): string {
-  const raw = String(orderCreatedAt ?? confirmContextTimestamp ?? '').trim();
-  if (!raw) return nowIso();
-  const parsed = new Date(raw);
-  if (Number.isNaN(parsed.getTime())) return nowIso();
-  return parsed.toISOString().replace(/\.\d{3}Z$/, '.000Z');
-}
-
 function buildTimeToShip(
   value: number | null | undefined,
   unit: string | null | undefined,
@@ -745,7 +733,7 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
           '@ondc/org/settlement_details': settlementDetails,
         },
         tags: confirmTags,
-        created_at: resolveConfirmOrderCreatedAt(order['created_at'], ctx.timestamp),
+        created_at: nowIso(),
         updated_at: nowIso(),
       };
 
