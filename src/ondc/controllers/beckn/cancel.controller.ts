@@ -47,39 +47,34 @@ export async function handleCancel(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const items = await orderModel.getItems(dbOrder.ondc_order_id);
-
-    if (items.length > 0) {
-      const productIds = items
-        .map((i) => {
-          const match = i.item_id?.match(/prod_(\d+)/);
-          if (match && match[1]) return parseInt(match[1], 10);
-          return i.product_id;
-        })
-        .filter(Boolean);
-
-      if (productIds.length > 0) {
-        const placeholders = productIds.map(() => '?').join(',');
-        const productRows = await ondcQuery<any>(
-          `SELECT id, cancellable FROM products WHERE id IN (${placeholders})`,
-          productIds,
-        );
-        const isNonCancellable = productRows.some((p: any) => p.cancellable === 'NO');
-        if (isNonCancellable) {
-          ondcLogger.warn('cancel: order contains non-cancellable item', { orderId, txnId });
-          res.status(200).json({
-            context: ctx,
-            message: { ack: { status: 'NACK' } },
-            error: {
-              type: 'DOMAIN-ERROR',
-              code: '50001',
-              message: 'Cancellation not possible',
-            },
-          });
-          return;
-        }
-      }
+    // Contract v1.2.5: buyer cancellation "may be enabled for all fulfillment
+    // states, after order has been placed ('Pending') and before it is
+    // delivered ('Order-delivered')" — a post-pickup cancel is answered with
+    // cancellation charges in the updated quote, never refused. The only hard
+    // refusal is a terminal order: no order mutation is allowed after
+    // "Completed"/"Cancelled". (An earlier @ondc/org/cancellable=NO NACK here
+    // was not contract-sourced — the flag has no documented NACK semantics —
+    // and it failed certification's buyer-side cancellation flow.)
+    const TERMINAL_STATUSES = new Set(['DELIVERED', 'CANCELLED', 'RETURNED']);
+    if (TERMINAL_STATUSES.has(dbOrder.status)) {
+      ondcLogger.warn('cancel: order already in terminal state', {
+        orderId,
+        txnId,
+        status: dbOrder.status,
+      });
+      res.status(200).json({
+        context: ctx,
+        message: { ack: { status: 'NACK' } },
+        error: {
+          type: 'DOMAIN-ERROR',
+          code: '50001',
+          message: `Cancellation not possible — order is already ${dbOrder.status.toLowerCase()}`,
+        },
+      });
+      return;
     }
+
+    const items = await orderModel.getItems(dbOrder.ondc_order_id);
 
     res.status(200).json(buildAck(ctx));
 
@@ -100,8 +95,16 @@ export async function handleCancel(req: Request, res: Response): Promise<void> {
           { cancel_reason_id: reasonId },
         );
 
-        // Fetch fulfillments from order model
+        // Fetch fulfillments from order model. This runs BEFORE the forward
+        // fulfillment is flipped to Cancelled below, so it still holds the
+        // pre-cancel state — the precancel_state tag must carry the true
+        // prior state ("state of fulfillment prior to cancellation", [702]),
+        // not a hardcoded value.
         const fulfillments = await orderModel.getFulfillments(dbOrder.ondc_order_id);
+        const preCancelFulf =
+          fulfillments.find((f) => f.fulfillment_role === 'primary_forward') ?? fulfillments[0];
+        const preCancelState = preCancelFulf?.state ?? 'Pending';
+        const preCancelUpdatedAt = preCancelFulf?.updated_at ?? dbOrder.updated_at ?? null;
         let storeId = dbOrder.store_id;
         if (!storeId && items.length > 0) {
           const firstProductId = items[0]?.product_id;
@@ -415,11 +418,11 @@ export async function handleCancel(req: Request, res: Response): Promise<void> {
             {
               code: 'precancel_state',
               list: [
-                { code: 'fulfillment_state', value: 'Order-picked-up' },
+                { code: 'fulfillment_state', value: preCancelState },
                 {
                   code: 'updated_at',
-                  value: dbOrder.updated_at
-                    ? dbOrder.updated_at.toISOString().replace(/\.\d{3}Z$/, '.000Z')
+                  value: preCancelUpdatedAt
+                    ? new Date(preCancelUpdatedAt).toISOString().replace(/\.\d{3}Z$/, '.000Z')
                     : nowIso(),
                 },
               ],
