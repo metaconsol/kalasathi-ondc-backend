@@ -47,7 +47,7 @@ export const DOMAIN_CONFIGS: Record<OndcRetailDomain, DomainConfig> = {
     requiresFssai: false,
     requiresVegNonveg: false,
     requiresFoodStatutory: false,
-    defaultCategoryCode: 'Apparel',
+    defaultCategoryCode: 'Handbags',
     mandatoryAttributes: ['brand', 'colour', 'size', 'gender'],
     defaultReturnWindow: 'P7D',
     defaultTimeToShip: 'PT48H',

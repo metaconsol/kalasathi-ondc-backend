@@ -671,6 +671,12 @@ export function buildProviderEntry(
     ? ondcTimestamp(new Date(providerRow.updated_at))
     : ondcTimestamp();
 
+  // Prefer the catalog item's ONDC subcategory (e.g. Handbags) over the domain
+  // default — serviceability.category must match a RET subcategory, not "Apparel".
+  const serviceabilityCategory =
+    String((items[0] as { category_id?: unknown } | undefined)?.category_id ?? '').trim() ||
+    cfg.defaultCategoryCode;
+
   const entry: Record<string, unknown> = {
     id: providerRow.provider_id,
     time: { label: 'enable', timestamp: providerTimestamp },
@@ -688,7 +694,7 @@ export function buildProviderEntry(
     ttl: 'PT24H',
     locations: resolvedLocations,
     items,
-    tags: buildProviderTags(providerRow, domain, firstLocId, cfg.defaultCategoryCode),
+    tags: buildProviderTags(providerRow, domain, firstLocId, serviceabilityCategory),
     // `categories` (variant groups) must always be present per the ONDC
     // Retail schema — omitting the key when a domain's catalog has no
     // multi-variant products NACKs the whole on_search (observed: workbench
