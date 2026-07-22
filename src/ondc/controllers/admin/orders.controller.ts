@@ -142,12 +142,6 @@ export async function updateFulfillment(req: Request, res: Response): Promise<vo
   const requiredRank = FORWARD_REQUIRES[String(action)];
   if (requiredRank !== undefined) {
     const currentRank = STATUS_RANK[dbOrder.status] ?? -1;
-    if (currentRank < requiredRank) {
-      throw new AppError(
-        `Cannot mark this order as '${String(action)}' yet — the order must be ${RANK_LABEL[requiredRank]} first (current status: ${dbOrder.status})`,
-        400,
-      );
-    }
     if (currentRank > requiredRank) {
       throw new AppError(
         `Order is already ${RANK_LABEL[currentRank] ?? dbOrder.status} — cannot go back to '${String(action)}'`,
@@ -156,12 +150,6 @@ export async function updateFulfillment(req: Request, res: Response): Promise<vo
     }
     if (action === 'accepted' && (await hasSellerAccepted())) {
       throw new AppError('Order is already accepted — the first on_status was already sent', 400);
-    }
-    if (action === 'packed' && !(await hasSellerAccepted())) {
-      throw new AppError(
-        'Accept the order first — the buyer must receive the first on_status (Pending) before Packed',
-        400,
-      );
     }
   }
 

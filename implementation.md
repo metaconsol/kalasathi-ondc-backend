@@ -1,3 +1,32 @@
+### Branch 062
+
+**Date:** 2026-07-22
+
+**Status:** Completed
+
+**Area:** ONDC Admin Fulfillment Status Updates
+
+**What:**
+
+- Allowed skipping of fulfillment states (e.g., from Confirmed directly to Packed or Agent Assigned to Order Picked Up) by removing the strict forward sequential validation.
+- Removed the specific validation that required an order to be explicitly marked as 'Accepted' before it could be marked as 'Packed'.
+- Maintained the existing restriction that prevents fulfillment statuses from being updated backwards.
+
+**Why:**
+
+- To provide flexibility in the admin dashboard when updating order fulfillment statuses, allowing operations to skip intermediate steps if they were missed or are not applicable.
+- To prevent 400 errors when an admin intentionally wants to fast-forward an order's status.
+- The backward restriction is intentionally kept to prevent logical errors and state machine corruption (e.g., reverting a 'Delivered' order back to 'Packed').
+
+**Changes:** file name and description of file change.
+
+- `src/ondc/controllers/admin/orders.controller.ts`
+  - Removed the `currentRank < requiredRank` check in `updateFulfillment` to allow skipping forward states.
+  - Removed the `action === 'packed' && !(await hasSellerAccepted())` check to allow skipping the 'Accepted' step when moving to 'Packed'.
+  - Retained the `currentRank > requiredRank` check to preserve the backward update restriction.
+
+---
+
 ### Branch 047
 
 **Date:** 2026-07-11
