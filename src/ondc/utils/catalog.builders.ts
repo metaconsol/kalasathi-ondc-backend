@@ -138,12 +138,7 @@ export function buildProviderTags(
     timingTag('Self-Pickup', locationId, '1100', '2000'),
     // Delivery service window
     timingTag('Delivery', locationId, '1100', '2200'),
-    // Serviceability — one construct per category served from this location
-    // (contract requires per-category serviceability, and the workbench NACKs
-    // on_search when a serviceability category doesn't match one of the
-    // provider's item category_ids: "category in serviceability construct
-    // should be a valid category id in bpp/providers[0]", code 20006).
-    // Pan-India (type 12), val=IND, unit=country.
+    // One serviceability construct per item category (workbench NACK 20006 otherwise).
     ...categoryIds.map((categoryId) => ({
       code: 'serviceability',
       list: [
@@ -641,6 +636,18 @@ export function buildOnInitPayment(total: number, settlement?: SettlementDetails
   };
 }
 
+/** Distinct item category_ids, or the domain default if none are set. */
+function deriveCategoryIds(items: object[], fallback: string): string[] {
+  const ids = [
+    ...new Set(
+      items
+        .map((i) => (i as { category_id?: unknown }).category_id)
+        .filter((c): c is string => typeof c === 'string' && c.length > 0),
+    ),
+  ];
+  return ids.length > 0 ? ids : [fallback];
+}
+
 // ─── Build full bpp/providers entry from a row + items ─────────────────────
 
 export function buildProviderEntry(
@@ -697,33 +704,11 @@ export function buildProviderEntry(
       providerRow,
       domain,
       firstLocId,
-      // Serviceability must cover the categories the items actually use —
-      // the workbench cross-checks each serviceability category against the
-      // item category_ids (and expects every item category to have a
-      // serviceability construct, so a single category is not enough for
-      // multi-category providers). Fall back to the domain default only for
-      // an (unexpected) provider whose items carry no category_id.
-      (() => {
-        const ids = [
-          ...new Set(
-            items
-              .map((i) => (i as { category_id?: unknown }).category_id)
-              .filter((c): c is string => typeof c === 'string' && c.length > 0),
-          ),
-        ];
-        return ids.length > 0 ? ids : [cfg.defaultCategoryCode];
-      })(),
+      deriveCategoryIds(items, cfg.defaultCategoryCode),
     ),
-    // `categories` (variant groups) must ALWAYS be present — even as [].
-    // Contract v1.2.5 marks it "(optional)" (footnote [54]) and its Home &
-    // Kitchen example omits the key, BUT the workbench validator requires
-    // the key to exist: omitting it NACKs the whole on_search with 30000
-    // "$....categories[*].id must be present in the payload" (reproduced
-    // twice on live RET16 runs, 2026-07 — conditional emission was tried
-    // and reverted both times). An empty array satisfies the validator's
-    // JSONPath check since there are no entries whose id it could demand;
-    // certification runs against the workbench, so the workbench wins.
-    categories: variantCategories,
+    // Workbench requires ≥1 categories entry (see PLACEHOLDER_VARIANT_GROUP_CATEGORIES).
+    categories:
+      variantCategories.length > 0 ? variantCategories : PLACEHOLDER_VARIANT_GROUP_CATEGORIES,
   };
 
   // FSSAI only for RET10 (grocery)
@@ -761,6 +746,24 @@ export interface VariantCategory {
   descriptor: { name: string };
   tags: Array<{ code: string; list: Array<{ code: string; value: string }> }>;
 }
+
+// Workbench requires ≥1 categories entry even with no real variant groups; unreferenced by items.
+const PLACEHOLDER_VARIANT_GROUP_CATEGORIES: VariantCategory[] = [
+  {
+    id: 'V1',
+    descriptor: { name: 'Variant Group 1' },
+    tags: [
+      { code: 'type', list: [{ code: 'type', value: 'variant_group' }] },
+      {
+        code: 'attr',
+        list: [
+          { code: 'name', value: 'item.tags.attribute.colour' },
+          { code: 'seq', value: '1' },
+        ],
+      },
+    ],
+  },
+];
 
 const VARIANT_ATTR_PRIORITY: Record<string, number> = {
   colour: 1,
