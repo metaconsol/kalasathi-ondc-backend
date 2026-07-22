@@ -129,7 +129,7 @@ export function buildProviderTags(
   _providerRow: ProviderBuildInfo,
   domain: OndcRetailDomain,
   locationId: string,
-  categoryId: string,
+  categoryIds: string[],
 ): object[] {
   const tags: object[] = [
     // Orders accepted 24/7
@@ -138,8 +138,13 @@ export function buildProviderTags(
     timingTag('Self-Pickup', locationId, '1100', '2000'),
     // Delivery service window
     timingTag('Delivery', locationId, '1100', '2200'),
-    // Serviceability — pan-India (type 12), val=IND, unit=country
-    {
+    // Serviceability — one construct per category served from this location
+    // (contract requires per-category serviceability, and the workbench NACKs
+    // on_search when a serviceability category doesn't match one of the
+    // provider's item category_ids: "category in serviceability construct
+    // should be a valid category id in bpp/providers[0]", code 20006).
+    // Pan-India (type 12), val=IND, unit=country.
+    ...categoryIds.map((categoryId) => ({
       code: 'serviceability',
       list: [
         { code: 'location', value: locationId },
@@ -148,7 +153,7 @@ export function buildProviderTags(
         { code: 'val', value: 'IND' },
         { code: 'unit', value: 'country' },
       ],
-    },
+    })),
   ];
 
   // FSSAI license tag — RET10 grocery only
@@ -671,12 +676,6 @@ export function buildProviderEntry(
     ? ondcTimestamp(new Date(providerRow.updated_at))
     : ondcTimestamp();
 
-  // Prefer the catalog item's ONDC subcategory (e.g. Handbags) over the domain
-  // default — serviceability.category must match a RET subcategory, not "Apparel".
-  const serviceabilityCategory =
-    String((items[0] as { category_id?: unknown } | undefined)?.category_id ?? '').trim() ||
-    cfg.defaultCategoryCode;
-
   const entry: Record<string, unknown> = {
     id: providerRow.provider_id,
     time: { label: 'enable', timestamp: providerTimestamp },
@@ -694,15 +693,38 @@ export function buildProviderEntry(
     ttl: 'PT24H',
     locations: resolvedLocations,
     items,
-    tags: buildProviderTags(providerRow, domain, firstLocId, serviceabilityCategory),
-    // `categories` (variant groups) must always be present per the ONDC
-    // Retail schema — omitting the key when a domain's catalog has no
-    // multi-variant products NACKs the whole on_search (observed: workbench
-    // rejected a categories-less provider with "categories[*].id must be
-    // present in the payload"). An empty array satisfies the "present" rule
-    // without violating the per-entry id requirement, since there are no
-    // entries to check.
-    categories: variantCategories,
+    tags: buildProviderTags(
+      providerRow,
+      domain,
+      firstLocId,
+      // Serviceability must cover the categories the items actually use —
+      // the workbench cross-checks each serviceability category against the
+      // item category_ids (and expects every item category to have a
+      // serviceability construct, so a single category is not enough for
+      // multi-category providers). Fall back to the domain default only for
+      // an (unexpected) provider whose items carry no category_id.
+      (() => {
+        const ids = [
+          ...new Set(
+            items
+              .map((i) => (i as { category_id?: unknown }).category_id)
+              .filter((c): c is string => typeof c === 'string' && c.length > 0),
+          ),
+        ];
+        return ids.length > 0 ? ids : [cfg.defaultCategoryCode];
+      })(),
+    ),
+    // `categories` (variant groups) is OPTIONAL per contract v1.2.5
+    // (footnote [54]: "custom menu / customization group / variant
+    // definitions for provider (optional)"; the doc's own Home & Kitchen
+    // example provider has no categories key at all). Emit it only when the
+    // provider actually has variant groups — an empty [] adds noise and no
+    // provider in the contract's examples carries one.
+    // NOTE: an earlier workbench run NACK'd a categories-less provider with
+    // 30000 "categories[*].id must be present in the payload"; if that exact
+    // NACK reappears after this change, the workbench deviates from the
+    // contract and this must revert to always emitting `categories`.
+    ...(variantCategories.length > 0 ? { categories: variantCategories } : {}),
   };
 
   // FSSAI only for RET10 (grocery)
