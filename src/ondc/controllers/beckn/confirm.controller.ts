@@ -732,8 +732,8 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
           '@ondc/org/settlement_details': settlementDetails,
         },
         tags: confirmTags,
-        created_at: nowIso(),
-        updated_at: nowIso(),
+        created_at: ctx.timestamp,
+        updated_at: ctx.timestamp,
       };
 
       const onConfirmPayload = buildOnConfirm(ctx, onConfirmOrder) as any;
