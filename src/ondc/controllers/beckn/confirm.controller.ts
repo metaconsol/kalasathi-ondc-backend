@@ -647,7 +647,7 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
           locations: providerLocationIds.length ? providerLocationIds : [{ id: '' }],
         },
         items: confirmedItems,
-        billing: normalizeBilling(billing, true),
+        billing: normalizeBilling(billing, false),
         fulfillments: (fulfillments.length
           ? fulfillments
           : [{ id: fallbackFulfillmentId, type: 'Delivery' }]
