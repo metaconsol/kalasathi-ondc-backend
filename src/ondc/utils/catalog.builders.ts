@@ -714,17 +714,16 @@ export function buildProviderEntry(
         return ids.length > 0 ? ids : [cfg.defaultCategoryCode];
       })(),
     ),
-    // `categories` (variant groups) is OPTIONAL per contract v1.2.5
-    // (footnote [54]: "custom menu / customization group / variant
-    // definitions for provider (optional)"; the doc's own Home & Kitchen
-    // example provider has no categories key at all). Emit it only when the
-    // provider actually has variant groups — an empty [] adds noise and no
-    // provider in the contract's examples carries one.
-    // NOTE: an earlier workbench run NACK'd a categories-less provider with
-    // 30000 "categories[*].id must be present in the payload"; if that exact
-    // NACK reappears after this change, the workbench deviates from the
-    // contract and this must revert to always emitting `categories`.
-    ...(variantCategories.length > 0 ? { categories: variantCategories } : {}),
+    // `categories` (variant groups) must ALWAYS be present — even as [].
+    // Contract v1.2.5 marks it "(optional)" (footnote [54]) and its Home &
+    // Kitchen example omits the key, BUT the workbench validator requires
+    // the key to exist: omitting it NACKs the whole on_search with 30000
+    // "$....categories[*].id must be present in the payload" (reproduced
+    // twice on live RET16 runs, 2026-07 — conditional emission was tried
+    // and reverted both times). An empty array satisfies the validator's
+    // JSONPath check since there are no entries whose id it could demand;
+    // certification runs against the workbench, so the workbench wins.
+    categories: variantCategories,
   };
 
   // FSSAI only for RET10 (grocery)
