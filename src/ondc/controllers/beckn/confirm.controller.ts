@@ -733,7 +733,7 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
         },
         tags: confirmTags,
         created_at: ctx.timestamp,
-        updated_at: ctx.timestamp,
+        updated_at: nowIso(),
       };
 
       const onConfirmPayload = buildOnConfirm(ctx, onConfirmOrder) as any;
