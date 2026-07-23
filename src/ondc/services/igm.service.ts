@@ -11,6 +11,7 @@
 
 import { randomUUID } from 'crypto';
 import { customerTicketModel, type TicketMessage } from '~/ondc/models/customer_ticket.model';
+import { orderModel } from '~/ondc/models/order.model';
 import { becknService } from './beckn.service';
 import { observabilityService } from './observability.service';
 import { buildResponseContext, newMessageId } from '~/ondc/utils/payload.builder';
@@ -140,26 +141,30 @@ function chatFromIgmAction(
 async function pushOnIssue(
   row: TicketRow,
   extra: { resolution?: unknown; resolutionProvider?: unknown } = {},
+  /** Prefer the inbound /issue context so txn_id never drifts from the BAP. */
+  inboundCtx?: BecknContext,
 ): Promise<void> {
-  if (!row.bap_uri) {
+  const txnId = inboundCtx?.transaction_id || row.txn_id;
+  const bapUri = inboundCtx?.bap_uri || row.bap_uri;
+  if (!bapUri) {
     ondcLogger.warn('IGM: no bap_uri on ticket; cannot push on_issue', { ticketId: row.ticket_id });
     return;
   }
 
   const ctxBase = {
-    domain: row.domain || 'ONDC:RET12',
-    country: row.country || 'IND',
-    city: row.city || 'std:0755',
+    domain: inboundCtx?.domain || row.domain || 'ONDC:RET12',
+    country: inboundCtx?.country || row.country || 'IND',
+    city: inboundCtx?.city || row.city || 'std:0755',
     action: 'on_issue' as const,
-    core_version: row.core_version || '1.2.5',
-    bap_id: row.bap_id || '',
-    bap_uri: row.bap_uri || '',
-    bpp_id: '',
-    bpp_uri: '',
-    transaction_id: row.txn_id,
+    core_version: inboundCtx?.core_version || row.core_version || '1.2.5',
+    bap_id: inboundCtx?.bap_id || row.bap_id || '',
+    bap_uri: bapUri,
+    bpp_id: inboundCtx?.bpp_id || '',
+    bpp_uri: inboundCtx?.bpp_uri || '',
+    transaction_id: txnId,
     message_id: newMessageId(),
     timestamp: '',
-    ttl: row.ttl || 'PT30S',
+    ttl: inboundCtx?.ttl || row.ttl || 'PT30S',
   };
   const responseContext = buildResponseContext(ctxBase, 'on_issue');
 
@@ -187,19 +192,19 @@ async function pushOnIssue(
 
   const payload = { context: responseContext, message };
   const { statusCode, error } = await becknService.sendCallback(
-    becknService.buildCallbackUrl(row.bap_uri, 'on_issue'),
+    becknService.buildCallbackUrl(bapUri, 'on_issue'),
     'on_issue',
     payload as any,
-    row.txn_id,
+    txnId,
   );
   await txnLogModel.insert({
-    transaction_id: row.txn_id,
+    transaction_id: txnId,
     message_id: (responseContext as any).message_id,
     action: 'on_issue',
     direction: 'outbound',
-    bap_id: row.bap_id,
+    bap_id: inboundCtx?.bap_id || row.bap_id,
     bpp_id: (responseContext as any).bpp_id ?? null,
-    domain: row.domain,
+    domain: inboundCtx?.domain || row.domain,
     http_status: statusCode ?? null,
     ack_status: statusCode && statusCode < 300 ? 'ACK' : 'NACK',
     payload_json: JSON.stringify(payload),
@@ -208,13 +213,45 @@ async function pushOnIssue(
   observabilityService.push('on_issue', payload);
 }
 
+/** True when workbench reuses a ticket id (e.g. ISSUE-1) from another txn or a closed ticket — start a fresh OPEN. */
+function shouldStartFreshOpenOnExistingTicket(
+  row: TicketRow,
+  context: BecknContext,
+  inboundStatus: string,
+): boolean {
+  if (inboundStatus !== 'OPEN') return false;
+  if (row.txn_id !== context.transaction_id) return true;
+  return ['RESOLVED', 'CLOSED', 'REJECTED'].includes(String(row.display_status ?? '').toUpperCase());
+}
+
+async function findOrderAndProviderForIssue(
+  context: BecknContext,
+  issue: IgmIssue,
+): Promise<{ orderId: string | null; providerId: string | null }> {
+  const fromIssue =
+    orderIdFromRefs(issue) ?? (issue['order_details'] as any)?.['id'] ?? null;
+  try {
+    const byTxn = await orderModel.findByTransactionId(context.transaction_id);
+    return {
+      orderId: byTxn?.ondc_order_id ?? (fromIssue ? String(fromIssue) : null),
+      providerId: byTxn?.provider_id ?? providerIdFromRefs(issue),
+    };
+  } catch {
+    return {
+      orderId: fromIssue ? String(fromIssue) : null,
+      providerId: providerIdFromRefs(issue),
+    };
+  }
+}
+
 async function handleIgmV2Issue(
   context: BecknContext,
   issue: IgmIssue,
   complainant: Record<string, any>,
   desc: Record<string, any>,
 ): Promise<void> {
-  const issueId = String(issue['id'] ?? randomUUID());
+  // Keep BAP-supplied id when present (protocol); otherwise mint a unique one.
+  const issueId = String(issue['id'] ?? `IGM-${randomUUID()}`);
   const images = extractIgmImages(issue, desc);
   const attachments = extractIgmAttachments(issue, desc);
   const domain = context.domain || 'ONDC:RET12';
@@ -223,18 +260,31 @@ async function handleIgmV2Issue(
     short_desc: desc['short_desc'] ?? '',
     long_desc: desc['long_desc'] ?? '',
   };
+  const inboundStatus = String(issue['status'] ?? 'OPEN').toUpperCase();
+  const { orderId, providerId } = await findOrderAndProviderForIssue(context, issue);
 
   let row = await customerTicketModel.findByTicketId(issueId);
+  const startFreshOpen = row ? shouldStartFreshOpenOnExistingTicket(row, context, inboundStatus) : false;
 
-  if (!row) {
+  if (!row || startFreshOpen) {
     const issueState: IgmIssue = structuredClone(issue);
     issueState['id'] = issueId;
     issueState['descriptor'] = descriptor;
+    issueState['status'] = 'OPEN';
     if (!issueState['created_at']) issueState['created_at'] = nowIso();
-    if (!issueState['updated_at']) issueState['updated_at'] = issueState['created_at'];
+    issueState['updated_at'] = issueState['created_at'];
     if (!issueState['level']) issueState['level'] = 'ISSUE';
+    // Fresh OPEN must not carry stale actions/resolutions from a prior workbench run.
+    issueState['actions'] = Array.isArray(issue['actions']) ? [...(issue['actions'] as any[])] : [];
+    if (startFreshOpen) {
+      delete issueState['resolutions'];
+      delete issueState['last_action_id'];
+      // Keep the previous ticket row as history; free ISSUE-1 (etc.) for this new run.
+      await customerTicketModel.moveTicketToHistory(row!.ticket_id, row!.txn_id);
+      row = null;
+    }
 
-    ensureSellerActor(issueState, domain);
+    const sellerActorId = ensureSellerActor(issueState, domain);
 
     const openMsg: TicketMessage = {
       id: randomUUID(),
@@ -252,8 +302,8 @@ async function handleIgmV2Issue(
     await customerTicketModel.create({
       ticket_id: issueId,
       txn_id: context.transaction_id,
-      order_id: orderIdFromRefs(issueState) ?? issue['order_details']?.['id'] ?? null,
-      provider_id: providerIdFromRefs(issueState),
+      order_id: orderId,
+      provider_id: providerId,
       domain,
       display_status: 'OPEN',
       customer_name: complainant?.person?.name ?? null,
@@ -276,21 +326,46 @@ async function handleIgmV2Issue(
       mirror: extractTicketMirrorFields(issueState, context.ttl ? { ttl: context.ttl } : undefined),
     });
     row = await customerTicketModel.findByTicketId(issueId);
+
     if (row) {
+      // Pramaan Flow 6B step 1 expects on_issue with PROCESSING immediately after OPEN.
+      const actorName = SELLER_PROFILE.SUPPORT_NAME || SELLER_PROFILE.BRAND_NAME || 'Support';
+      appendIgmV2Action(issueState, {
+        code: 'PROCESSING',
+        short_desc: 'Complaint is being processed',
+        action_by: sellerActorId,
+        actor_name: actorName,
+      });
+      await customerTicketModel.appendMessage(
+        { id: row.id },
+        {
+          id: randomUUID(),
+          actor: 'SELLER',
+          sender_role: 'SELLER',
+          sender_name: actorName,
+          message: 'Complaint is being processed',
+          action_code: 'PROCESSING',
+          created_at: nowIso(),
+        },
+        { displayStatus: 'PROCESSING', igmStatusRaw: 'PROCESSING' },
+      );
       await customerTicketModel.saveIgmIssueState(row.id, issueState, {
-        displayStatus: 'OPEN',
-        igmStatusRaw: 'OPEN',
+        displayStatus: 'PROCESSING',
+        igmStatusRaw: 'PROCESSING',
       });
     }
   } else {
+    await customerTicketModel.updateTicketFromIssueContext(row.id, context, {
+      order_id: orderId,
+      provider_id: providerId,
+    });
+
     const stored = parseIgmIssue(row);
     if (!stored) return;
     const merged = mergeInboundIgmIssue(stored, issue);
     const sellerActorId = ensureSellerActor(merged, domain);
     const prevLen = (stored['actions'] as any[])?.length ?? 0;
     const newActions = (merged['actions'] as any[]).slice(prevLen);
-    // Flow 6F only: the escalation branch is entered only when the buyer app
-    // explicitly appends an ESCALATED action to the issue timeline.
     const escalationReceived = newActions.some((action) => action.descriptor?.code === 'ESCALATED');
 
     for (const action of newActions) {
@@ -351,7 +426,7 @@ async function handleIgmV2Issue(
 
   if (row) {
     const fresh = await customerTicketModel.getById(row.id);
-    if (fresh) await pushOnIssue(fresh);
+    if (fresh) await pushOnIssue(fresh, {}, context);
   }
 }
 
@@ -361,7 +436,7 @@ async function handleIgmV1Issue(
   complainant: Record<string, any>,
   desc: Record<string, any>,
 ): Promise<void> {
-  const issueId = String(issue['id'] ?? randomUUID());
+  const issueId = String(issue['id'] ?? `IGM-${randomUUID()}`);
   // Serialize per-ticket — see withTicketLock's docblock. Without this, a
   // retried/duplicated /issue callback for the same ticket can double-fire
   // the dedup-then-append sequence below (and, for an escalation, the GRO
@@ -380,10 +455,17 @@ async function handleIgmV1IssueLocked(
 ): Promise<void> {
   const images = extractIgmImages(issue, desc);
   const attachments = extractIgmAttachments(issue, desc);
+  const inboundStatus = String(issue['status'] ?? 'OPEN').toUpperCase();
+  const { orderId, providerId } = await findOrderAndProviderForIssue(context, issue);
 
   let row = await customerTicketModel.findByTicketId(issueId);
+  const startFreshOpen = row ? shouldStartFreshOpenOnExistingTicket(row, context, inboundStatus) : false;
 
-  if (!row) {
+  if (!row || startFreshOpen) {
+    if (startFreshOpen && row) {
+      await customerTicketModel.moveTicketToHistory(row.ticket_id, row.txn_id);
+      row = null;
+    }
     const openMsg: TicketMessage = {
       id: randomUUID(),
       actor: 'CONSUMER',
@@ -399,7 +481,8 @@ async function handleIgmV1IssueLocked(
     await customerTicketModel.create({
       ticket_id: issueId,
       txn_id: context.transaction_id,
-      order_id: issue['order_details']?.['id'] ?? null,
+      order_id: orderId,
+      provider_id: providerId,
       domain: context.domain,
       display_status: 'OPEN',
       customer_name: complainant?.person?.name ?? null,
@@ -436,6 +519,11 @@ async function handleIgmV1IssueLocked(
       );
     }
   } else {
+    await customerTicketModel.updateTicketFromIssueContext(row.id, context, {
+      order_id: orderId,
+      provider_id: providerId,
+    });
+
     const actions: any[] = issue['issue_actions']?.['complainant_actions'] ?? [];
     const latest = actions[actions.length - 1];
     const code = String(latest?.complainant_action ?? 'INFO_PROVIDED');
@@ -500,7 +588,7 @@ async function handleIgmV1IssueLocked(
 
   if (row) {
     const fresh = await customerTicketModel.getById(row.id);
-    if (fresh) await pushOnIssue(fresh);
+    if (fresh) await pushOnIssue(fresh, {}, context);
   }
 }
 
