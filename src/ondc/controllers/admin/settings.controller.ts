@@ -11,6 +11,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import type { Request, Response } from 'express';
 import { ApiResponse, AppError } from '~/lib/response';
 import { ondcEnv } from '~/config/ondc.config';
+import { ondcNetwork } from '~/ondc/config/network.config';
 import { ondcLogger } from '~/ondc/utils/logger.util';
 
 /** GET /api/v1/ondc/admin/settings */
@@ -21,6 +22,7 @@ export async function getSettings(_req: Request, res: Response): Promise<void> {
     unique_key_id: ondcEnv.uniqueKeyId,
     environment: ondcEnv.environment,
     registry_lookup_url: ondcEnv.registryLookupUrl,
+    gateway_url: ondcNetwork.gateway,
     observability_url: ondcEnv.observabilityUrl,
     // key presence only — never leak the private key material
     sign_priv_key_set: Boolean(ondcEnv.signPrivKey),

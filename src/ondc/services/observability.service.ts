@@ -11,7 +11,7 @@ import { sanitizePii } from '~/ondc/utils/helpers';
 
 export const observabilityService = {
   push(action: string, payload: Record<string, unknown>): void {
-    if (!ondcEnv.observabilityToken) return;
+    if (!ondcEnv.observabilityToken || !ondcEnv.observabilityUrl) return;
 
     const sanitized = sanitizePii(payload);
     const body = { type: action, data: sanitized };
