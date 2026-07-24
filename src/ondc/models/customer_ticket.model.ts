@@ -396,4 +396,73 @@ export const customerTicketModel = {
       [displayStatus, igmStatusRaw ?? null, id],
     );
   },
+
+  /**
+   * Copy txn_id / bap_uri / domain / etc. from the inbound /issue context onto
+   * the ticket row so /on_issue callbacks keep the BAP's current transaction_id.
+   */
+  async updateTicketFromIssueContext(
+    id: number,
+    ctx: {
+      transaction_id: string;
+      bap_id?: string;
+      bap_uri?: string;
+      bpp_id?: string | null;
+      bpp_uri?: string | null;
+      domain?: string;
+      city?: string;
+      country?: string;
+      core_version?: string;
+      ttl?: string | null;
+    },
+    extras: { order_id?: string | null; provider_id?: string | null } = {},
+  ): Promise<void> {
+    await ondcExec(
+      `UPDATE ondc_customer_ticket SET
+         txn_id = ?,
+         bap_id = ?,
+         bap_uri = ?,
+         bpp_id = COALESCE(?, bpp_id),
+         bpp_uri = COALESCE(?, bpp_uri),
+         domain = COALESCE(?, domain),
+         city = COALESCE(?, city),
+         country = COALESCE(?, country),
+         core_version = COALESCE(?, core_version),
+         ttl = COALESCE(?, ttl),
+         order_id = COALESCE(?, order_id),
+         provider_id = COALESCE(?, provider_id),
+         updated_at = NOW()
+       WHERE id = ?`,
+      [
+        ctx.transaction_id,
+        ctx.bap_id ?? null,
+        ctx.bap_uri ?? null,
+        ctx.bpp_id ?? null,
+        ctx.bpp_uri ?? null,
+        ctx.domain ?? null,
+        ctx.city ?? null,
+        ctx.country ?? null,
+        ctx.core_version ?? null,
+        ctx.ttl ?? null,
+        extras.order_id ?? null,
+        extras.provider_id ?? null,
+        id,
+      ],
+    );
+  },
+
+  /**
+   * Keep the old ticket as history and free its ticket_id for a new IGM run.
+   * Renames e.g. ISSUE-1 → ISSUE-1__hist__fc36458d (still visible in admin list).
+   */
+  async moveTicketToHistory(ticketId: string, previousTxnId: string): Promise<string> {
+    const historyTicketId = `${ticketId}__hist__${previousTxnId.slice(0, 8)}_${Date.now().toString(36)}`;
+    await ondcExec(
+      `UPDATE ondc_customer_ticket
+       SET ticket_id = ?, updated_at = NOW()
+       WHERE ticket_id = ?`,
+      [historyTicketId, ticketId],
+    );
+    return historyTicketId;
+  },
 };
