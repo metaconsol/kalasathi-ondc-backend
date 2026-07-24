@@ -13,6 +13,9 @@ function optionalEnv(key: string, fallback = ''): string {
   return process.env[key] ?? fallback;
 }
 
+// Resolved first so env-dependent defaults below can use it.
+const environment = optionalEnv('ONDC_ENVIRONMENT', 'preprod') as 'preprod' | 'prod';
+
 export const ondcEnv = {
   // Network identity
   subscriberId: requireEnv('BPP_SUBSCRIBER_ID'),
@@ -26,15 +29,17 @@ export const ondcEnv = {
   // ONDC registry
   registryLookupUrl: requireEnv('ONDC_REGISTRY_LOOKUP_URL'),
 
-  // ONDC Observability
+  // ONDC Observability — no prod default: pushing prod logs to the preprod endpoint must never happen silently.
   observabilityUrl: optionalEnv(
     'ONDC_OBSERVABILITY_URL',
-    'https://analytics-api-pre-prod.aws.ondc.org/v1/api/push-txn-logs',
+    environment === 'prod'
+      ? ''
+      : 'https://analytics-api-pre-prod.aws.ondc.org/v1/api/push-txn-logs',
   ),
   observabilityToken: optionalEnv('ONDC_OBSERVABILITY_TOKEN'),
 
   // Environment flag
-  environment: optionalEnv('ONDC_ENVIRONMENT', 'preprod') as 'preprod' | 'prod',
+  environment,
 
   // Auth
   adminEmail: optionalEnv('ONDC_ADMIN_EMAIL'),
