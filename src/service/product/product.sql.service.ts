@@ -170,7 +170,7 @@ async function insertVariantTreeFromPayload(
 
   const insertOne = async (v: any, parentDbId: bigint | null) => {
     const vres = await sqlExec(
-      'INSERT INTO product_variants (product_id, parent_variant_id, level_index, level_name, attribute_value, color_code, variant_name, sku, gtin_ean, price, mrp, unit_count, unit_type, product_weight_gm, product_length_cm, product_width_cm, product_height_cm, shipping_pkg_weight_gm, shipping_pkg_length_cm, shipping_pkg_width_cm, shipping_pkg_height_cm, min_purchase_limit, max_purchase_limit, standard_package_qty, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO product_variants (product_id, parent_variant_id, level_index, level_name, attribute_value, color_code, variant_name, sku, gtin_ean, price, mrp, unit_count, unit_type, product_weight_gm, product_length_cm, product_width_cm, product_height_cm, shipping_pkg_weight_gm, shipping_pkg_length_cm, shipping_pkg_width_cm, shipping_pkg_height_cm, min_purchase_limit, max_purchase_limit, standard_package_qty, is_active, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))',
       [
         productId,
         parentDbId,
@@ -220,7 +220,7 @@ async function insertVariantTreeFromPayload(
       for (const a of v.ondcAttributes) {
         if (!a?.attributeKey) continue;
         await sqlExec(
-          'INSERT INTO product_ondc_attributes (product_id, variant_id, attribute_key, attribute_value, color_name, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
+          'INSERT INTO product_ondc_attributes (product_id, variant_id, attribute_key, attribute_value, color_name, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))',
           [
             productId,
             vid,
@@ -919,8 +919,8 @@ class ProductSqlService {
     try {
       const productId = await withSqlTransaction(async (tx) => {
         const ins = await sqlExec(
-          `INSERT INTO products (store_id, category_id, product_name, artisan_name, artisan_location, district, description, hsn_sac_code, gst_percent, gtin_ean, stock, force_out_of_stock, unit_count, unit_type, brand, manufacturing_month, expiry_date, country_of_origin, sort_order, return_days_window, seller_pickup_return, is_cod_available, publish_status, is_manufacturer, manufacturer_name, manufacturer_address, currency, default_price, mrp, visibility, alias_slug, seo_title, seo_description, seo_keywords, disable_for_bots, availability_mode, cancellable, returnable, time_to_ship_value, time_to_ship_unit, instructions, storage_conditions, included_items, size_chart_url, gi_tag, silk_mark, have_ondc_attributes, product_weight_gm, product_length_cm, product_width_cm, product_height_cm, package_weight_gm, package_length_cm, package_width_cm, package_height_cm, min_purchase_limit, max_purchase_limit, standard_package_qty, low_stock_qty, order_mode, ondc_subcategory)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO products (store_id, category_id, product_name, artisan_name, artisan_location, district, description, hsn_sac_code, gst_percent, gtin_ean, stock, force_out_of_stock, unit_count, unit_type, brand, manufacturing_month, expiry_date, country_of_origin, sort_order, return_days_window, seller_pickup_return, is_cod_available, publish_status, is_manufacturer, manufacturer_name, manufacturer_address, currency, default_price, mrp, visibility, alias_slug, seo_title, seo_description, seo_keywords, disable_for_bots, availability_mode, cancellable, returnable, time_to_ship_value, time_to_ship_unit, instructions, storage_conditions, included_items, size_chart_url, gi_tag, silk_mark, have_ondc_attributes, product_weight_gm, product_length_cm, product_width_cm, product_height_cm, package_weight_gm, package_length_cm, package_width_cm, package_height_cm, min_purchase_limit, max_purchase_limit, standard_package_qty, low_stock_qty, order_mode, ondc_subcategory, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))`,
           [
             storeId,
             body.categoryId,
@@ -1022,7 +1022,7 @@ class ProductSqlService {
           for (const a of (body as any).ondcAttributes) {
             if (!a?.attributeKey) continue;
             await sqlExec(
-              'INSERT INTO product_ondc_attributes (product_id, variant_id, attribute_key, attribute_value, color_name, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
+              'INSERT INTO product_ondc_attributes (product_id, variant_id, attribute_key, attribute_value, color_name, sort_order, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(3))',
               [
                 pid,
                 null,
