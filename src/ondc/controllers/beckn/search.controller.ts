@@ -25,6 +25,7 @@ import { overallTxnsModel } from '~/ondc/models/overall_txns.model';
 import { SUPPORTED_DOMAINS } from '~/ondc/config/domain.config';
 import { ondcLogger } from '~/ondc/utils/logger.util';
 import type { BecknContext } from '~/ondc/types/beckn.types';
+import { handleRet10Search } from '~/ondc/controllers/beckn/ret10-search.controller';
 
 const ALLOWED_DOMAINS = new Set<string>(SUPPORTED_DOMAINS);
 
@@ -61,6 +62,12 @@ export async function handleSearch(req: Request, res: Response): Promise<void> {
   const domain = String(ctx.domain ?? '')
     .toUpperCase()
     .trim();
+
+  // Dispatch RET10 requests to the dedicated controller
+  if (domain === 'ONDC:RET10') {
+    return handleRet10Search(req, res);
+  }
+
   if (!ALLOWED_DOMAINS.has(domain)) {
     res.status(200).json(
       buildNack(ctx, {
