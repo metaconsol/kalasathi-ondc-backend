@@ -127,9 +127,10 @@ export interface BecknTime {
   label?: string;
   timestamp?: string;
   duration?: string;
-  range?: { start: string; end: string };
+  // range?: { start: string; end: string };
   days?: string;
-  schedule?: { frequency?: string; holidays?: string[]; times?: string[] };
+  // schedule?: { frequency?: string; holidays?: string[]; times?: string[] };
+  schedule?: {  holidays?: string[]; };
 }
 
 export interface BecknContact {

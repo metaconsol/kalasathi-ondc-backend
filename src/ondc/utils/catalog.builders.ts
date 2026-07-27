@@ -271,8 +271,9 @@ export interface ProviderLocation {
     label: string;
     timestamp: string;
     days: string;
-    schedule: { holidays: string[]; frequency: string; times: string[] };
-    range: { start: string; end: string };
+    // schedule: { holidays: string[]; frequency: string; times: string[] };
+    schedule: { holidays: string[]; };
+    // range: { start: string; end: string };
   };
 }
 
@@ -298,8 +299,9 @@ export function buildProviderLocation(
       label: 'enable',
       timestamp: ondcTimestamp(),
       days,
-      schedule: { holidays: [], frequency: 'PT4H', times: ['0000', '2359'] },
-      range: { start: timeFrom, end: timeTo },
+      schedule: { holidays: [] },
+      // schedule: { holidays: [], frequency: 'PT4H', times: ['0000', '2359'] },
+      // range: { start: timeFrom, end: timeTo },
     },
   };
 }
