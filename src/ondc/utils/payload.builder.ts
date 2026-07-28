@@ -166,10 +166,75 @@ export function buildOnTrack(incomingCtx: BecknContext, tracking: object): objec
 
 // ─── /on_update ────────────────────────────────────────────────────────────
 
+export const ALLOWED_ON_UPDATE_FULFILLMENT_CODES = new Set<string>([
+  'Accepted',
+  'Cancelled',
+  'Pending',
+  'Order-delivered',
+  'Order-picked-up',
+  'Return_Initiated',
+  'Return_Pick_Failed',
+  'Return_Approved',
+  'Return_Picked',
+  'Return_Delivered',
+  'Liquidated',
+  'Return_Rejected',
+]);
+
+export function sanitizeFulfillmentsForOnUpdate(fulfillments: any[], orderState?: string): any[] {
+  if (!Array.isArray(fulfillments)) return fulfillments;
+
+  return fulfillments.map((f: any) => {
+    if (!f || typeof f !== 'object') return f;
+    const currentCode = String(f?.state?.descriptor?.code ?? '');
+
+    if (ALLOWED_ON_UPDATE_FULFILLMENT_CODES.has(currentCode)) {
+      return f;
+    }
+
+    // Map invalid on_update state codes (e.g. Out-for-delivery, Packed, Agent-assigned)
+    let newCode = 'Pending';
+    if (
+      currentCode === 'Out-for-delivery' ||
+      orderState === 'Completed' ||
+      orderState === 'Order-delivered' ||
+      orderState === 'In-progress'
+    ) {
+      newCode = 'Order-delivered';
+    } else if (
+      currentCode === 'Packed' ||
+      currentCode === 'Agent-assigned' ||
+      currentCode === 'Searching-for-agent'
+    ) {
+      newCode = 'Accepted';
+    } else if (currentCode.startsWith('Return_')) {
+      newCode = 'Return_Initiated';
+    }
+
+    return {
+      ...f,
+      state: {
+        ...(f.state && typeof f.state === 'object' ? f.state : {}),
+        descriptor: {
+          ...(f.state?.descriptor && typeof f.state?.descriptor === 'object' ? f.state.descriptor : {}),
+          code: newCode,
+        },
+      },
+    };
+  });
+}
+
 export function buildOnUpdate(incomingCtx: BecknContext, order: object): object {
+  const orderObj = (order && typeof order === 'object' ? { ...order } : {}) as Record<string, any>;
+  if (Array.isArray(orderObj['fulfillments'])) {
+    orderObj['fulfillments'] = sanitizeFulfillmentsForOnUpdate(
+      orderObj['fulfillments'],
+      String(orderObj['state'] ?? ''),
+    );
+  }
   return {
     context: buildResponseContext(incomingCtx, 'on_update'),
-    message: { order },
+    message: { order: orderObj },
   };
 }
 
