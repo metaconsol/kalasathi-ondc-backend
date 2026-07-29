@@ -8,15 +8,25 @@ import type { Request, Response } from 'express';
 import { ApiResponse, AppError } from '~/lib/response';
 import { providerModel } from '~/ondc/models/provider.model';
 
+function parseProviderFilters(req: Request): {
+  q: string | undefined;
+  status: 'active' | 'inactive' | undefined;
+  hasProducts: 'yes' | 'no' | undefined;
+} {
+  const { q, status, hasProducts } = req.query as Record<string, string>;
+  return {
+    q: q?.trim() || undefined,
+    status: status === 'active' ? 'active' : status === 'inactive' ? 'inactive' : undefined,
+    hasProducts: hasProducts === 'yes' ? 'yes' : hasProducts === 'no' ? 'no' : undefined,
+  };
+}
+
 /** GET /api/v1/ondc/admin/providers — unpaginated when no page/limit; else 12 per page by default.
  *  ?status=active|inactive filters by the ONDC-only toggle (ondc_provider_settings).
  *  ?hasProducts=yes|no filters approved sellers by whether they have any product yet. */
 export async function listProviders(req: Request, res: Response): Promise<void> {
-  const { page, limit, q, status, hasProducts } = req.query as Record<string, string>;
-  const statusFilter: 'active' | 'inactive' | undefined =
-    status === 'active' ? 'active' : status === 'inactive' ? 'inactive' : undefined;
-  const hasProductsFilter: 'yes' | 'no' | undefined =
-    hasProducts === 'yes' ? 'yes' : hasProducts === 'no' ? 'no' : undefined;
+  const { page, limit } = req.query as Record<string, string>;
+  const filterOpts = parseProviderFilters(req);
 
   if (page === undefined && limit === undefined) {
     const providers = await providerModel.listAll();
@@ -28,8 +38,6 @@ export async function listProviders(req: Request, res: Response): Promise<void> 
   const limitNum = Math.min(100, Math.max(1, parseInt(limit ?? '12', 10) || 12));
   const offset = (pageNum - 1) * limitNum;
 
-  const search = q?.trim() || undefined;
-  const filterOpts = { q: search, status: statusFilter, hasProducts: hasProductsFilter };
   const listOpts = { ...filterOpts, limit: limitNum, offset };
 
   const [providers, total, productBreakdown] = await Promise.all([
@@ -46,6 +54,14 @@ export async function listProviders(req: Request, res: Response): Promise<void> 
     withProductsCount: productBreakdown.withProducts,
     withoutProductsCount: productBreakdown.withoutProducts,
   });
+}
+
+/** GET /api/v1/ondc/admin/providers/ids — every provider_id matching the same filters as listProviders,
+ *  unpaginated. Used by "select all matching" bulk actions so they aren't limited to one page. */
+export async function listProviderIds(req: Request, res: Response): Promise<void> {
+  const filterOpts = parseProviderFilters(req);
+  const ids = await providerModel.listAllIds(filterOpts);
+  ApiResponse.success(res, 'Provider ids', ids);
 }
 
 /** GET /api/v1/ondc/admin/providers/:providerId */

@@ -22,6 +22,7 @@ import {
 } from '~/ondc/controllers/admin/logistics.controller';
 import {
   listProviders,
+  listProviderIds,
   getProvider,
   toggleProvider,
   bulkToggleProviders,
@@ -92,6 +93,8 @@ router.post('/orders/:orderId/delhivery/pickup', ...sellerGuard, createPickup);
 
 // ---- Providers (read-only view of stores; provider_id = String(stores.id)) ----
 router.get('/providers', ...adminGuard, listProviders);
+// Literal segment registered before /providers/:providerId so it can't be captured.
+router.get('/providers/ids', ...adminGuard, listProviderIds);
 router.get('/providers/:providerId', ...adminGuard, getProvider);
 router.patch('/providers/:providerId/toggle', ...adminGuard, toggleProvider);
 router.patch('/providers/bulk-toggle', ...adminGuard, bulkToggleProviders);
