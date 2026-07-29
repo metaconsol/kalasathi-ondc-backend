@@ -39,6 +39,7 @@ import {
 import { ondcLogger } from '~/ondc/utils/logger.util';
 import type { OndcRetailDomain } from '~/ondc/config/domain.config';
 import type { OnSearchCatalog } from '~/ondc/utils/payload.builder';
+import { PROVIDER_TIMING } from '~/ondc/config/constants';
 
 const RET10_DOMAIN: OndcRetailDomain = 'ONDC:RET10';
 
@@ -90,11 +91,8 @@ const RET10_MEASURE_UNITS = new Set(['unit', 'dozen', 'kilogram', 'tonne', 'litr
 
 /** Bhopal (ODOP HQ) — used only when a store location has no coordinates. */
 const FALLBACK_GPS = '23.259933,77.412613';
-const FALLBACK_DAYS = '1,2,3,4,5,6,7';
 const FALLBACK_TIME_FROM = '0000';
 const FALLBACK_TIME_TO = '2359';
-
-const HHMM_RE = /^([01]\d|2[0-3])[0-5]\d$/;
 
 // ─── Category resolution ───────────────────────────────────────────────────
 
@@ -283,38 +281,22 @@ function normalizeGps(raw: unknown): string {
   return `${formatGpsCoord(lat)},${formatGpsCoord(lng)}`;
 }
 
-/** store_locations.time_from / time_to are HHMM smallints (1030, 630, 1 …). */
-function toHhmm(value: number | null | undefined): string | null {
-  if (value === null || value === undefined) return null;
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric < 0) return null;
-  const padded = String(Math.trunc(numeric)).padStart(4, '0');
-  return HHMM_RE.test(padded) ? padded : null;
-}
-
 interface LocationWindow {
   start: string;
   end: string;
   days: string;
 }
 
-/** Operating window for one store location — DB first, 24x7 as the fallback. */
-function resolveLocationWindow(loc: MainDbStoreLocation | undefined): LocationWindow {
-  const start = toHhmm(loc?.time_from) ?? FALLBACK_TIME_FROM;
-  const end = toHhmm(loc?.time_to) ?? FALLBACK_TIME_TO;
+/** Operating window — one org-wide PROVIDER_TIMING setting, 24x7 as the fallback. */
+function resolveLocationWindow(): LocationWindow {
+  const start = PROVIDER_TIMING.TIME_FROM || FALLBACK_TIME_FROM;
+  const end = PROVIDER_TIMING.TIME_TO || FALLBACK_TIME_TO;
 
-  const dayFrom = Number(loc?.day_from);
-  const dayTo = Number(loc?.day_to);
-  let days = FALLBACK_DAYS;
-  if (
-    Number.isInteger(dayFrom) &&
-    Number.isInteger(dayTo) &&
-    dayFrom >= 1 &&
-    dayTo <= 7 &&
-    dayFrom <= dayTo
-  ) {
-    days = Array.from({ length: dayTo - dayFrom + 1 }, (_, i) => String(dayFrom + i)).join(',');
-  }
+  const dayFrom = Number.parseInt(PROVIDER_TIMING.DAY_FROM, 10) || 1;
+  const dayTo = Number.parseInt(PROVIDER_TIMING.DAY_TO, 10) || 7;
+  const days = Array.from({ length: Math.max(1, dayTo - dayFrom + 1) }, (_, i) =>
+    String(dayFrom + i),
+  ).join(',');
 
   // A window that wraps past midnight (e.g. 1030 → 0630) can't be expressed as a
   // start/end pair, so such rows fall back to the 24x7 window.
@@ -478,28 +460,19 @@ export const ret10CatalogService = {
       ) as Record<string, any>;
 
       // ── RET10 provider-level normalization ──────────────────────────────
-      const windowByLocationId = new Map<string, LocationWindow>(
-        locRows.map((loc) => [String(loc.id), resolveLocationWindow(loc)]),
-      );
+      const window = resolveLocationWindow();
 
       const entryLocations = Array.isArray(entry['locations'])
         ? (entry['locations'] as Array<Record<string, any>>)
         : [];
-      entry['locations'] = entryLocations.map((loc) =>
-        normalizeRet10Location(
-          loc,
-          windowByLocationId.get(String(loc['id'])) ?? resolveLocationWindow(undefined),
-        ),
-      );
+      entry['locations'] = entryLocations.map((loc) => normalizeRet10Location(loc, window));
 
       const primaryLocationId = String(entryLocations[0]?.['id'] ?? locationId);
-      const primaryWindow =
-        windowByLocationId.get(primaryLocationId) ?? resolveLocationWindow(undefined);
 
       const nonTimingTags = (Array.isArray(entry['tags']) ? entry['tags'] : []).filter(
         (tag: { code?: unknown }) => String(tag?.code ?? '') !== 'timing',
       );
-      entry['tags'] = [...buildRet10TimingTags(primaryLocationId, primaryWindow), ...nonTimingTags];
+      entry['tags'] = [...buildRet10TimingTags(primaryLocationId, window), ...nonTimingTags];
 
       // `categories` carries variant groups only. None of the ODOP grocery
       // products are variant-grouped, so the block is dropped rather than
