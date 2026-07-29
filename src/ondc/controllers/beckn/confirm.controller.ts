@@ -699,7 +699,9 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
             : {}),
           params: {
             currency: String(inboundCurrency ?? 'INR'),
-            transaction_id: String(inboundTransactionId ?? ''),
+            ...(inboundTransactionId && /^[0-9a-zA-Z\_\-]{1,36}$/.test(String(inboundTransactionId))
+              ? { transaction_id: String(inboundTransactionId) }
+              : {}),
             amount: String(inboundAmount ?? (total > 0 ? total.toFixed(2) : '0.00')),
             ...Object.fromEntries(
               Object.entries(remainingPaymentParams).map(([key, value]) => [
