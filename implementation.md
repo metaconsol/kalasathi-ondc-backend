@@ -1,3 +1,27 @@
+### Branch 068
+
+**Date:** 2026-07-28
+
+**Status:** Ready for Testing
+
+**Area:** ONDC RET10 (Grocery) Catalog Validation & Schema Normalization
+
+**What:**
+
+- Added strict schema normalizations for item tags, GPS coordinates, and mandatory provider timings for the RET10 domain catalog.
+
+**Why:**
+
+- To resolve strict validation errors thrown by the ONDC Workbench by ensuring the catalog payload complies perfectly with the ONDC schema formatting rules.
+
+**Changes:** file name and description of file change.
+
+- `src/ondc/services/ret10-catalog.service.ts`
+  - Added `normalizeGps` function to strictly format GPS coordinates (ensuring exactly 2 integer digits and minimum 4 decimals) and provide a valid fallback.
+  - Added `resolveLocationWindow` and `buildRet10TimingTags` to automatically calculate store operating hours and inject mandatory `timing` tags (Order, Delivery, Self-Pickup).
+  - Added `normalizeRet10Item` to filter out unsupported ONDC item tags and enforce quantity maximums as strictly numeric strings.
+  - Updated the catalog mapping logic to apply these normalizations at both the provider location and item levels.
+
 ### Branch 065
 
 **Date:** 2026-07-27
