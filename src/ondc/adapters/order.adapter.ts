@@ -560,6 +560,10 @@ export async function buildOnStatusOrder(
     ),
     amount: nonEmpty(payment['params']?.amount, row.order_total, '0.00'),
   };
+
+  if (!payment['params'].transaction_id || !/^[0-9a-zA-Z\_\-]{1,36}$/.test(payment['params'].transaction_id)) {
+    delete payment['params'].transaction_id;
+  }
   // Seller settlement details (the buyer's confirm doesn't carry these).
   if (
     !Array.isArray(payment['@ondc/org/settlement_details']) ||
