@@ -8,9 +8,15 @@ import type { Request, Response } from 'express';
 import { ApiResponse, AppError } from '~/lib/response';
 import { providerModel } from '~/ondc/models/provider.model';
 
-/** GET /api/v1/ondc/admin/providers — unpaginated when no page/limit; else 12 per page by default */
+/** GET /api/v1/ondc/admin/providers — unpaginated when no page/limit; else 12 per page by default.
+ *  ?status=active|inactive filters by the ONDC-only toggle (ondc_provider_settings).
+ *  ?hasProducts=yes|no filters approved sellers by whether they have any product yet. */
 export async function listProviders(req: Request, res: Response): Promise<void> {
-  const { page, limit, q } = req.query as Record<string, string>;
+  const { page, limit, q, status, hasProducts } = req.query as Record<string, string>;
+  const statusFilter: 'active' | 'inactive' | undefined =
+    status === 'active' ? 'active' : status === 'inactive' ? 'inactive' : undefined;
+  const hasProductsFilter: 'yes' | 'no' | undefined =
+    hasProducts === 'yes' ? 'yes' : hasProducts === 'no' ? 'no' : undefined;
 
   if (page === undefined && limit === undefined) {
     const providers = await providerModel.listAll();
@@ -23,12 +29,13 @@ export async function listProviders(req: Request, res: Response): Promise<void> 
   const offset = (pageNum - 1) * limitNum;
 
   const search = q?.trim() || undefined;
-  const listOpts = { limit: limitNum, offset, ...(search ? { q: search } : {}) };
-  const countOpts = search ? { q: search } : {};
+  const filterOpts = { q: search, status: statusFilter, hasProducts: hasProductsFilter };
+  const listOpts = { ...filterOpts, limit: limitNum, offset };
 
-  const [providers, total] = await Promise.all([
+  const [providers, total, productBreakdown] = await Promise.all([
     providerModel.listPaginated(listOpts),
-    providerModel.countAll(countOpts),
+    providerModel.countAll(filterOpts),
+    providerModel.getProductBreakdown(filterOpts),
   ]);
 
   ApiResponse.success(res, 'Providers', providers, {
@@ -36,6 +43,8 @@ export async function listProviders(req: Request, res: Response): Promise<void> 
     limit: limitNum,
     total,
     totalPages: Math.max(1, Math.ceil(total / limitNum)),
+    withProductsCount: productBreakdown.withProducts,
+    withoutProductsCount: productBreakdown.withoutProducts,
   });
 }
 
@@ -46,9 +55,22 @@ export async function getProvider(req: Request, res: Response): Promise<void> {
   ApiResponse.success(res, 'Provider', provider);
 }
 
-/** PATCH /api/v1/ondc/admin/providers/:providerId/toggle — flips stores.is_active */
+/** PATCH /api/v1/ondc/admin/providers/:providerId/toggle — flips the ONDC-only toggle (ondc_provider_settings) */
 export async function toggleProvider(req: Request, res: Response): Promise<void> {
   const { active } = req.body as { active: boolean };
   await providerModel.setActive(req.params['providerId'] as string, active);
   ApiResponse.success(res, `Provider ${active ? 'activated' : 'deactivated'}`);
+}
+
+/** PATCH /api/v1/ondc/admin/providers/bulk-toggle — body: { providerIds: string[], active: boolean } */
+export async function bulkToggleProviders(req: Request, res: Response): Promise<void> {
+  const { providerIds, active } = req.body as { providerIds: unknown; active: boolean };
+  if (!Array.isArray(providerIds) || providerIds.length === 0) {
+    throw new AppError('providerIds must be a non-empty array', 400);
+  }
+  const count = await providerModel.setActiveBulk(providerIds.map(String), active);
+  ApiResponse.success(
+    res,
+    `${count} provider${count !== 1 ? 's' : ''} ${active ? 'activated' : 'deactivated'}`,
+  );
 }

@@ -272,7 +272,7 @@ export interface ProviderLocation {
     timestamp: string;
     days: string;
     // schedule: { holidays: string[]; frequency: string; times: string[] };
-    schedule: { holidays: string[]; };
+    schedule: { holidays: string[] };
     // range: { start: string; end: string };
   };
 }
@@ -628,7 +628,7 @@ export function buildOnInitPayment(total: number, settlement?: SettlementDetails
         const obj: any = {
           settlement_counterparty: 'seller-app',
           settlement_phase: 'sale-amount',
-          settlement_type: 'upi',
+          settlement_type: 'neft',
           upi_address: settlement?.upiAddress ?? '',
           settlement_bank_account_no: settlement?.bankAccountNo ?? '',
           settlement_ifsc_code: settlement?.ifscCode ?? '',

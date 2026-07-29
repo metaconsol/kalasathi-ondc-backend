@@ -30,6 +30,7 @@ import { overallTxnsModel } from '~/ondc/models/overall_txns.model';
 import { bapTermsModel } from '~/ondc/models/bap_terms.model';
 import { ondcLogger } from '~/ondc/utils/logger.util';
 import { ondcEnv } from '~/config/ondc.config';
+import { PLATFORM_SETTLEMENT } from '~/ondc/config/constants';
 import { ondcExec, ondcQuery, withOndcTransaction } from '~/lib/ondcSql';
 import {
   buildQuote,
@@ -575,29 +576,19 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
       });
 
       // Build on_confirm
-      const branchName = String(
-        storeLocations[0]?.address_line1 ?? storeLocations[0]?.city ?? store?.name ?? '',
-      );
-
-      const rawBankName = String((sellerProfile as any)?.bank_name ?? '').trim();
-      const rawBranchName = String((sellerProfile as any)?.branch_name ?? '').trim();
-
+      // Platform collects the full amount from the buyer — settlement identity is
+      // always ODOP's own, never an individual seller's real bank details.
       const settlementObj: any = {
         settlement_counterparty: 'seller-app',
         settlement_phase: 'sale-amount',
-        settlement_type: 'neft',
-        beneficiary_name: String(sellerProfile?.business_name ?? store?.name ?? ''),
-        upi_address: String(sellerProfile?.upi_id ?? ''),
-        settlement_bank_account_no: String(sellerProfile?.bank_account_no ?? ''),
-        settlement_ifsc_code: String(sellerProfile?.bank_ifsc ?? ''),
+        settlement_type: PLATFORM_SETTLEMENT.TYPE || 'neft',
+        beneficiary_name: PLATFORM_SETTLEMENT.BENEFICIARY_NAME || 'ODOP Marketplace',
+        upi_address: PLATFORM_SETTLEMENT.UPI_ADDRESS || 'platform@kotak',
+        settlement_bank_account_no: PLATFORM_SETTLEMENT.BANK_ACCOUNT_NO || '0000000000',
+        settlement_ifsc_code: PLATFORM_SETTLEMENT.IFSC_CODE || 'KKBK0000001',
+        bank_name: PLATFORM_SETTLEMENT.BANK_NAME || 'Kotak Mahindra Bank',
+        branch_name: PLATFORM_SETTLEMENT.BRANCH_NAME || 'Bhopal',
       };
-
-      if (rawBankName) {
-        settlementObj.bank_name = rawBankName;
-      }
-      if (rawBranchName) {
-        settlementObj.branch_name = rawBranchName;
-      }
 
       const settlementDetails = [settlementObj];
       const confirmTags = [

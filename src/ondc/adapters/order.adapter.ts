@@ -15,12 +15,8 @@ import type {
 import type { BecknContext } from '~/ondc/types/beckn.types';
 import { generateOndcOrderId } from '~/ondc/utils/helpers';
 import { safeJsonParse } from '~/ondc/utils/payload.builder';
-import {
-  fetchStoreById,
-  fetchStoreLocations,
-  fetchSellerProfileByStoreId,
-} from '~/ondc/adapters/seller.adapter';
-import { SELLER_PROFILE } from '~/ondc/config/constants';
+import { fetchStoreById, fetchStoreLocations } from '~/ondc/adapters/seller.adapter';
+import { SELLER_PROFILE, PLATFORM_SETTLEMENT } from '~/ondc/config/constants';
 
 export interface ConfirmMessage {
   order: OndcOrder;
@@ -271,10 +267,9 @@ export async function buildOnStatusOrder(
 
   // provider_id == String(stores.id), so the store id is directly derivable.
   const storeId = row.store_id ?? (Number.parseInt(row.provider_id, 10) || null);
-  const [store, storeLocations, sellerProfile] = await Promise.all([
+  const [store, storeLocations] = await Promise.all([
     storeId ? fetchStoreById(storeId) : Promise.resolve(null),
     storeId ? fetchStoreLocations(storeId) : Promise.resolve([]),
-    storeId ? fetchSellerProfileByStoreId(storeId) : Promise.resolve(null),
   ]);
   // Prefer a location row that actually has coordinates — a store can have
   // multiple rows (e.g. RETURN without gps) and [0] may lack lat/lng, which
@@ -572,20 +567,21 @@ export async function buildOnStatusOrder(
   ) {
     payment['@ondc/org/settlement_details'] = [
       {
+        // Platform collects the full amount from the buyer — settlement identity
+        // is always ODOP's own, never an individual seller's real bank details.
         settlement_counterparty: 'seller-app',
         settlement_phase: 'sale-amount',
-        settlement_type: 'neft',
+        settlement_type: PLATFORM_SETTLEMENT.TYPE || 'neft',
         beneficiary_name: nonEmpty(
-          sellerProfile?.business_name,
-          store?.name,
+          PLATFORM_SETTLEMENT.BENEFICIARY_NAME,
           SELLER_PROFILE.COMPANY_NAME,
-          'ODOP Seller',
+          'ODOP Marketplace',
         ),
-        upi_address: nonEmpty(sellerProfile?.upi_id, 'seller@upi'),
-        settlement_bank_account_no: nonEmpty(sellerProfile?.bank_account_no, '0000000000'),
-        settlement_ifsc_code: nonEmpty(sellerProfile?.bank_ifsc, 'SBIN0000001'),
-        bank_name: nonEmpty(sellerProfile?.bank_name, 'State Bank of India'),
-        branch_name: nonEmpty(sellerProfile?.branch_name, startLoc?.city, 'Bhopal'),
+        upi_address: nonEmpty(PLATFORM_SETTLEMENT.UPI_ADDRESS, 'platform@kotak'),
+        settlement_bank_account_no: nonEmpty(PLATFORM_SETTLEMENT.BANK_ACCOUNT_NO, '0000000000'),
+        settlement_ifsc_code: nonEmpty(PLATFORM_SETTLEMENT.IFSC_CODE, 'KKBK0000001'),
+        bank_name: nonEmpty(PLATFORM_SETTLEMENT.BANK_NAME, 'Kotak Mahindra Bank'),
+        branch_name: nonEmpty(PLATFORM_SETTLEMENT.BRANCH_NAME, 'Bhopal'),
       },
     ];
   }
@@ -597,32 +593,30 @@ export async function buildOnStatusOrder(
     ...(detail && typeof detail === 'object' ? detail : {}),
     settlement_counterparty: nonEmpty(detail?.settlement_counterparty, 'seller-app'),
     settlement_phase: nonEmpty(detail?.settlement_phase, 'sale-amount'),
-    settlement_type: nonEmpty(detail?.settlement_type, 'neft'),
+    // Platform always settles by NEFT — never echo a different rail from a
+    // stale/incoming payload, same reasoning as the bank details below.
+    settlement_type: PLATFORM_SETTLEMENT.TYPE || 'neft',
+    // Platform collects the full amount from the buyer — settlement identity is
+    // always ODOP's own, never an individual seller's real bank details.
     beneficiary_name: nonEmpty(
       detail?.beneficiary_name,
-      sellerProfile?.business_name,
-      store?.name,
+      PLATFORM_SETTLEMENT.BENEFICIARY_NAME,
       SELLER_PROFILE.COMPANY_NAME,
-      'ODOP Seller',
+      'ODOP Marketplace',
     ),
-    upi_address: nonEmpty(detail?.upi_address, sellerProfile?.upi_id, 'seller@upi'),
+    upi_address: nonEmpty(detail?.upi_address, PLATFORM_SETTLEMENT.UPI_ADDRESS, 'platform@kotak'),
     settlement_bank_account_no: nonEmpty(
       detail?.settlement_bank_account_no,
-      sellerProfile?.bank_account_no,
+      PLATFORM_SETTLEMENT.BANK_ACCOUNT_NO,
       '0000000000',
     ),
     settlement_ifsc_code: nonEmpty(
       detail?.settlement_ifsc_code,
-      sellerProfile?.bank_ifsc,
-      'SBIN0000001',
+      PLATFORM_SETTLEMENT.IFSC_CODE,
+      'KKBK0000001',
     ),
-    bank_name: nonEmpty(detail?.bank_name, sellerProfile?.bank_name, 'State Bank of India'),
-    branch_name: nonEmpty(
-      detail?.branch_name,
-      sellerProfile?.branch_name,
-      startLoc?.city,
-      'Bhopal',
-    ),
+    bank_name: nonEmpty(detail?.bank_name, PLATFORM_SETTLEMENT.BANK_NAME, 'Kotak Mahindra Bank'),
+    branch_name: nonEmpty(detail?.branch_name, PLATFORM_SETTLEMENT.BRANCH_NAME, 'Bhopal'),
     settlement_reference: nonEmpty(
       detail?.settlement_reference,
       row.payment_transaction_ref,

@@ -199,6 +199,7 @@ export async function fetchOndcCatalogRows(storeId: number): Promise<OndcCatalog
     `SELECT ${PRODUCT_SELECT}
      FROM products p
      LEFT JOIN categories c ON c.id = p.category_id
+     JOIN product_verification pv ON pv.product_id = p.id AND pv.approval_status = 'approved'
      WHERE p.store_id = ? AND p.publish_status = 'publish'
      ORDER BY p.id ASC`,
     [storeId],
@@ -257,6 +258,7 @@ export async function resolveOndcCatalogRow(itemId: string): Promise<OndcCatalog
     `SELECT ${PRODUCT_SELECT}
      FROM products p
      LEFT JOIN categories c ON c.id = p.category_id
+     JOIN product_verification pv ON pv.product_id = p.id AND pv.approval_status = 'approved'
      WHERE p.id = ? AND p.publish_status = 'publish'
      LIMIT 1`,
     [parts.productId],
