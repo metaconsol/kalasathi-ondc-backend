@@ -157,7 +157,7 @@ export const providerModel = {
   /** Every APPROVED store — active and inactive, with or without products — so admin can manage them. */
   async listAll(): Promise<OndcProviderRow[]> {
     const rows = await ondcQuery<any>(
-      `SELECT ${STORE_SELECT} ${LISTING_JOIN} ORDER BY COALESCE(ops.is_active, 1) DESC, s.store_name ASC`,
+      `SELECT ${STORE_SELECT} ${LISTING_JOIN} ORDER BY s.store_name ASC`,
     );
     return rows.map(mapRow);
   },
@@ -187,6 +187,16 @@ export const providerModel = {
       withProducts: Number(rows[0]?.withProducts) || 0,
       withoutProducts: Number(rows[0]?.withoutProducts) || 0,
     };
+  },
+
+  /** Every provider_id matching the given filters, unpaginated — for "select all matching" bulk actions. */
+  async listAllIds(opts?: ProviderFilterOpts): Promise<string[]> {
+    const { clause, params } = buildFilters(opts);
+    const rows = await ondcQuery<{ provider_id: string }>(
+      `SELECT CAST(s.id AS CHAR) AS provider_id ${LISTING_JOIN} ${clause} ORDER BY s.id ASC`,
+      params,
+    );
+    return rows.map((r) => String(r.provider_id));
   },
 
   async listPaginated(
