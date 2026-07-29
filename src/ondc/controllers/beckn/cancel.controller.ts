@@ -12,13 +12,10 @@ import { orderModel } from '~/ondc/models/order.model';
 import { txnLogModel } from '~/ondc/models/log.model';
 import { ondcLogger } from '~/ondc/utils/logger.util';
 import type { BecknContext } from '~/ondc/types/beckn.types';
-import {
-  fetchStoreById,
-  fetchStoreLocations,
-  fetchSellerProfileByStoreId,
-} from '~/ondc/adapters/seller.adapter';
+import { fetchStoreById, fetchStoreLocations } from '~/ondc/adapters/seller.adapter';
 import { bapTermsModel } from '~/ondc/models/bap_terms.model';
 import { ondcEnv } from '~/config/ondc.config';
+import { PLATFORM_SETTLEMENT } from '~/ondc/config/constants';
 import { ondcQuery } from '~/lib/ondcSql';
 
 export async function handleCancel(req: Request, res: Response): Promise<void> {
@@ -118,10 +115,9 @@ export async function handleCancel(req: Request, res: Response): Promise<void> {
             }
           }
         }
-        const [store, storeLocations, sellerProfile] = await Promise.all([
+        const [store, storeLocations] = await Promise.all([
           storeId ? fetchStoreById(storeId) : Promise.resolve(null),
           storeId ? fetchStoreLocations(storeId) : Promise.resolve([]),
-          storeId ? fetchSellerProfileByStoreId(storeId) : Promise.resolve(null),
         ]);
 
         // Parse raw confirm payload if it exists
@@ -582,18 +578,19 @@ export async function handleCancel(req: Request, res: Response): Promise<void> {
         const dbPayment = safeJsonParse<any>(dbOrder.payment_json ?? '{}', {});
         const origPayment = origOrder.payment ?? dbPayment ?? {};
 
-        // Build settlement details dynamically from seller profile and store info
+        // Platform collects the full amount from the buyer — settlement identity is
+        // always ODOP's own, never an individual seller's real bank details.
         const dynamicSettlementDetails = [
           {
             settlement_counterparty: 'seller-app',
             settlement_phase: 'sale-amount',
-            settlement_type: 'neft',
-            beneficiary_name: String(sellerProfile?.business_name ?? store?.name ?? ''),
-            upi_address: String(sellerProfile?.upi_id ?? ''),
-            settlement_bank_account_no: String(sellerProfile?.bank_account_no ?? ''),
-            settlement_ifsc_code: String(sellerProfile?.bank_ifsc ?? ''),
-            bank_name: String(sellerProfile?.bank_name ?? 'Kotak Mahindra Bank'),
-            branch_name: String(sellerProfile?.branch_name ?? 'Bhopal'),
+            settlement_type: PLATFORM_SETTLEMENT.TYPE || 'neft',
+            beneficiary_name: PLATFORM_SETTLEMENT.BENEFICIARY_NAME || 'ODOP Marketplace',
+            upi_address: PLATFORM_SETTLEMENT.UPI_ADDRESS || 'platform@kotak',
+            settlement_bank_account_no: PLATFORM_SETTLEMENT.BANK_ACCOUNT_NO || '0000000000',
+            settlement_ifsc_code: PLATFORM_SETTLEMENT.IFSC_CODE || 'KKBK0000001',
+            bank_name: PLATFORM_SETTLEMENT.BANK_NAME || 'Kotak Mahindra Bank',
+            branch_name: PLATFORM_SETTLEMENT.BRANCH_NAME || 'Bhopal',
           },
         ];
 

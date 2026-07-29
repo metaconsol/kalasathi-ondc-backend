@@ -22,6 +22,7 @@ import { transactionModel } from '~/ondc/models/transaction.model';
 import { txnLogModel } from '~/ondc/models/log.model';
 import { overallTxnsModel } from '~/ondc/models/overall_txns.model';
 import { ondcEnv } from '~/config/ondc.config';
+import { PLATFORM_SETTLEMENT } from '~/ondc/config/constants';
 import { ondcLogger } from '~/ondc/utils/logger.util';
 import { buildQuote, type QuoteLineInput } from '~/ondc/utils/catalog.builders';
 import type { BecknContext } from '~/ondc/types/beckn.types';
@@ -407,17 +408,19 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
         String(order?.['payment']?.['@ondc/org/buyer_app_finder_fee_amount'] ?? '').trim() ||
         String(ondcEnv.buyerFinderFeeDefault);
 
+      // Platform collects the full amount from the buyer — settlement identity is
+      // always ODOP's own, never an individual seller's real bank details.
       const settlementDetails = [
         {
           settlement_counterparty: 'seller-app',
           settlement_phase: 'sale-amount',
-          settlement_type: 'neft',
-          beneficiary_name: String(sellerProfile?.business_name ?? store?.name ?? ''),
-          upi_address: String(sellerProfile?.upi_id ?? ''),
-          settlement_bank_account_no: String(sellerProfile?.bank_account_no ?? ''),
-          settlement_ifsc_code: String(sellerProfile?.bank_ifsc ?? ''),
-          bank_name: String(sellerProfile?.bank_name ?? 'Kotak Mahindra Bank'),
-          branch_name: String(sellerProfile?.branch_name ?? 'Bhopal'),
+          settlement_type: PLATFORM_SETTLEMENT.TYPE || 'neft',
+          beneficiary_name: PLATFORM_SETTLEMENT.BENEFICIARY_NAME || 'ODOP Marketplace',
+          upi_address: PLATFORM_SETTLEMENT.UPI_ADDRESS || 'platform@kotak',
+          settlement_bank_account_no: PLATFORM_SETTLEMENT.BANK_ACCOUNT_NO || '0000000000',
+          settlement_ifsc_code: PLATFORM_SETTLEMENT.IFSC_CODE || 'KKBK0000001',
+          bank_name: PLATFORM_SETTLEMENT.BANK_NAME || 'Kotak Mahindra Bank',
+          branch_name: PLATFORM_SETTLEMENT.BRANCH_NAME || 'Bhopal',
         },
       ];
 

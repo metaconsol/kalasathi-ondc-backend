@@ -13,13 +13,10 @@ import {
 } from '~/ondc/utils/payload.builder';
 import { OndcError } from '~/ondc/utils/error.handler';
 import { ondcLogger } from '~/ondc/utils/logger.util';
-import {
-  fetchStoreById,
-  fetchStoreLocations,
-  fetchSellerProfileByStoreId,
-} from '~/ondc/adapters/seller.adapter';
+import { fetchStoreById, fetchStoreLocations } from '~/ondc/adapters/seller.adapter';
 import { bapTermsModel } from '~/ondc/models/bap_terms.model';
 import { ondcEnv } from '~/config/ondc.config';
+import { PLATFORM_SETTLEMENT } from '~/ondc/config/constants';
 import { ondcQuery } from '~/lib/ondcSql';
 import { txnLogModel } from '~/ondc/models/log.model';
 import { observabilityService } from '~/ondc/services/observability.service';
@@ -63,10 +60,9 @@ export const flow3CService = {
         }
       }
     }
-    const [store, storeLocations, sellerProfile] = await Promise.all([
+    const [store, storeLocations] = await Promise.all([
       storeId ? fetchStoreById(storeId) : Promise.resolve(null),
       storeId ? fetchStoreLocations(storeId) : Promise.resolve([]),
-      storeId ? fetchSellerProfileByStoreId(storeId) : Promise.resolve(null),
     ]);
     const bapTerms = dbOrder.bap_id ? await bapTermsModel.findByBapId(dbOrder.bap_id) : null;
 
@@ -535,18 +531,20 @@ export const flow3CService = {
         dbPayment['@ondc/org/buyer_app_finder_fee_amount'] ??
         bapTerms?.bff_percent ??
         String(ondcEnv.buyerFinderFeeDefault),
+      // Platform collects the full amount from the buyer — settlement identity is
+      // always ODOP's own, never an individual seller's real bank details.
       '@ondc/org/settlement_details': origPayment['@ondc/org/settlement_details'] ??
         dbPayment['@ondc/org/settlement_details'] ?? [
           {
             settlement_counterparty: 'seller-app',
             settlement_phase: 'sale-amount',
-            settlement_type: 'neft',
-            beneficiary_name: String(sellerProfile?.business_name ?? store?.name ?? 'ODOP Mart'),
-            upi_address: String(sellerProfile?.upi_id ?? ''),
-            settlement_bank_account_no: String(sellerProfile?.bank_account_no ?? ''),
-            settlement_ifsc_code: String(sellerProfile?.bank_ifsc ?? ''),
-            bank_name: String(sellerProfile?.bank_name ?? ''),
-            branch_name: String(sellerProfile?.branch_name ?? ''),
+            settlement_type: PLATFORM_SETTLEMENT.TYPE || 'neft',
+            beneficiary_name: PLATFORM_SETTLEMENT.BENEFICIARY_NAME || 'ODOP Marketplace',
+            upi_address: PLATFORM_SETTLEMENT.UPI_ADDRESS || 'platform@kotak',
+            settlement_bank_account_no: PLATFORM_SETTLEMENT.BANK_ACCOUNT_NO || '0000000000',
+            settlement_ifsc_code: PLATFORM_SETTLEMENT.IFSC_CODE || 'KKBK0000001',
+            bank_name: PLATFORM_SETTLEMENT.BANK_NAME || 'Kotak Mahindra Bank',
+            branch_name: PLATFORM_SETTLEMENT.BRANCH_NAME || 'Bhopal',
           },
         ],
     };

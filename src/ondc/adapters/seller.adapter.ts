@@ -7,14 +7,17 @@
  *
  * Table: store_locations (ondc_odop_db)
  *   id, store_id, address_line1, address_line2, city, state, country, pincode,
- *   latitude, longitude, radius_km (already km), time_from, time_to (HHMM smallint),
- *   day_from, day_to, location_type, fulfillment_type, is_active
+ *   latitude, longitude, radius_km (already km), location_type, is_active
+ *
+ * Operating-hours (time_from/time_to/day_from/day_to) and fulfillment_type are
+ * NOT read per-row here — see PROVIDER_TIMING in ~/ondc/config/constants,
+ * applied as one org-wide setting for every provider instead.
  */
 
 import { ondcQuery } from '~/lib/ondcSql';
 import type { OndcProvider } from '~/ondc/types/ondc.types';
 import { ondcEnv } from '~/config/ondc.config';
-import { SELLER_PROFILE } from '~/ondc/config/constants';
+import { SELLER_PROFILE, PROVIDER_TIMING } from '~/ondc/config/constants';
 import {
   buildProviderLocation,
   resolveOndcLocality,
@@ -46,12 +49,7 @@ export interface MainDbStoreLocation {
   country: string;
   pincode: string;
   radius_km: number | null; // already in km (schema: radius_km)
-  time_from: number | null; // HHMM smallint (schema: time_from)
-  time_to: number | null; // HHMM smallint (schema: time_to)
-  day_from: number | null; // 1=Mon
-  day_to: number | null; // 7=Sun
   location_type: string;
-  fulfillment_type: string;
   is_active: boolean;
 }
 
@@ -90,10 +88,23 @@ function mapStoreRow(r: any): MainDbSeller {
   };
 }
 
-/** All active stores — each becomes an ONDC provider */
+/**
+ * All active stores eligible to be an ONDC provider: ecom-active, Super
+ * Admin-approved seller, has at least one product (a store with none would
+ * only ever produce an empty catalog entry), and not turned off via the
+ * ONDC-only toggle (ondc_provider_settings — absent row means active).
+ */
 export async function getActiveStores(): Promise<MainDbSeller[]> {
   const rows = await ondcQuery<any>(
-    `SELECT ${STORE_SELECT} FROM stores s WHERE s.is_active = 1 ORDER BY s.id ASC`,
+    `SELECT ${STORE_SELECT}
+     FROM stores s
+     JOIN seller_profiles sp ON sp.user_id = s.seller_user_id
+     LEFT JOIN ondc_provider_settings ops ON ops.store_id = s.id
+     WHERE s.is_active = 1
+       AND sp.approval_status = 'APPROVED'
+       AND COALESCE(ops.is_active, 1) = 1
+       AND EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id)
+     ORDER BY s.id ASC`,
   );
   return rows.map(mapStoreRow);
 }
@@ -167,12 +178,7 @@ export async function fetchStoreLocations(storeId: number): Promise<MainDbStoreL
        sl.country,
        sl.pincode,
        sl.radius_km,
-       sl.time_from,
-       sl.time_to,
-       sl.day_from,
-       sl.day_to,
        sl.location_type,
-       sl.fulfillment_type,
        sl.is_active
      FROM store_locations sl
      WHERE sl.store_id = ? AND sl.is_active = 1
@@ -191,14 +197,23 @@ export async function fetchStoreLocations(storeId: number): Promise<MainDbStoreL
     country: r.country ?? 'IND',
     pincode: r.pincode ?? SELLER_PROFILE.AREA_CODE,
     radius_km: r.radius_km ? parseInt(r.radius_km, 10) : null,
-    time_from: r.time_from ? parseInt(r.time_from, 10) : null,
-    time_to: r.time_to ? parseInt(r.time_to, 10) : null,
-    day_from: r.day_from ? parseInt(r.day_from, 10) : null,
-    day_to: r.day_to ? parseInt(r.day_to, 10) : null,
     location_type: r.location_type ?? 'PICKUP',
-    fulfillment_type: r.fulfillment_type ?? 'Delivery',
     is_active: Boolean(r.is_active),
   }));
+}
+
+/** Operating-hours window + day list, one org-wide setting applied to every provider. */
+function resolveProviderTiming(): { timeFrom: string; timeTo: string; days: string } {
+  const dayFrom = Number.parseInt(PROVIDER_TIMING.DAY_FROM, 10) || 1;
+  const dayTo = Number.parseInt(PROVIDER_TIMING.DAY_TO, 10) || 7;
+  const days = Array.from({ length: Math.max(1, dayTo - dayFrom + 1) }, (_, i) => dayFrom + i).join(
+    ',',
+  );
+  return {
+    timeFrom: PROVIDER_TIMING.TIME_FROM || '0000',
+    timeTo: PROVIDER_TIMING.TIME_TO || '2359',
+    days,
+  };
 }
 
 /** Convert store_locations row → ONDC ProviderLocation */
@@ -207,10 +222,8 @@ export function mapStoreLocationToOndcLocation(loc: MainDbStoreLocation): Provid
   const lng = loc.longitude ?? 77.4126;
   const gps = `${lat},${lng}`;
   const radiusKm = Math.max(1, loc.radius_km ?? 10);
+  const { timeFrom, timeTo, days } = resolveProviderTiming();
 
-  // Store operates 24/7 — location time defaults to 0000-2359, all days
-  // (buildProviderLocation applies those defaults). Per-fulfillment service
-  // windows are expressed in the provider timing tags instead.
   return buildProviderLocation(
     String(loc.id),
     gps,
@@ -222,6 +235,9 @@ export function mapStoreLocationToOndcLocation(loc: MainDbStoreLocation): Provid
       state: loc.state,
     },
     radiusKm,
+    timeFrom,
+    timeTo,
+    days,
   );
 }
 
