@@ -17,7 +17,6 @@
 import type { Request, Response } from 'express';
 import { ApiResponse } from '~/lib/response';
 import { ondcQuery } from '~/lib/ondcSql';
-import { catalogService } from '~/ondc/services/catalog.service';
 
 interface OndcDashboardStats {
   totalOrders: number;
@@ -32,6 +31,17 @@ interface OndcDashboardStats {
 }
 
 const num = (v: unknown): number => Number(v ?? 0) || 0;
+
+// A store reaches ONDC only when every gate passes: ecom-active, seller
+// Super Admin-approved, ONDC toggle on (no row = on), and holding a product.
+// Must stay in sync with getActiveStores() in seller.adapter.ts.
+const HAS_PRODUCTS = 'EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id)';
+const LIVE_STORE_IDS = `
+  SELECT s.id
+  FROM stores s
+  JOIN seller_profiles sp ON sp.user_id = s.seller_user_id AND sp.approval_status = 'APPROVED'
+  LEFT JOIN ondc_provider_settings ops ON ops.store_id = s.id
+  WHERE s.is_active = 1 AND COALESCE(ops.is_active, 1) = 1 AND ${HAS_PRODUCTS}`;
 
 /** GET /api/v1/ondc/admin/dashboard/stats */
 export async function getDashboardStats(req: Request, res: Response): Promise<void> {
@@ -70,11 +80,14 @@ export async function getDashboardStats(req: Request, res: Response): Promise<vo
   );
   const orderAgg = orderRows[0];
 
-  // ---- Active providers (active stores; scoped to the seller's own stores) ----
-  const providerWhere = sellerId !== undefined ? 'AND seller_user_id = ?' : '';
+  // ---- Providers live on ONDC (scoped to the seller's own stores) ----
+  // NOT `stores.is_active` alone: that is the ecom site's own switch, it is set
+  // on every store, so counting it reported the entire store table as active
+  // providers no matter their ONDC eligibility.
+  const providerWhere = sellerId !== undefined ? 'AND s.seller_user_id = ?' : '';
   const providerParams = sellerId !== undefined ? [sellerId] : [];
   const providerRows = await ondcQuery<{ cnt: number }>(
-    `SELECT COUNT(*) AS cnt FROM stores WHERE is_active = 1 ${providerWhere}`,
+    `SELECT COUNT(*) AS cnt FROM (${LIVE_STORE_IDS} ${providerWhere}) live`,
     providerParams,
   );
 
@@ -109,19 +122,26 @@ export async function getDashboardStats(req: Request, res: Response): Promise<vo
     totalTransactions = num(txnRows[0]?.cnt);
   }
 
-  // ---- Synced catalog items (live build, matching the Catalog page) ----
-  // Wrapped so a catalog-build failure degrades to 0 rather than failing the dashboard.
-  let syncedItems = 0;
-  try {
-    const catalog = await catalogService.buildSearchCatalog('ONDC:RET12');
-    const providers = (catalog['bpp/providers'] as Array<{ id: string; items?: unknown[] }>) ?? [];
-    for (const p of providers) {
-      if (providerIds.length && !providerIds.includes(p.id)) continue;
-      syncedItems += p.items?.length ?? 0;
-    }
-  } catch {
-    syncedItems = 0;
-  }
+  // ---- Synced catalog items ----
+  // Counted in SQL rather than by building the catalog payload: the old version
+  // built ONLY the RET12 catalog, so every RET10 and RET16 item was missing, and
+  // building each domain's payload per dashboard load does not scale past a
+  // handful of providers. One row per leaf variant, or one per product when it
+  // has none — the same expansion fetchOndcCatalogRows performs.
+  const itemWhere = sellerId !== undefined ? 'AND s.seller_user_id = ?' : '';
+  const itemParams = sellerId !== undefined ? [sellerId] : [];
+  const itemRows = await ondcQuery<{ cnt: number }>(
+    `SELECT COUNT(*) AS cnt
+     FROM products p
+     JOIN product_verification pv ON pv.product_id = p.id AND pv.approval_status = 'approved'
+     LEFT JOIN product_variants v
+       ON v.product_id = p.id
+      AND NOT EXISTS (SELECT 1 FROM product_variants c WHERE c.parent_variant_id = v.id)
+     WHERE p.publish_status = 'publish'
+       AND p.store_id IN (${LIVE_STORE_IDS} ${itemWhere})`,
+    itemParams,
+  );
+  const syncedItems = num(itemRows[0]?.cnt);
 
   const stats: OndcDashboardStats = {
     totalOrders: num(orderAgg?.total),
