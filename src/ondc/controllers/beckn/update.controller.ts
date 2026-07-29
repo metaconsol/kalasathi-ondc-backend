@@ -96,6 +96,26 @@ export async function handleUpdate(req: Request, res: Response): Promise<void> {
         return;
       }
 
+      // Item-level return requests (when fulfillments array doesn't specify Return_* code directly)
+      const itemReturnTag = (order['items'] ?? []).find((item: any) =>
+        (item?.tags ?? []).some(
+          (t: any) =>
+            t?.code === 'return_request' ||
+            (t?.code === 'return' && t?.list?.some((l: any) => l?.code === 'request')),
+        ),
+      );
+      if (itemReturnTag) {
+        const fulfillmentId = String(
+          itemReturnTag.fulfillment_id ?? order['fulfillments']?.[0]?.id ?? 'F1',
+        );
+        await fulfillmentService.initiateReturn(
+          dbOrder.ondc_order_id,
+          fulfillmentId,
+          'Return',
+        );
+        return;
+      }
+
       // Log to ondc_order_actions
       if (target === 'item' || target === 'fulfillment') {
         const actionType = target === 'fulfillment' ? 'return' : 'partial_cancel';

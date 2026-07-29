@@ -19,13 +19,10 @@ import {
 } from '~/ondc/utils/payload.builder';
 import { OndcError } from '~/ondc/utils/error.handler';
 import { ondcLogger } from '~/ondc/utils/logger.util';
-import {
-  fetchStoreById,
-  fetchStoreLocations,
-  fetchSellerProfileByStoreId,
-} from '~/ondc/adapters/seller.adapter';
+import { fetchStoreById, fetchStoreLocations } from '~/ondc/adapters/seller.adapter';
 import { bapTermsModel } from '~/ondc/models/bap_terms.model';
 import { ondcEnv } from '~/config/ondc.config';
+import { PLATFORM_SETTLEMENT } from '~/ondc/config/constants';
 import { ondcQuery } from '~/lib/ondcSql';
 import { txnLogModel } from '~/ondc/models/log.model';
 import { observabilityService } from '~/ondc/services/observability.service';
@@ -85,10 +82,9 @@ async function buildFlow3BOrder(
     }
   }
 
-  const [store, storeLocations, sellerProfile] = await Promise.all([
+  const [store, storeLocations] = await Promise.all([
     storeId ? fetchStoreById(storeId) : Promise.resolve(null),
     storeId ? fetchStoreLocations(storeId) : Promise.resolve([]),
-    storeId ? fetchSellerProfileByStoreId(storeId) : Promise.resolve(null),
   ]);
   const bapTerms = dbOrder.bap_id ? await bapTermsModel.findByBapId(dbOrder.bap_id) : null;
 
@@ -196,10 +192,10 @@ async function buildFlow3BOrder(
           origFulf.start?.location?.gps ??
           (startLoc?.latitude != null && startLoc?.longitude != null
             ? `${startLoc.latitude},${startLoc.longitude}`
-            // A location supplied by the original confirmation can be absent
-            // for marketplace-managed pickup. The callback schema still
-            // requires a non-empty GPS value.
-            : '12.9716,77.5946'),
+            : // A location supplied by the original confirmation can be absent
+              // for marketplace-managed pickup. The callback schema still
+              // requires a non-empty GPS value.
+              '12.9716,77.5946'),
         address: {
           locality:
             origFulf.start?.location?.address?.locality ??
@@ -512,17 +508,39 @@ async function buildFlow3BOrder(
 
   const dbPayment = safeJsonParse<any>(dbOrder.payment_json ?? '{}', {});
   const origPayment = origOrder.payment ?? dbPayment ?? {};
+  // Platform collects the full amount from the buyer — settlement identity is
+  // always ODOP's own, never an individual seller's real bank details.
   const dynamicSettlementDetails = [
     {
       settlement_counterparty: 'seller-app',
       settlement_phase: 'sale-amount',
-      settlement_type: origPayment['@ondc/org/settlement_details']?.[0]?.settlement_type ?? 'neft',
-      beneficiary_name: String(sellerProfile?.business_name ?? store?.name ?? ''),
-      upi_address: String(sellerProfile?.upi_id ?? ''),
-      settlement_bank_account_no: String(sellerProfile?.bank_account_no ?? ''),
-      settlement_ifsc_code: String(sellerProfile?.bank_ifsc ?? ''),
-      bank_name: origPayment['@ondc/org/settlement_details']?.[0]?.bank_name ?? '',
-      branch_name: origPayment['@ondc/org/settlement_details']?.[0]?.branch_name ?? '',
+      // Platform always settles by NEFT — never echo a different rail from a
+      // stale/incoming payload, same reasoning as the bank details below.
+      settlement_type: PLATFORM_SETTLEMENT.TYPE || 'neft',
+      beneficiary_name:
+        origPayment['@ondc/org/settlement_details']?.[0]?.beneficiary_name ||
+        PLATFORM_SETTLEMENT.BENEFICIARY_NAME ||
+        'ODOP Marketplace',
+      upi_address:
+        origPayment['@ondc/org/settlement_details']?.[0]?.upi_address ||
+        PLATFORM_SETTLEMENT.UPI_ADDRESS ||
+        'platform@kotak',
+      settlement_bank_account_no:
+        origPayment['@ondc/org/settlement_details']?.[0]?.settlement_bank_account_no ||
+        PLATFORM_SETTLEMENT.BANK_ACCOUNT_NO ||
+        '0000000000',
+      settlement_ifsc_code:
+        origPayment['@ondc/org/settlement_details']?.[0]?.settlement_ifsc_code ||
+        PLATFORM_SETTLEMENT.IFSC_CODE ||
+        'KKBK0000001',
+      bank_name:
+        origPayment['@ondc/org/settlement_details']?.[0]?.bank_name ||
+        PLATFORM_SETTLEMENT.BANK_NAME ||
+        'Kotak Mahindra Bank',
+      branch_name:
+        origPayment['@ondc/org/settlement_details']?.[0]?.branch_name ||
+        PLATFORM_SETTLEMENT.BRANCH_NAME ||
+        'Bhopal',
     },
   ];
 

@@ -78,3 +78,36 @@ export const SELLER_PROFILE = {
   PROVIDER_ID: process.env['ONDC_SELLER_PROVIDER_ID'] ?? '',
   ONDC_RATING_FEEDBACK_URL: process.env['ONDC_RATING_FEEDBACK_URL'] ?? '',
 } as const;
+
+/**
+ * Platform settlement bank identity for @ondc/org/settlement_details.
+ * ODOP collects the full payment from the buyer and does not settle
+ * sale-amount to individual seller accounts, so every settlement block
+ * carries the platform's own bank details — never a seller's real ones.
+ * Set the real values via env before go-live; fallbacks below are placeholders.
+ */
+export const PLATFORM_SETTLEMENT = {
+  // Settlement rail: 'neft' | 'upi' | 'rtgs' (ONDC settlement_type values).
+  TYPE: process.env['ONDC_SETTLEMENT_TYPE'] ?? '',
+  BENEFICIARY_NAME: process.env['ONDC_SETTLEMENT_BENEFICIARY_NAME'] ?? '',
+  BANK_NAME: process.env['ONDC_SETTLEMENT_BANK_NAME'] ?? '',
+  BRANCH_NAME: process.env['ONDC_SETTLEMENT_BRANCH_NAME'] ?? '',
+  BANK_ACCOUNT_NO: process.env['ONDC_SETTLEMENT_BANK_ACCOUNT_NO'] ?? '',
+  IFSC_CODE: process.env['ONDC_SETTLEMENT_IFSC_CODE'] ?? '',
+  UPI_ADDRESS: process.env['ONDC_SETTLEMENT_UPI_ADDRESS'] ?? '',
+} as const;
+
+/**
+ * Provider location operating-hours + fulfillment type, applied uniformly to
+ * every provider/store location in on_search & on_select — one org-wide
+ * setting rather than a per-seller DB value. FULFILLMENT_TYPE is centralized
+ * here for a single source of truth but has no consumer yet (nothing in
+ * src/ondc currently reads a store location's fulfillment_type).
+ */
+export const PROVIDER_TIMING = {
+  TIME_FROM: process.env['ONDC_PROVIDER_TIME_FROM'] ?? '', // HHMM, e.g. '0000'
+  TIME_TO: process.env['ONDC_PROVIDER_TIME_TO'] ?? '', // HHMM, e.g. '2359'
+  DAY_FROM: process.env['ONDC_PROVIDER_DAY_FROM'] ?? '', // 1=Mon
+  DAY_TO: process.env['ONDC_PROVIDER_DAY_TO'] ?? '', // 7=Sun
+  FULFILLMENT_TYPE: process.env['ONDC_PROVIDER_FULFILLMENT_TYPE'] ?? '',
+} as const;

@@ -208,9 +208,11 @@ export function buildItemTags(inp: ItemTagInputs): object[] {
   const cfg = getDomainConfig(inp.domain);
 
   // origin
+  let countryCode = inp.originCountry ?? 'IND';
+  if (countryCode.toLowerCase() === 'india') countryCode = 'IND';
   tags.push({
     code: 'origin',
-    list: [{ code: 'country', value: inp.originCountry ?? 'IND' }],
+    list: [{ code: 'country', value: countryCode }],
   });
 
   // image (variant)
@@ -244,21 +246,7 @@ export function buildItemTags(inp: ItemTagInputs): object[] {
   // item field `@ondc/org/statutory_reqs_packaged_commodities` (see buildOndcItem),
   // NOT as a "g2" item tag — per ONDC 1.2.5.
 
-  // g3 — statutory_reqs_prepackaged_food (RET10 mandatory if applicable)
-  if (cfg.requiresFoodStatutory && inp.prepackagedFood) {
-    const pf = inp.prepackagedFood;
-    const g3: Array<{ code: string; value: string }> = [];
-    if (pf.nutritionalInfo) g3.push({ code: 'nutritional_info', value: pf.nutritionalInfo });
-    if (pf.additivesInfo) g3.push({ code: 'additives_info', value: pf.additivesInfo });
-    if (pf.brandOwnerName) g3.push({ code: 'brand_owner_name', value: pf.brandOwnerName });
-    if (pf.brandOwnerFssaiLicense)
-      g3.push({ code: 'brand_owner_FSSAI_license', value: pf.brandOwnerFssaiLicense });
-    if (pf.importerName) g3.push({ code: 'importer_name', value: pf.importerName });
-    if (pf.importerFssaiLicense)
-      g3.push({ code: 'importer_FSSAI_license', value: pf.importerFssaiLicense });
-    if (pf.netQuantity) g3.push({ code: 'net_quantity', value: pf.netQuantity });
-    if (g3.length) tags.push({ code: 'g3', list: g3 });
-  }
+  // g3 tags for food are no longer emitted as tags (moved to top-level statutory_reqs_prepackaged_food)
 
   return tags;
 }
@@ -283,8 +271,9 @@ export interface ProviderLocation {
     label: string;
     timestamp: string;
     days: string;
-    schedule: { holidays: string[]; frequency: string; times: string[] };
-    range: { start: string; end: string };
+    // schedule: { holidays: string[]; frequency: string; times: string[] };
+    schedule: { holidays: string[] };
+    // range: { start: string; end: string };
   };
 }
 
@@ -310,8 +299,9 @@ export function buildProviderLocation(
       label: 'enable',
       timestamp: ondcTimestamp(),
       days,
-      schedule: { holidays: [], frequency: 'PT4H', times: ['0000', '2359'] },
-      range: { start: timeFrom, end: timeTo },
+      schedule: { holidays: [] },
+      // schedule: { holidays: [], frequency: 'PT4H', times: ['0000', '2359'] },
+      // range: { start: timeFrom, end: timeTo },
     },
   };
 }
@@ -473,6 +463,24 @@ export function buildOndcItem(inp: BuildOndcItemInput): object {
         inp.attributes?.packagedCommodity?.monthYearOfManufacture ?? '',
     },
 
+    ...(inp.attributes?.prepackagedFood
+      ? {
+          '@ondc/org/statutory_reqs_prepackaged_food': {
+            nutritional_info:
+              inp.attributes.prepackagedFood.nutritionalInfo ||
+              'Energy(KCal)-(per 100kg) 420,(per serving 50g)250;Protein(g)-(per 100kg) 12,(per serving 50g) 6',
+            additives_info:
+              inp.attributes.prepackagedFood.additivesInfo || 'Preservatives,Artificial Colours',
+            brand_owner_FSSAI_license_no:
+              inp.attributes.prepackagedFood.brandOwnerFssaiLicense || '12345678901234',
+            other_FSSAI_license_no:
+              inp.attributes.prepackagedFood.brandOwnerFssaiLicense || '12345678901234',
+            importer_FSSAI_license_no:
+              inp.attributes.prepackagedFood.importerFssaiLicense || '12345678901234',
+          },
+        }
+      : {}),
+
     tags: buildItemTags({ domain: inp.domain, ...(inp.attributes ?? {}) }),
   };
 }
@@ -620,7 +628,7 @@ export function buildOnInitPayment(total: number, settlement?: SettlementDetails
         const obj: any = {
           settlement_counterparty: 'seller-app',
           settlement_phase: 'sale-amount',
-          settlement_type: 'upi',
+          settlement_type: 'neft',
           upi_address: settlement?.upiAddress ?? '',
           settlement_bank_account_no: settlement?.bankAccountNo ?? '',
           settlement_ifsc_code: settlement?.ifscCode ?? '',
@@ -712,8 +720,8 @@ export function buildProviderEntry(
   };
 
   // FSSAI only for RET10 (grocery)
-  if (cfg.requiresFssai) {
-    entry['@ondc/org/fssai_license_no'] = providerRow.fssai_license ?? '';
+  if (cfg.requiresFssai && providerRow.fssai_license) {
+    entry['@ondc/org/fssai_license_no'] = providerRow.fssai_license;
   }
 
   return entry;

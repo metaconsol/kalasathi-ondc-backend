@@ -7,13 +7,12 @@
 import { orderModel } from '~/ondc/models/order.model';
 import { becknService } from '~/ondc/services/beckn.service';
 import { observabilityService } from '~/ondc/services/observability.service';
-import { buildResponseContext } from '~/ondc/utils/payload.builder';
+import { buildResponseContext, buildOnUpdate, newMessageId } from '~/ondc/utils/payload.builder';
 import { txnLogModel } from '~/ondc/models/log.model';
 import { ondcLogger } from '~/ondc/utils/logger.util';
 import { buildOnStatusOrder } from '~/ondc/adapters/order.adapter';
 import { OndcError } from '~/ondc/utils/error.handler';
 import type { OndcFulfillmentState } from '~/ondc/types/order.types';
-import { newMessageId } from '~/ondc/utils/payload.builder';
 
 export const flow4AService = {
   async initiateReturn(ondcOrderId: string, returnItems: unknown[]): Promise<void> {
@@ -61,10 +60,7 @@ export const flow4AService = {
     };
     const responseContext = buildResponseContext(callbackContext as any, 'on_update');
 
-    const callbackPayload = {
-      context: responseContext,
-      message: { order: onUpdateOrder },
-    };
+    const callbackPayload = buildOnUpdate(callbackContext as any, onUpdateOrder);
 
     const callbackUrl = becknService.buildCallbackUrl(order.bap_uri, 'on_update');
     const { statusCode, error: cbErr } = await becknService.sendCallback(
@@ -88,7 +84,7 @@ export const flow4AService = {
       error_message: cbErr ?? null,
     });
 
-    observabilityService.push('on_update', callbackPayload);
+    observabilityService.push('on_update', callbackPayload as Record<string, unknown>);
 
     ondcLogger.info('Flow4A on_update sent', { ondcOrderId, fulfillmentState });
   },

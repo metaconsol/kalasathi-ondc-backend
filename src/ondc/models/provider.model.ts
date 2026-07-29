@@ -22,6 +22,7 @@ export interface OndcProviderRow {
   support_email: string | null;
   domain: string;
   domains: OndcRetailDomain[];
+  /** ONDC-only toggle (ondc_provider_settings) — independent of the ecom site's own on/off switch. */
   is_active: boolean;
   created_at: Date;
   updated_at: Date;
@@ -40,14 +41,73 @@ const STORE_SELECT = `
   s.support_phone                        AS support_phone,
   s.support_email                        AS support_email,
   s.ondc_domain                          AS ondc_domain_raw,
-  s.is_active                            AS is_active,
+  COALESCE(ops.is_active, 1)             AS is_active,
   s.created_at                           AS created_at,
   s.updated_at                           AS updated_at`;
 
-function buildNameFilter(q?: string): { clause: string; params: string[] } {
-  const term = q?.trim();
-  if (!term) return { clause: '', params: [] };
-  return { clause: 'WHERE s.store_name LIKE ?', params: [`%${term}%`] };
+// Used by findById/findBySellerId only — deliberately lenient. These back the
+// live /confirm order flow (see confirm.controller.ts), which must keep
+// resolving an already-placed order's provider even if the seller's approval
+// or product catalog changes afterward. ondc_provider_settings has no row for
+// stores never explicitly toggled — absent means active (default).
+const STORE_JOIN = `
+  FROM stores s
+  LEFT JOIN ondc_provider_settings ops ON ops.store_id = s.id`;
+
+// Used by the admin listing only (listAll/listPaginated/countAll) — a store
+// only shows here once its seller is Super Admin-approved; sellers pending
+// approval never appear at all. Having a product is NOT a hard exclusion here
+// (unlike getActiveStores, the real /on_search gate) — approved sellers with
+// zero products still show, filterable via hasProducts, so admins can see
+// them and follow up. is_active on this row is still the ONDC-only toggle.
+const LISTING_JOIN = `
+  FROM stores s
+  JOIN seller_profiles sp ON sp.user_id = s.seller_user_id AND sp.approval_status = 'APPROVED'
+  LEFT JOIN ondc_provider_settings ops ON ops.store_id = s.id`;
+
+const HAS_PRODUCTS_EXISTS = 'EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id)';
+
+interface ProviderFilterOpts {
+  q?: string | undefined;
+  /** ONDC-only toggle state (ondc_provider_settings), not the ecom stores.is_active. */
+  status?: 'active' | 'inactive' | undefined;
+  hasProducts?: 'yes' | 'no' | undefined;
+}
+
+function buildFilters(opts?: ProviderFilterOpts): { clause: string; params: string[] } {
+  const conditions: string[] = [];
+  const params: string[] = [];
+
+  const term = opts?.q?.trim();
+  if (term) {
+    conditions.push('s.store_name LIKE ?');
+    params.push(`%${term}%`);
+  }
+
+  if (opts?.status === 'active') {
+    conditions.push('COALESCE(ops.is_active, 1) = 1');
+  } else if (opts?.status === 'inactive') {
+    conditions.push('COALESCE(ops.is_active, 1) = 0');
+  }
+
+  if (opts?.hasProducts === 'yes') {
+    conditions.push(HAS_PRODUCTS_EXISTS);
+  } else if (opts?.hasProducts === 'no') {
+    conditions.push(`NOT ${HAS_PRODUCTS_EXISTS}`);
+  }
+
+  return { clause: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', params };
+}
+
+/** Extra conditions for buildFilters, excluding hasProducts — used to compute
+ *  the has-products breakdown against whatever OTHER filters are active, so
+ *  the counts never get narrowed by the hasProducts filter itself. */
+function buildFiltersExceptProducts(opts?: ProviderFilterOpts): {
+  clause: string;
+  params: string[];
+} {
+  const { hasProducts: _hasProducts, ...rest } = opts ?? {};
+  return buildFilters(rest);
 }
 
 function mapRow(r: any): OndcProviderRow {
@@ -77,7 +137,7 @@ export const providerModel = {
     const storeId = parseInt(providerId, 10);
     if (!Number.isFinite(storeId)) return null;
     const rows = await ondcQuery<any>(
-      `SELECT ${STORE_SELECT} FROM stores s WHERE s.id = ? LIMIT 1`,
+      `SELECT ${STORE_SELECT} ${STORE_JOIN} WHERE s.id = ? LIMIT 1`,
       [storeId],
     );
     return rows[0] ? mapRow(rows[0]) : null;
@@ -85,54 +145,86 @@ export const providerModel = {
 
   async findBySellerId(sellerId: number): Promise<OndcProviderRow | null> {
     const rows = await ondcQuery<any>(
-      `SELECT ${STORE_SELECT} FROM stores s
+      `SELECT ${STORE_SELECT} ${STORE_JOIN}
        WHERE s.seller_user_id = ?
-       ORDER BY s.is_active DESC, s.id ASC
+       ORDER BY COALESCE(ops.is_active, 1) DESC, s.id ASC
        LIMIT 1`,
       [sellerId],
     );
     return rows[0] ? mapRow(rows[0]) : null;
   },
 
-  /** Every store — active and inactive — so admin can toggle them. */
+  /** Every APPROVED store — active and inactive, with or without products — so admin can manage them. */
   async listAll(): Promise<OndcProviderRow[]> {
     const rows = await ondcQuery<any>(
-      `SELECT ${STORE_SELECT} FROM stores s ORDER BY s.is_active DESC, s.store_name ASC`,
+      `SELECT ${STORE_SELECT} ${LISTING_JOIN} ORDER BY COALESCE(ops.is_active, 1) DESC, s.store_name ASC`,
     );
     return rows.map(mapRow);
   },
 
-  async countAll(opts?: { q?: string }): Promise<number> {
-    const { clause, params } = buildNameFilter(opts?.q);
+  async countAll(opts?: ProviderFilterOpts): Promise<number> {
+    const { clause, params } = buildFilters(opts);
     const rows = await ondcQuery<{ cnt: number }>(
-      `SELECT COUNT(*) AS cnt FROM stores s ${clause}`,
+      `SELECT COUNT(*) AS cnt ${LISTING_JOIN} ${clause}`,
       params,
     );
     return Number(rows[0]?.cnt ?? 0);
   },
 
-  async listPaginated(opts: {
-    limit: number;
-    offset: number;
-    q?: string;
-  }): Promise<OndcProviderRow[]> {
-    const { clause, params } = buildNameFilter(opts.q);
+  /** Has-products counts among approved sellers matching every OTHER active filter (search/status). */
+  async getProductBreakdown(
+    opts?: ProviderFilterOpts,
+  ): Promise<{ withProducts: number; withoutProducts: number }> {
+    const { clause, params } = buildFiltersExceptProducts(opts);
+    const rows = await ondcQuery<{ withProducts: number; withoutProducts: number }>(
+      `SELECT
+         SUM(CASE WHEN ${HAS_PRODUCTS_EXISTS} THEN 1 ELSE 0 END) AS withProducts,
+         SUM(CASE WHEN NOT ${HAS_PRODUCTS_EXISTS} THEN 1 ELSE 0 END) AS withoutProducts
+       ${LISTING_JOIN} ${clause}`,
+      params,
+    );
+    return {
+      withProducts: Number(rows[0]?.withProducts) || 0,
+      withoutProducts: Number(rows[0]?.withoutProducts) || 0,
+    };
+  },
+
+  async listPaginated(
+    opts: ProviderFilterOpts & { limit: number; offset: number },
+  ): Promise<OndcProviderRow[]> {
+    const { clause, params } = buildFilters(opts);
     const rows = await ondcQuery<any>(
-      `SELECT ${STORE_SELECT} FROM stores s ${clause}
-       ORDER BY s.is_active DESC, s.store_name ASC
+      `SELECT ${STORE_SELECT} ${LISTING_JOIN} ${clause}
+       ORDER BY COALESCE(ops.is_active, 1) DESC, s.store_name ASC
        LIMIT ? OFFSET ?`,
       [...params, opts.limit, opts.offset],
     );
     return rows.map(mapRow);
   },
 
-  /** Activate/deactivate the underlying store. */
+  /** ONDC-only toggle — never touches the ecom-owned `stores` table. */
   async setActive(providerId: string, active: boolean): Promise<void> {
     const storeId = parseInt(providerId, 10);
     if (!Number.isFinite(storeId)) return;
-    await ondcExec(`UPDATE stores SET is_active = ?, updated_at = NOW() WHERE id = ?`, [
-      active ? 1 : 0,
-      storeId,
-    ]);
+    await ondcExec(
+      `INSERT INTO ondc_provider_settings (store_id, is_active) VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE is_active = VALUES(is_active), updated_at = NOW()`,
+      [storeId, active ? 1 : 0],
+    );
+  },
+
+  /** Same as setActive, for many providers in one statement. */
+  async setActiveBulk(providerIds: string[], active: boolean): Promise<number> {
+    const storeIds = providerIds.map((id) => parseInt(id, 10)).filter((id) => Number.isFinite(id));
+    if (storeIds.length === 0) return 0;
+
+    const values = storeIds.map(() => '(?, ?)').join(', ');
+    const params = storeIds.flatMap((id) => [id, active ? 1 : 0]);
+    await ondcExec(
+      `INSERT INTO ondc_provider_settings (store_id, is_active) VALUES ${values}
+       ON DUPLICATE KEY UPDATE is_active = VALUES(is_active), updated_at = NOW()`,
+      params,
+    );
+    return storeIds.length;
   },
 };

@@ -7,15 +7,16 @@ idempotent MariaDB scripts (`IF NOT EXISTS` everywhere — safe to re-run).
 
 Run against the database `ONDC_DB_URL` points to, in this exact order:
 
-| #   | File                          | What it does                                                                                                                                                   |
-| --- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | `001_setup_ondc.sql`          | store*locations ONDC columns (radius/timing/fulfillment_type), all `ondc*\*` runtime tables, ondc_ppf_recon extensions, seller_profiles bank columns           |
-| 2   | `002_fix_dump_gaps.sql`       | ondc_fulfillments.fulfillment_json, ondc_settlements ledger columns + indexes. FIX 3 (User table-name case) is a MANUAL note — read it, currently not required |
-| 3   | `003_delhivery_logistics.sql` | ondc*orders delhivery*\* columns (booking/tracking state for the ONDC order page)                                                                              |
+| #   | File                             | What it does                                                                                                                                                   |
+| --- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `001_setup_ondc.sql`             | store*locations ONDC columns (radius/timing/fulfillment_type), all `ondc*\*` runtime tables, ondc_ppf_recon extensions, seller_profiles bank columns           |
+| 2   | `002_fix_dump_gaps.sql`          | ondc_fulfillments.fulfillment_json, ondc_settlements ledger columns + indexes. FIX 3 (User table-name case) is a MANUAL note — read it, currently not required |
+| 3   | `003_delhivery_logistics.sql`    | ondc*orders delhivery*\* columns (booking/tracking state for the ONDC order page)                                                                              |
+| 4   | `004_ondc_provider_settings.sql` | ondc_provider_settings table — independent per-store ONDC on/off toggle, decoupled from stores.is_active                                                       |
 
 ## Moving to the single/ecom database later
 
-The same three files, in the same order, bring the ecom DB (`odopmartmp_new`)
+The same files, in the same order, bring the ecom DB (`odopmartmp_new`)
 up to ONDC-ready state — it already has the storefront base tables the
 migrations build on (products, stores, store*locations incl. the
 delhivery_warehouse*\* columns, seller_profiles, ...). After running them,

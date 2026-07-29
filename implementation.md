@@ -1,3 +1,62 @@
+### Branch 068
+
+**Date:** 2026-07-28
+
+**Status:** Ready for Testing
+
+**Area:** ONDC RET10 (Grocery) Catalog Validation & Schema Normalization
+
+**What:**
+
+- Added strict schema normalizations for item tags, GPS coordinates, and mandatory provider timings for the RET10 domain catalog.
+
+**Why:**
+
+- To resolve strict validation errors thrown by the ONDC Workbench by ensuring the catalog payload complies perfectly with the ONDC schema formatting rules.
+
+**Changes:** file name and description of file change.
+
+- `src/ondc/services/ret10-catalog.service.ts`
+  - Added `normalizeGps` function to strictly format GPS coordinates (ensuring exactly 2 integer digits and minimum 4 decimals) and provide a valid fallback.
+  - Added `resolveLocationWindow` and `buildRet10TimingTags` to automatically calculate store operating hours and inject mandatory `timing` tags (Order, Delivery, Self-Pickup).
+  - Added `normalizeRet10Item` to filter out unsupported ONDC item tags and enforce quantity maximums as strictly numeric strings.
+  - Updated the catalog mapping logic to apply these normalizations at both the provider location and item levels.
+
+### Branch 065
+
+**Date:** 2026-07-27
+
+**Status:** In Progress
+
+**Area:** ONDC RET10 (Grocery) Domain Integration & Statutory Requirements
+
+**What:**
+
+- Added support for RET10 domain search, catalog service, and statutory requirements for prepackaged food in ONDC payloads.
+
+**Why:**
+
+- To comply with ONDC 1.2.5 specifications for RET10 domain and ensure database records track update timestamps properly.
+
+**Changes:** file name and description of file change.
+
+- `src/ondc/controllers/ret10-search.controller.ts`
+  - Added new search controller specifically for handling RET10 (Grocery) domain requests.
+
+- `src/ondc/controllers/search.controller.ts`
+  - Modified to integrate and route the search requests for the new RET10 domain.
+
+- `src/ondc/services/ret10-catalog.service.ts`
+  - Added new catalog service to handle RET10 specific catalog fetching and mapping logic.
+
+- `src/ondc/utils/catalog.builders.ts`
+  - Modified to map statutory requirements for prepackaged food (`@ondc/org/statutory_reqs_prepackaged_food`) as top-level fields instead of `g3` tags, and updated FSSAI license handling.
+
+- `src/service/product/product.sql.service.ts`
+  - Modified SQL insert queries for `products`, `product_variants`, and `product_ondc_attributes` to explicitly set the `updated_at` timestamp.
+
+---
+
 ### Branch 062
 
 **Date:** 2026-07-22
