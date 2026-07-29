@@ -99,14 +99,15 @@ function buildFilters(opts?: ProviderFilterOpts): { clause: string; params: stri
   return { clause: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', params };
 }
 
-/** Extra conditions for buildFilters, excluding hasProducts — used to compute
- *  the has-products breakdown against whatever OTHER filters are active, so
- *  the counts never get narrowed by the hasProducts filter itself. */
-function buildFiltersExceptProducts(opts?: ProviderFilterOpts): {
+/** Conditions for the has-products breakdown. Excludes hasProducts (so the
+ *  counts are never narrowed by the very filter they describe) and status (so
+ *  they stay a stable fact about the approved seller base while the admin
+ *  flips between Active/Inactive). A search term still applies. */
+function buildBreakdownFilters(opts?: ProviderFilterOpts): {
   clause: string;
   params: string[];
 } {
-  const { hasProducts: _hasProducts, ...rest } = opts ?? {};
+  const { hasProducts: _hasProducts, status: _status, ...rest } = opts ?? {};
   return buildFilters(rest);
 }
 
@@ -171,11 +172,12 @@ export const providerModel = {
     return Number(rows[0]?.cnt ?? 0);
   },
 
-  /** Has-products counts among approved sellers matching every OTHER active filter (search/status). */
+  /** Has-products split across the whole approved seller base — independent of
+   *  the active/inactive toggle, so it reads as information, not a filter echo. */
   async getProductBreakdown(
     opts?: ProviderFilterOpts,
   ): Promise<{ withProducts: number; withoutProducts: number }> {
-    const { clause, params } = buildFiltersExceptProducts(opts);
+    const { clause, params } = buildBreakdownFilters(opts);
     const rows = await ondcQuery<{ withProducts: number; withoutProducts: number }>(
       `SELECT
          SUM(CASE WHEN ${HAS_PRODUCTS_EXISTS} THEN 1 ELSE 0 END) AS withProducts,
