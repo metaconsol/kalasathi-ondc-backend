@@ -111,3 +111,21 @@ export const PROVIDER_TIMING = {
   DAY_TO: process.env['ONDC_PROVIDER_DAY_TO'] ?? '', // 7=Sun
   FULFILLMENT_TYPE: process.env['ONDC_PROVIDER_FULFILLMENT_TYPE'] ?? '',
 } as const;
+
+/**
+ * Brand fallbacks for a provider's descriptor, used when the store itself has
+ * no image of its own. Paths are resolved against this BPP's own origin, so the
+ * preprod folder and the prod folder each serve their OWN asset from one shared
+ * repo — neither environment can end up advertising the other's domain. Set the
+ * full-URL env vars only to point at a CDN.
+ */
+export const PROVIDER_BRANDING = {
+  /** descriptor.symbol + images[0] when stores.store_photo is empty. */
+  DEFAULT_LOGO_URL: process.env['ONDC_DEFAULT_PROVIDER_LOGO_URL'] ?? '',
+  /** Filename under public/uploads/ — used when DEFAULT_LOGO_URL is unset. */
+  DEFAULT_LOGO_FILE: process.env['ONDC_DEFAULT_PROVIDER_LOGO_FILE'] ?? 'odop-logo.png',
+  /** The banner appended to images[] when stores.banner_photo is empty. */
+  DEFAULT_BANNER_URL: process.env['ONDC_DEFAULT_PROVIDER_BANNER_URL'] ?? '',
+  DEFAULT_BANNER_FILE:
+    process.env['ONDC_DEFAULT_PROVIDER_BANNER_FILE'] ?? 'SLIDER_FINAL.jpg-Kfo32o9D.jpeg',
+} as const;
