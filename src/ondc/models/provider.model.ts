@@ -14,6 +14,10 @@ export interface OndcProviderRow {
   seller_id: number;
   store_id: number;
   name: string;
+  /** stores.store_slug — powers the /store/:slug storefront link in the admin UI. */
+  store_slug: string | null;
+  /** Products in this store. Only populated by the listing queries. */
+  product_count: number;
   short_desc: string | null;
   long_desc: string | null;
   logo_url: string | null;
@@ -34,6 +38,7 @@ const STORE_SELECT = `
   s.seller_user_id                       AS seller_id,
   s.id                                   AS store_id,
   s.store_name                           AS name,
+  s.store_slug                           AS store_slug,
   SUBSTRING(COALESCE(s.description, ''), 1, 200) AS short_desc,
   s.description                          AS long_desc,
   NULL                                   AS logo_url,
@@ -66,6 +71,12 @@ const LISTING_JOIN = `
   LEFT JOIN ondc_provider_settings ops ON ops.store_id = s.id`;
 
 const HAS_PRODUCTS_EXISTS = 'EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id)';
+
+// Listing-only projection. The product count is deliberately NOT in STORE_SELECT:
+// that one also backs findById/findBySellerId on the live /confirm path, which
+// has no use for it. products.store_id is indexed, so this is ~6ms for 50 rows.
+const LISTING_SELECT = `${STORE_SELECT},
+  (SELECT COUNT(*) FROM products p WHERE p.store_id = s.id) AS product_count`;
 
 interface ProviderFilterOpts {
   q?: string | undefined;
@@ -119,6 +130,8 @@ function mapRow(r: any): OndcProviderRow {
     seller_id: Number(r.seller_id),
     store_id: Number(r.store_id),
     name: r.name,
+    store_slug: r.store_slug ?? null,
+    product_count: Number(r.product_count ?? 0),
     short_desc: r.short_desc ?? null,
     long_desc: r.long_desc ?? null,
     logo_url: r.logo_url ?? null,
@@ -158,7 +171,7 @@ export const providerModel = {
   /** Every APPROVED store — active and inactive, with or without products — so admin can manage them. */
   async listAll(): Promise<OndcProviderRow[]> {
     const rows = await ondcQuery<any>(
-      `SELECT ${STORE_SELECT} ${LISTING_JOIN} ORDER BY s.store_name ASC`,
+      `SELECT ${LISTING_SELECT} ${LISTING_JOIN} ORDER BY s.store_name ASC`,
     );
     return rows.map(mapRow);
   },
@@ -206,7 +219,7 @@ export const providerModel = {
   ): Promise<OndcProviderRow[]> {
     const { clause, params } = buildFilters(opts);
     const rows = await ondcQuery<any>(
-      `SELECT ${STORE_SELECT} ${LISTING_JOIN} ${clause}
+      `SELECT ${LISTING_SELECT} ${LISTING_JOIN} ${clause}
        ORDER BY COALESCE(ops.is_active, 1) DESC, s.store_name ASC
        LIMIT ? OFFSET ?`,
       [...params, opts.limit, opts.offset],
