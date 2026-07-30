@@ -4,7 +4,8 @@
  */
 
 import { ondcEnv } from '~/config/ondc.config';
-import { SELLER_PROFILE } from '~/ondc/config/constants';
+import { env } from '~/config/env.config';
+import { PROVIDER_BRANDING, SELLER_PROFILE } from '~/ondc/config/constants';
 import { getDomainConfig, type OndcRetailDomain } from '~/ondc/config/domain.config';
 
 /**
@@ -15,8 +16,98 @@ export function ondcTimestamp(d: Date = new Date()): string {
   return d.toISOString().replace(/\.\d{3}Z$/, '.000Z');
 }
 
-/** Hardcoded brand logo used for provider descriptor symbol/images (for now). */
-const ODOP_LOGO_URL = 'https://test.odopmartmp.com/assets/ODOP%20LOGO-DmZ6QXZC.jpeg';
+/**
+ * This BPP's own origin — baseUri minus the /api/v1/ondc suffix.
+ * BPP_BASE_URI is configured inconsistently across environments (with and
+ * without the /api/v1/ondc suffix, with and without a trailing slash), so any
+ * trailing slash is stripped too. Without that, a base of
+ * 'https://host/' built 'https://host//uploads/x.png', and a doubled slash
+ * under /uploads is already a 500 on these servers.
+ */
+function bppOrigin(): string {
+  return ondcEnv.baseUri.replace(/\/api\/v1\/ondc\/?$/, '').replace(/\/+$/, '');
+}
+
+/**
+ * Public, non-expiring base for `s3:`-stored media, e.g.
+ * https://<bucket>.s3.<region>.amazonaws.com. The bucket's objects are
+ * public-read, so these URLs never expire — required, because buyer apps cache
+ * the catalog and re-render it long after /on_search. A presigned URL must
+ * never be used here. ONDC_MEDIA_S3_PUBLIC_BASE_URL overrides, for a CDN.
+ */
+function s3PublicBase(): string | null {
+  const explicit = (process.env['ONDC_MEDIA_S3_PUBLIC_BASE_URL'] ?? '').trim();
+  if (explicit) return explicit.replace(/\/+$/, '');
+  const bucket = (env.awsBucketName ?? '').trim();
+  const region = (env.awsRegion ?? '').trim();
+  return bucket && region ? `https://${bucket}.s3.${region}.amazonaws.com` : null;
+}
+
+/**
+ * Absolute, non-expiring URL for a stored image value. Handles all three shapes
+ * the storefront actually writes:
+ *   - 'https://…'                       already absolute (product images)
+ *   - 's3:uploads/stores/photos/x.png'  S3 object ref — what store_photo and
+ *                                       banner_photo hold for ~all stores
+ *   - 'public/uploads/stores/…/x.png'   the non-S3 disk fallback (cwd-relative)
+ * Returns null when it cannot build a URL that will actually resolve, so the
+ * caller substitutes the brand asset instead of publishing a certain 404.
+ */
+function absoluteMediaUrl(value: string | null | undefined): string | null {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  if (/^https?:\/\//i.test(raw)) return raw;
+
+  const s3Ref = /^s3:(.+)$/i.exec(raw);
+  if (s3Ref) {
+    const base = s3PublicBase();
+    // Bucket/region not configured on this node: any URL we built would 404, so
+    // fall back to the brand asset rather than publishing a broken one.
+    if (!base) return null;
+    const key = s3Ref[1]!.replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
+    return `${base}/${key}`;
+  }
+
+  // A path served out of this BPP's own public/ dir. The storefront's non-S3
+  // branch stores cwd-relative paths ('public/uploads/…'), and some values
+  // already carry an 'uploads/' prefix — strip both so the result is never
+  // '<origin>/uploads/public/uploads/…' or a doubled slash.
+  const rel = raw
+    .replace(/^\/+/, '')
+    .replace(/^public\//i, '')
+    .replace(/^uploads\//i, '');
+  return `${bppOrigin()}/uploads/${rel}`;
+}
+
+/** Brand fallbacks, resolved from THIS server's origin so the preprod and prod
+ *  folders each serve their own copy out of one shared repo. */
+function defaultProviderLogo(): string {
+  return (
+    PROVIDER_BRANDING.DEFAULT_LOGO_URL ||
+    `${bppOrigin()}/uploads/${PROVIDER_BRANDING.DEFAULT_LOGO_FILE}`
+  );
+}
+
+function defaultProviderBanner(): string {
+  return (
+    PROVIDER_BRANDING.DEFAULT_BANNER_URL ||
+    `${bppOrigin()}/uploads/${PROVIDER_BRANDING.DEFAULT_BANNER_FILE}`
+  );
+}
+
+/**
+ * descriptor.symbol + descriptor.images for a provider.
+ * Buyer apps read BOTH symbol and images[0] as the storefront logo, so the logo
+ * is deliberately emitted twice; the banner follows as images[1].
+ */
+export function buildProviderImages(
+  logoValue?: string | null,
+  bannerValue?: string | null,
+): { symbol: string; images: string[] } {
+  const logo = absoluteMediaUrl(logoValue) ?? defaultProviderLogo();
+  const banner = absoluteMediaUrl(bannerValue) ?? defaultProviderBanner();
+  return { symbol: logo, images: banner && banner !== logo ? [logo, banner] : [logo] };
+}
 
 /**
  * Default provider rating shown in on_search.
@@ -30,7 +121,10 @@ export interface ProviderBuildInfo {
   name: string;
   short_desc?: string | null;
   long_desc?: string | null;
+  /** stores.store_photo — the shop's logo. Falls back to the ODOP brand logo. */
   logo_url?: string | null;
+  /** stores.banner_photo — the shop's banner. Falls back to the ODOP banner. */
+  banner_url?: string | null;
   fssai_license?: string | null;
   updated_at?: Date | string | null;
   support_phone?: string | null;
@@ -691,6 +785,8 @@ export function buildProviderEntry(
     ? ondcTimestamp(new Date(providerRow.updated_at))
     : ondcTimestamp();
 
+  const providerImages = buildProviderImages(providerRow.logo_url, providerRow.banner_url);
+
   const entry: Record<string, unknown> = {
     id: providerRow.provider_id,
     time: { label: 'enable', timestamp: providerTimestamp },
@@ -700,10 +796,11 @@ export function buildProviderEntry(
     fulfillments: buildProviderFulfillments(providerRow),
     descriptor: {
       name: providerRow.name,
-      symbol: ODOP_LOGO_URL,
+      // Store's own logo, falling back to the ODOP brand logo. Emitted as both
+      // symbol and images[0] because buyer apps read either one as the logo.
+      ...providerImages,
       short_desc: resolveProviderShortDesc(providerRow.short_desc, providerRow.name),
       long_desc: resolveProviderLongDesc(providerRow.long_desc, providerRow.name),
-      images: [ODOP_LOGO_URL],
     },
     ttl: 'PT24H',
     locations: resolvedLocations,

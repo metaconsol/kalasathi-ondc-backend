@@ -105,6 +105,7 @@ export const catalogService = {
         short_desc: store.description?.slice(0, 200) ?? '',
         long_desc: store.description ?? '',
         logo_url: store.logo ?? null,
+        banner_url: store.banner ?? null,
         fssai_license: null,
         support_phone: store.phone,
         support_email: store.email,
