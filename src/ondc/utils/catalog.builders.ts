@@ -114,7 +114,7 @@ export function buildProviderImages(
  * ONDC: aggregate 1-5 scale, up to 1 decimal, maintained by the SNP.
  * TODO: source from real review aggregate once provider ratings are tracked.
  */
-const DEFAULT_PROVIDER_RATING = '4';
+const DEFAULT_PROVIDER_RATING = '5';
 /** Minimal provider info needed to build a bpp/providers entry */
 export interface ProviderBuildInfo {
   provider_id: string;
@@ -514,7 +514,7 @@ export function buildOndcItem(inp: BuildOndcItemInput): object {
   return {
     id: inp.ondcItemId,
     time: { label: 'enable', timestamp: ondcTimestamp() },
-    rating: inp.rating ?? '4',
+    rating: inp.rating ?? '5',
     descriptor: {
       name: inp.name,
       ...(inp.idCode ? { code: inp.idCode } : {}),
