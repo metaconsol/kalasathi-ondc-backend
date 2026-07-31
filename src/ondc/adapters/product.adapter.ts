@@ -308,7 +308,7 @@ async function attachItemRatings(rows: OndcCatalogRow[]): Promise<OndcCatalogRow
   if (rows.length === 0) return rows;
 
   const itemIds = rows.map((row) => buildOndcItemId(row.product_id, row.variant_id));
-  const defaults = rows.map((row) => ({ ...row, item_rating: '4' }));
+  const defaults = rows.map((row) => ({ ...row, item_rating: '5' }));
   const placeholders = itemIds.map(() => '?').join(',');
 
   try {
@@ -330,7 +330,7 @@ async function attachItemRatings(rows: OndcCatalogRow[]): Promise<OndcCatalogRow
 
     return defaults.map((row) => ({
       ...row,
-      item_rating: ratingsByItemId.get(buildOndcItemId(row.product_id, row.variant_id)) ?? '4',
+      item_rating: ratingsByItemId.get(buildOndcItemId(row.product_id, row.variant_id)) ?? '5',
     }));
   } catch {
     return defaults;
@@ -498,7 +498,7 @@ function buildRowForProduct(
     ondc_attrs: attrs,
     images,
     has_variants: hasVariants,
-    item_rating: '4',
+    item_rating: '5',
   };
 }
 
@@ -584,7 +584,7 @@ function buildRowForVariant(
     ondc_attrs: attrs,
     images,
     has_variants: hasVariants,
-    item_rating: '4',
+    item_rating: '5',
   };
 }
 

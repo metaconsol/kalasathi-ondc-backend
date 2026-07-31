@@ -1,3 +1,30 @@
+### Branch 074
+
+**Date:** 2026-07-31
+
+**Status:** In Progress
+
+**Area:** ONDC Catalog Default Ratings Update (Provider & Items)
+
+**What:**
+
+- Updated default rating fallback for ONDC provider store and catalog items from '4' to '5'.
+
+**Why:**
+
+- To update the default rating scale in catalog `on_search` payloads across ONDC retail domains when database reviews are untracked or missing.
+
+**Changes:** file name and description of file change.
+
+- `src/ondc/utils/catalog.builders.ts`
+  - Updated `DEFAULT_PROVIDER_RATING` constant value from `'4'` to `'5'`.
+  - Updated `buildOndcItem` item rating fallback from `'4'` to `'5'`.
+
+- `src/ondc/adapters/product.adapter.ts`
+  - Updated default `item_rating` fallback values from `'4'` to `'5'` across product catalog row assembly functions.
+
+---
+
 ### Branch 068
 
 **Date:** 2026-07-28
