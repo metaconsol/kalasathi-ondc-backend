@@ -64,6 +64,8 @@ export interface MainDbStoreLocation {
 export interface MainDbSellerProfile {
   user_id: number;
   gstin: string | null;
+  /** Artisan/handloom enrollment id — stands in for GSTIN on unregistered sellers. */
+  enrollment_number: string | null;
   pan: string | null;
   business_name: string | null;
   bank_account_no: string | null;
@@ -134,6 +136,20 @@ export function storeContactPhone(s: MainDbSeller): string | null {
 }
 
 /**
+ * bpp_terms `tax_number` for a provider.
+ *
+ * Most ODOP sellers are unregistered artisans with no GSTIN — 259 of 320
+ * approved sellers have none — so their artisan/handloom enrollment number
+ * stands in. Together the two cover every seller (0 have neither), where GSTIN
+ * alone would have sent an empty string for 81% of providers and NACKed.
+ *
+ * `provider_tax_number` needs no equivalent: PAN is set on all 320.
+ */
+export function sellerTaxNumber(p: MainDbSellerProfile | null | undefined): string {
+  return firstNonEmpty(p?.gstin, p?.enrollment_number) ?? '';
+}
+
+/**
  * All active stores eligible to be an ONDC provider: ecom-active, Super
  * Admin-approved seller, has at least one product (a store with none would
  * only ever produce an empty catalog entry), and not turned off via the
@@ -183,6 +199,7 @@ export async function fetchSellerProfileByStoreId(
     `SELECT
        sp.user_id,
        sp.gstin,
+       sp.enrollment_number,
        sp.pan,
        sp.business_name,
        sp.bank_account_no,
@@ -201,6 +218,7 @@ export async function fetchSellerProfileByStoreId(
   return {
     user_id: rows[0].user_id,
     gstin: rows[0].gstin ?? null,
+    enrollment_number: rows[0].enrollment_number ?? null,
     pan: rows[0].pan ?? null,
     business_name: rows[0].business_name ?? null,
     bank_account_no: rows[0].bank_account_no ?? null,

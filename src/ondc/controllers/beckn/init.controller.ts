@@ -16,6 +16,7 @@ import {
   fetchSellerProfileByStoreId,
   fetchStoreById,
   fetchStoreLocations,
+  sellerTaxNumber,
 } from '~/ondc/adapters/seller.adapter';
 import { ondcQuery } from '~/lib/ondcSql';
 import { transactionModel } from '~/ondc/models/transaction.model';
@@ -428,7 +429,8 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
         {
           code: 'bpp_terms',
           list: [
-            { code: 'tax_number', value: String(sellerProfile?.gstin ?? '') },
+            // GSTIN, or the seller's enrollment number when they have none.
+            { code: 'tax_number', value: sellerTaxNumber(sellerProfile) },
             { code: 'provider_tax_number', value: String(sellerProfile?.pan ?? '') },
           ],
         },
