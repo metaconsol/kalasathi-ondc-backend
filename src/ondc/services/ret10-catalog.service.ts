@@ -25,6 +25,8 @@ import {
   getActiveStores,
   fetchStoreLocations,
   mapStoreLocationToOndcLocation,
+  storeContactEmail,
+  storeContactPhone,
   type MainDbStoreLocation,
 } from '~/ondc/adapters/seller.adapter';
 import {
@@ -411,8 +413,8 @@ export const ret10CatalogService = {
             locationId,
             fulfillmentId,
             storeName: store.name,
-            storeEmail: store.email,
-            storePhone: store.phone,
+            storeEmail: storeContactEmail(store),
+            storePhone: storeContactPhone(store),
           });
 
           // STRICTLY filter for RET10 items
@@ -445,10 +447,9 @@ export const ret10CatalogService = {
         short_desc: store.description?.slice(0, 200) ?? '',
         long_desc: store.description ?? '',
         logo_url: store.logo ?? null,
-        banner_url: store.banner ?? null,
         fssai_license: null,
-        support_phone: store.phone,
-        support_email: store.email,
+        support_phone: storeContactPhone(store),
+        support_email: storeContactEmail(store),
         updated_at: new Date(),
       };
 
