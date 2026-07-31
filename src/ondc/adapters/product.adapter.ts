@@ -832,7 +832,7 @@ export async function buildOndcItemFromRow(
     attrValue(row.ondc_attrs, 'manufacturer_address') ??
     `${SELLER_PROFILE.STREET}, ${SELLER_PROFILE.CITY}, ${SELLER_PROFILE.STATE} ${SELLER_PROFILE.AREA_CODE}`;
   const mfgMonth = formatManufacturingMonth(
-    row.manufacturing_month ?? attrValue(row.ondc_attrs, 'month_year_of_mfg'),
+    row.manufacturing_month || attrValue(row.ondc_attrs, 'month_year_of_mfg'),
   );
   const origin = row.country_of_origin ?? attrValue(row.ondc_attrs, 'origin_country') ?? 'IND';
 
