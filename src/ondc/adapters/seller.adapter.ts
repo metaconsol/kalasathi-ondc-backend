@@ -19,6 +19,7 @@ import type { OndcProvider } from '~/ondc/types/ondc.types';
 import { ondcEnv } from '~/config/ondc.config';
 import { SELLER_PROFILE, PROVIDER_TIMING } from '~/ondc/config/constants';
 import {
+  buildProviderImages,
   buildProviderLocation,
   resolveOndcLocality,
   resolveProviderLongDesc,
@@ -31,7 +32,10 @@ export interface MainDbSeller {
   seller_id: number; // stores.seller_id (user ID)
   name: string;
   description: string | null;
+  /** stores.store_photo — the shop's logo (descriptor.symbol + images[0]). */
   logo: string | null;
+  /** stores.banner_photo — the shop's banner (appended to descriptor.images). */
+  banner: string | null;
   phone: string | null;
   email: string | null;
   is_active: boolean;
@@ -70,7 +74,8 @@ const STORE_SELECT = `
   s.seller_user_id,
   s.store_name  AS name,
   s.description,
-  NULL          AS logo,
+  s.store_photo   AS logo,
+  s.banner_photo  AS banner,
   s.support_phone AS phone,
   s.support_email AS email,
   s.is_active`;
@@ -82,6 +87,7 @@ function mapStoreRow(r: any): MainDbSeller {
     name: r.name,
     description: r.description,
     logo: r.logo,
+    banner: r.banner,
     phone: r.phone,
     email: r.email,
     is_active: Boolean(r.is_active),
@@ -242,20 +248,18 @@ export function mapStoreLocationToOndcLocation(loc: MainDbStoreLocation): Provid
 }
 
 export function adaptSellerToOndcProvider(seller: MainDbSeller, providerId: string): OndcProvider {
-  const baseUrl = ondcEnv.baseUri.replace('/api/v1/ondc', '');
-  const logoUrl = seller.logo
-    ? seller.logo.startsWith('http')
-      ? seller.logo
-      : `${baseUrl}/uploads/${seller.logo}`
-    : undefined;
+  // Same symbol/images rule as buildProviderEntry: the store's own logo (or the
+  // ODOP brand logo) as both symbol and images[0], then the banner.
+  const { symbol, images } = buildProviderImages(seller.logo, seller.banner);
 
   return {
     id: providerId,
     descriptor: {
       name: seller.name || SELLER_PROFILE.BRAND_NAME,
+      symbol,
       short_desc: resolveProviderShortDesc(seller.description?.slice(0, 200), seller.name),
       long_desc: resolveProviderLongDesc(seller.description, seller.name),
-      images: logoUrl ? [logoUrl] : [],
+      images,
     },
     locations: [],
     fulfillments: [

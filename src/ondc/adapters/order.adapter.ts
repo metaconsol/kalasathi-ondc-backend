@@ -17,6 +17,7 @@ import { generateOndcOrderId } from '~/ondc/utils/helpers';
 import { safeJsonParse } from '~/ondc/utils/payload.builder';
 import { fetchStoreById, fetchStoreLocations } from '~/ondc/adapters/seller.adapter';
 import { SELLER_PROFILE, PLATFORM_SETTLEMENT } from '~/ondc/config/constants';
+import { ondcEnv } from '~/config/ondc.config';
 
 export interface ConfirmMessage {
   order: OndcOrder;
@@ -561,7 +562,11 @@ export async function buildOnStatusOrder(
     amount: nonEmpty(payment['params']?.amount, row.order_total, '0.00'),
   };
 
-  if (!payment['params'].transaction_id || !/^[0-9a-zA-Z\_\-]{1,36}$/.test(payment['params'].transaction_id)) {
+  // '-' last in the class is a literal, so no escapes needed (eslint no-useless-escape).
+  if (
+    !payment['params'].transaction_id ||
+    !/^[0-9a-zA-Z_-]{1,36}$/.test(payment['params'].transaction_id)
+  ) {
     delete payment['params'].transaction_id;
   }
   // Seller settlement details (the buyer's confirm doesn't carry these).
@@ -632,7 +637,10 @@ export async function buildOnStatusOrder(
   order['payment'] = payment;
 
   // documents (invoice) is required on /on_status.
-  const invoiceBase = row.bpp_id ? `https://${row.bpp_id}` : 'https://ondc.odopmartmp.com';
+  // Prefer the bpp_id recorded on the order; otherwise fall back to THIS node's
+  // own configured subscriber id rather than a hardcoded domain, so preprod and
+  // prod never emit each other's invoice host.
+  const invoiceBase = `https://${row.bpp_id || ondcEnv.subscriberId}`;
   order['documents'] = origOrder.documents ?? [
     { url: `${invoiceBase}/invoice/${row.ondc_order_id}`, label: 'Invoice' },
   ];

@@ -23,6 +23,8 @@ export interface OndcProvider {
   descriptor: {
     name: string;
     code?: string;
+    /** Store logo. Buyer apps read this AND images[0] as the storefront logo. */
+    symbol?: string;
     short_desc?: string;
     long_desc?: string;
     images?: string[];
