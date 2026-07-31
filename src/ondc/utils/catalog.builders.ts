@@ -100,12 +100,17 @@ function defaultProviderBanner(): string {
  * Buyer apps read BOTH symbol and images[0] as the storefront logo, so the logo
  * is deliberately emitted twice; the banner follows as images[1].
  */
-export function buildProviderImages(
-  logoValue?: string | null,
-  bannerValue?: string | null,
-): { symbol: string; images: string[] } {
+export function buildProviderImages(logoValue?: string | null): {
+  symbol: string;
+  images: string[];
+} {
   const logo = absoluteMediaUrl(logoValue) ?? defaultProviderLogo();
-  const banner = absoluteMediaUrl(bannerValue) ?? defaultProviderBanner();
+  // The banner is always the one bundled ODOP asset — deliberately NOT read from
+  // stores.banner_photo. That column is newer than the ONDC databases that read
+  // it (prod is a VIEW with a frozen column list, preprod/local are separate
+  // base-table copies), so selecting it killed /on_search with ER_BAD_FIELD_ERROR
+  // wherever it was absent. One org-wide banner needs no schema at all.
+  const banner = defaultProviderBanner();
   return { symbol: logo, images: banner && banner !== logo ? [logo, banner] : [logo] };
 }
 
@@ -121,10 +126,9 @@ export interface ProviderBuildInfo {
   name: string;
   short_desc?: string | null;
   long_desc?: string | null;
-  /** stores.store_photo — the shop's logo. Falls back to the ODOP brand logo. */
+  /** stores.store_photo — the shop's logo. Falls back to the ODOP brand logo.
+   *  There is no banner field: the banner is one org-wide bundled asset. */
   logo_url?: string | null;
-  /** stores.banner_photo — the shop's banner. Falls back to the ODOP banner. */
-  banner_url?: string | null;
   fssai_license?: string | null;
   updated_at?: Date | string | null;
   support_phone?: string | null;
@@ -785,7 +789,7 @@ export function buildProviderEntry(
     ? ondcTimestamp(new Date(providerRow.updated_at))
     : ondcTimestamp();
 
-  const providerImages = buildProviderImages(providerRow.logo_url, providerRow.banner_url);
+  const providerImages = buildProviderImages(providerRow.logo_url);
 
   const entry: Record<string, unknown> = {
     id: providerRow.provider_id,

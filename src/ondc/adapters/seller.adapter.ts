@@ -34,10 +34,14 @@ export interface MainDbSeller {
   description: string | null;
   /** stores.store_photo — the shop's logo (descriptor.symbol + images[0]). */
   logo: string | null;
-  /** stores.banner_photo — the shop's banner (appended to descriptor.images). */
-  banner: string | null;
+  /** stores.support_phone / support_email — set on only some stores. */
   phone: string | null;
   email: string | null;
+  /** The owning seller's own `user` row. Populated for every store, so these are
+   *  the buyer-facing contact; the store support_* fields are only a fallback. */
+  owner_name: string | null;
+  owner_email: string | null;
+  owner_phone: string | null;
   is_active: boolean;
 }
 
@@ -69,15 +73,28 @@ export interface MainDbSellerProfile {
   branch_name: string | null;
 }
 
+// `user` is lowercase on purpose: the live table is `User`, and the prod ONDC
+// database exposes it through a lowercase view (20_prod_ondc_views.sql) because
+// table names are case-sensitive on the Linux server. Matches user.adapter.ts.
+const STORE_OWNER_JOIN = 'LEFT JOIN `user` u ON u.id = s.seller_user_id';
+
+// NOTE: stores.banner_photo is deliberately NOT selected. The provider banner is
+// one org-wide bundled asset (see buildProviderImages), so the catalog needs no
+// banner column at all. Reading it previously took /on_search and the admin
+// catalog down with ER_BAD_FIELD_ERROR on every database where the column was
+// missing — prod reads a VIEW whose column list MySQL freezes at creation time,
+// and preprod/local read separate base-table copies.
 const STORE_SELECT = `
   s.id,
   s.seller_user_id,
   s.store_name  AS name,
   s.description,
   s.store_photo   AS logo,
-  s.banner_photo  AS banner,
   s.support_phone AS phone,
   s.support_email AS email,
+  u.name          AS owner_name,
+  u.email         AS owner_email,
+  u.phoneNumber   AS owner_phone,
   s.is_active`;
 
 function mapStoreRow(r: any): MainDbSeller {
@@ -87,11 +104,33 @@ function mapStoreRow(r: any): MainDbSeller {
     name: r.name,
     description: r.description,
     logo: r.logo,
-    banner: r.banner,
     phone: r.phone,
     email: r.email,
+    owner_name: r.owner_name ?? null,
+    owner_email: r.owner_email ?? null,
+    owner_phone: r.owner_phone ?? null,
     is_active: Boolean(r.is_active),
   };
+}
+
+const firstNonEmpty = (...values: Array<string | null | undefined>): string | null =>
+  values.map((v) => String(v ?? '').trim()).find((v) => v !== '') ?? null;
+
+/**
+ * Buyer-facing contact for a store — used for the provider's fulfillment contact
+ * and for each item's @ondc/org/contact_details_consumer_care.
+ *
+ * The seller's own `user` row is the source: it has an email and phone for every
+ * store, whereas stores.support_phone is blank on ~17% of them, which silently
+ * fell back to the shared ODOP platform number. Store support_* stays as the
+ * fallback so a store that set a real support desk still beats nothing.
+ */
+export function storeContactEmail(s: MainDbSeller): string | null {
+  return firstNonEmpty(s.owner_email, s.email);
+}
+
+export function storeContactPhone(s: MainDbSeller): string | null {
+  return firstNonEmpty(s.owner_phone, s.phone);
 }
 
 /**
@@ -105,6 +144,7 @@ export async function getActiveStores(): Promise<MainDbSeller[]> {
     `SELECT ${STORE_SELECT}
      FROM stores s
      JOIN seller_profiles sp ON sp.user_id = s.seller_user_id
+     ${STORE_OWNER_JOIN}
      LEFT JOIN ondc_provider_settings ops ON ops.store_id = s.id
      WHERE s.is_active = 1
        AND sp.approval_status = 'APPROVED'
@@ -119,6 +159,7 @@ export async function getActiveStores(): Promise<MainDbSeller[]> {
 export async function fetchMainDbSeller(sellerUserId: number): Promise<MainDbSeller | null> {
   const rows = await ondcQuery<any>(
     `SELECT ${STORE_SELECT} FROM stores s
+     ${STORE_OWNER_JOIN}
      WHERE s.seller_user_id = ? AND s.is_active = 1
      ORDER BY s.id ASC LIMIT 1`,
     [sellerUserId],
@@ -128,9 +169,10 @@ export async function fetchMainDbSeller(sellerUserId: number): Promise<MainDbSel
 
 /** Fetch store by primary key (stores.id) */
 export async function fetchStoreById(storeId: number): Promise<MainDbSeller | null> {
-  const rows = await ondcQuery<any>(`SELECT ${STORE_SELECT} FROM stores s WHERE s.id = ? LIMIT 1`, [
-    storeId,
-  ]);
+  const rows = await ondcQuery<any>(
+    `SELECT ${STORE_SELECT} FROM stores s ${STORE_OWNER_JOIN} WHERE s.id = ? LIMIT 1`,
+    [storeId],
+  );
   return rows[0] ? mapStoreRow(rows[0]) : null;
 }
 
@@ -250,7 +292,7 @@ export function mapStoreLocationToOndcLocation(loc: MainDbStoreLocation): Provid
 export function adaptSellerToOndcProvider(seller: MainDbSeller, providerId: string): OndcProvider {
   // Same symbol/images rule as buildProviderEntry: the store's own logo (or the
   // ODOP brand logo) as both symbol and images[0], then the banner.
-  const { symbol, images } = buildProviderImages(seller.logo, seller.banner);
+  const { symbol, images } = buildProviderImages(seller.logo);
 
   return {
     id: providerId,
