@@ -22,6 +22,7 @@ import {
   fetchSellerProfileByStoreId,
   fetchStoreById,
   fetchStoreLocations,
+  sellerTaxNumber,
   type MainDbStoreLocation,
 } from '~/ondc/adapters/seller.adapter';
 import { transactionModel } from '~/ondc/models/transaction.model';
@@ -596,7 +597,8 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
           code: 'bpp_terms',
           list: [
             { code: 'np_type', value: 'MSN' },
-            { code: 'tax_number', value: String(sellerProfile?.gstin ?? '') },
+            // GSTIN, or the seller's enrollment number when they have none.
+            { code: 'tax_number', value: sellerTaxNumber(sellerProfile) },
             { code: 'provider_tax_number', value: String(sellerProfile?.pan ?? '') },
             { code: 'accept_bap_terms', value: 'Y' },
           ],
@@ -699,7 +701,8 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
             : {}),
           params: {
             currency: String(inboundCurrency ?? 'INR'),
-            ...(inboundTransactionId && /^[0-9a-zA-Z\_\-]{1,36}$/.test(String(inboundTransactionId))
+            // '-' last in the class is a literal, so no escapes needed (eslint no-useless-escape).
+            ...(inboundTransactionId && /^[0-9a-zA-Z_-]{1,36}$/.test(String(inboundTransactionId))
               ? { transaction_id: String(inboundTransactionId) }
               : {}),
             amount: String(inboundAmount ?? (total > 0 ? total.toFixed(2) : '0.00')),
