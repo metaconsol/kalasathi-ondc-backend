@@ -406,7 +406,8 @@ function assembleRows(
     const leafVariants = productVariants.filter((v) => !childrenByParent.has(v.id));
     const hasVariants = productVariants.length > 0;
     const productAttrs = attrsByProduct.get(p.id) ?? {};
-    const productImgs = (productImageMap.get(p.id) ?? []).map(absolutize);
+    const rawProductImgs = (productImageMap.get(p.id) ?? []).map(absolutize);
+    const productImgs = rawProductImgs.length > 1 ? rawProductImgs.slice(0, -1) : rawProductImgs;
 
     if (leafVariants.length === 0) {
       // Standalone product — emit one row
@@ -425,7 +426,8 @@ function assembleRows(
         for (const k of Object.keys(cv)) chainAttrs[k] = cv[k]!;
       }
 
-      const variantImgs = (variantImageMap.get(leaf.id) ?? []).map(absolutize);
+      const rawVariantImgs = (variantImageMap.get(leaf.id) ?? []).map(absolutize);
+      const variantImgs = rawVariantImgs.length > 1 ? rawVariantImgs.slice(0, -1) : rawVariantImgs;
       const finalImgs = variantImgs.length > 0 ? variantImgs : productImgs;
 
       out.push(buildRowForVariant(p, leaf, chainAttrs, finalImgs, hasVariants));
