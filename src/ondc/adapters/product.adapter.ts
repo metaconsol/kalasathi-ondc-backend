@@ -238,11 +238,11 @@ export async function fetchOndcCatalogRows(storeId: number): Promise<OndcCatalog
   const variantImages =
     variantIds.length > 0
       ? await ondcQuery<{ variant_id: number; image_url: string }>(
-          `SELECT variant_id, image_url FROM variant_images
+        `SELECT variant_id, image_url FROM variant_images
          WHERE variant_id IN (${variantIds.map(() => '?').join(',')})
          ORDER BY sort_order ASC, id ASC`,
-          variantIds,
-        )
+        variantIds,
+      )
       : [];
 
   const rows = assembleRows(products, variantRows, attrRows, productImages, variantImages);
@@ -292,11 +292,11 @@ export async function resolveOndcCatalogRow(itemId: string): Promise<OndcCatalog
 
   const variantImages = parts.variantId
     ? await ondcQuery<{ variant_id: number; image_url: string }>(
-        `SELECT variant_id, image_url FROM variant_images
+      `SELECT variant_id, image_url FROM variant_images
          WHERE variant_id = ?
          ORDER BY sort_order ASC, id ASC`,
-        [parts.variantId],
-      )
+      [parts.variantId],
+    )
     : [];
 
   const allRows = assembleRows(products, variantRows, attrRows, productImages, variantImages);
@@ -538,8 +538,8 @@ function buildRowForVariant(
       // Only append the variant name when it adds information — sellers often
       // set variant_name = product_name, which produced ugly "X - X" names.
       v.variant_name &&
-      v.variant_name.trim() !== '' &&
-      v.variant_name.trim().toLowerCase() !==
+        v.variant_name.trim() !== '' &&
+        v.variant_name.trim().toLowerCase() !==
         String(p.product_name ?? '')
           .trim()
           .toLowerCase()
@@ -806,7 +806,7 @@ export async function buildOndcItemFromRow(
   const cfg = getDomainConfig(domain);
 
   const baseUrl = ondcEnv.baseUri.replace(/\/api\/v1\/ondc$/, '');
-  const images = row.images.length > 0 ? row.images : [`${baseUrl}/uploads/odop-logo.png`];
+  const images = row.images.length > 0 ? row.images : [`${baseUrl}/uploads/ODOPMARTMPLOGO2_removebg-preview.png`];
 
   const ondcItemId = buildOndcItemId(row.product_id, row.variant_id);
 
@@ -849,9 +849,9 @@ export async function buildOndcItemFromRow(
     attrValue(row.ondc_attrs, 'colour') ??
     row.color_code ??
     (row.variant_id !== null &&
-    vName &&
-    vName.toLowerCase() !== 'default' &&
-    vName.toLowerCase() !== productNameLower
+      vName &&
+      vName.toLowerCase() !== 'default' &&
+      vName.toLowerCase() !== productNameLower
       ? vName
       : undefined);
   const sizeFromVariant =
