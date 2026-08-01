@@ -95,6 +95,26 @@ export function createApp(): Application {
     return ApiResponse.success(res, 'ODOP API is running');
   });
 
+  // Global Image Proxy to support private S3 buckets dynamically
+  app.get('/media', async (req: Request, res: Response) => {
+    const url = req.query.url as string;
+    if (!url) {
+      res.status(400).send('Missing url parameter');
+      return;
+    }
+    try {
+      const { resolveStoredToSignedUrl } = await import('~/lib/s3');
+      const signed = await resolveStoredToSignedUrl(url);
+      if (signed) {
+        res.redirect(302, signed);
+      } else {
+        res.status(404).send('Not found');
+      }
+    } catch (error) {
+      res.status(500).send('Internal server error');
+    }
+  });
+
   // Diagnostic endpoint for production verification
   app.get('/api/version', (_req: Request, res: Response) => {
     return ApiResponse.success(res, 'ODOP API version info', {

@@ -70,13 +70,21 @@ const LISTING_JOIN = `
   JOIN seller_profiles sp ON sp.user_id = s.seller_user_id AND sp.approval_status = 'APPROVED'
   LEFT JOIN ondc_provider_settings ops ON ops.store_id = s.id`;
 
-const HAS_PRODUCTS_EXISTS = 'EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id)';
+const HAS_PRODUCTS_EXISTS = `EXISTS (
+  SELECT 1 FROM products p 
+  JOIN product_verification pv ON pv.product_id = p.id AND pv.approval_status = 'approved'
+  WHERE p.store_id = s.id AND p.publish_status = 'publish'
+)`;
 
 // Listing-only projection. The product count is deliberately NOT in STORE_SELECT:
 // that one also backs findById/findBySellerId on the live /confirm path, which
 // has no use for it. products.store_id is indexed, so this is ~6ms for 50 rows.
 const LISTING_SELECT = `${STORE_SELECT},
-  (SELECT COUNT(*) FROM products p WHERE p.store_id = s.id) AS product_count`;
+  (
+    SELECT COUNT(*) FROM products p 
+    JOIN product_verification pv ON pv.product_id = p.id AND pv.approval_status = 'approved'
+    WHERE p.store_id = s.id AND p.publish_status = 'publish'
+  ) AS product_count`;
 
 interface ProviderFilterOpts {
   q?: string | undefined;
