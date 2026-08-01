@@ -127,5 +127,5 @@ export const PROVIDER_BRANDING = {
   /** The banner appended to images[] when stores.banner_photo is empty. */
   DEFAULT_BANNER_URL: process.env['ONDC_DEFAULT_PROVIDER_BANNER_URL'] ?? '',
   DEFAULT_BANNER_FILE:
-    process.env['ONDC_DEFAULT_PROVIDER_BANNER_FILE'] ?? 'SLIDER_FINAL.jpg-Kfo32o9D.jpeg',
+    process.env['ONDC_DEFAULT_PROVIDER_BANNER_FILE'] ?? 'bannerimageforondc.png',
 } as const;
