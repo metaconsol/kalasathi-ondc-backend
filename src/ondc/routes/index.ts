@@ -40,6 +40,28 @@ router.get('/', (_req, res) => {
   });
 });
 
+import { resolveStoredToSignedUrl } from '~/lib/s3';
+
+/** Image proxy to support private S3 buckets without expiring ONDC URLs */
+router.get('/media', async (req, res) => {
+  const url = req.query.url as string;
+  if (!url) {
+    res.status(400).send('Missing url parameter');
+    return;
+  }
+  try {
+    const signed = await resolveStoredToSignedUrl(url);
+    if (signed) {
+      // 302 redirect ensures buyer apps get the signed URL but re-request the proxy when it expires
+      res.redirect(302, signed);
+    } else {
+      res.status(404).send('Not found');
+    }
+  } catch (error) {
+    res.status(500).send('Internal server error');
+  }
+});
+
 // Beckn protocol endpoints (BAP → BPP)
 router.use('/', becknRouter);
 

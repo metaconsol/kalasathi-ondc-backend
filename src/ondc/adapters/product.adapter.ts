@@ -806,7 +806,7 @@ export async function buildOndcItemFromRow(
   const cfg = getDomainConfig(domain);
 
   const baseUrl = ondcEnv.baseUri.replace(/\/api\/v1\/ondc$/, '');
-  const images = row.images.length > 0 ? row.images : [`${baseUrl}/logo.png`];
+  const images = row.images.length > 0 ? row.images : [`${baseUrl}/uploads/odop-logo.png`];
 
   const ondcItemId = buildOndcItemId(row.product_id, row.variant_id);
 

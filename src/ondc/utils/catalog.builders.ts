@@ -38,9 +38,7 @@ function bppOrigin(): string {
 function s3PublicBase(): string | null {
   const explicit = (process.env['ONDC_MEDIA_S3_PUBLIC_BASE_URL'] ?? '').trim();
   if (explicit) return explicit.replace(/\/+$/, '');
-  const bucket = (env.awsBucketName ?? '').trim();
-  const region = (env.awsRegion ?? '').trim();
-  return bucket && region ? `https://${bucket}.s3.${region}.amazonaws.com` : null;
+  return null; // Do not fallback to raw S3 URL since bucket is private
 }
 
 /**
@@ -56,17 +54,23 @@ function s3PublicBase(): string | null {
 function absoluteMediaUrl(value: string | null | undefined): string | null {
   const raw = String(value ?? '').trim();
   if (!raw) return null;
-  if (/^https?:\/\//i.test(raw)) return raw;
-
-  const s3Ref = /^s3:(.+)$/i.exec(raw);
-  if (s3Ref) {
+  
+  // Proxy S3 URLs through our dynamic signer endpoint for ONDC buyer apps
+  const isS3Hosted = /^s3:/i.test(raw) || /^https?:\/\/[^\/]+\.amazonaws\.com/i.test(raw);
+  if (isS3Hosted) {
+    // If a CDN base is explicitly configured, use it for s3: refs.
     const base = s3PublicBase();
-    // Bucket/region not configured on this node: any URL we built would 404, so
-    // fall back to the brand asset rather than publishing a broken one.
-    if (!base) return null;
-    const key = s3Ref[1]!.replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
-    return `${base}/${key}`;
+    if (base && /^s3:/i.test(raw)) {
+      const s3Ref = /^s3:(.+)$/i.exec(raw);
+      const key = s3Ref![1]!.replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
+      return `${base}/${key}`;
+    }
+    
+    // Otherwise, route through our BPP proxy which resolves a signed URL and returns a 302 redirect.
+    return `${bppOrigin()}/media?url=${encodeURIComponent(raw)}`;
   }
+
+  if (/^https?:\/\//i.test(raw)) return raw;
 
   // A path served out of this BPP's own public/ dir. The storefront's non-S3
   // branch stores cwd-relative paths ('public/uploads/…'), and some values
@@ -409,10 +413,10 @@ export function buildProviderLocation(
 export function buildBppDescriptor() {
   return {
     name: SELLER_PROFILE.BRAND_NAME || 'ODOP Mart',
-    symbol: `${ondcEnv.baseUri}/logo.png`,
+    symbol: `${ondcEnv.baseUri}/uploads/odop-logo.png`,
     short_desc: 'ODOP Products Marketplace',
     long_desc: 'One District One Product e-commerce platform powered by ONDC',
-    images: [`${ondcEnv.baseUri}/logo.png`],
+    images: [`${ondcEnv.baseUri}/uploads/odop-logo.png`],
     tags: [
       {
         code: 'bpp_terms',
