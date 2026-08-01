@@ -54,7 +54,7 @@ function s3PublicBase(): string | null {
 function absoluteMediaUrl(value: string | null | undefined): string | null {
   const raw = String(value ?? '').trim();
   if (!raw) return null;
-  
+
   // Proxy S3 URLs through our dynamic signer endpoint for ONDC buyer apps
   const isS3Hosted = /^s3:/i.test(raw) || /^https?:\/\/[^\/]+\.amazonaws\.com/i.test(raw);
   if (isS3Hosted) {
@@ -65,7 +65,7 @@ function absoluteMediaUrl(value: string | null | undefined): string | null {
       const key = s3Ref![1]!.replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
       return `${base}/${key}`;
     }
-    
+
     // Otherwise, route through our BPP proxy which resolves a signed URL and returns a 302 redirect.
     return `${bppOrigin()}/media?url=${encodeURIComponent(raw)}`;
   }
@@ -282,26 +282,26 @@ export interface ItemTagInputs {
   originCountry?: string | undefined;
   /** Statutory: packaged commodities (g2) */
   packagedCommodity?:
-    | {
-        manufacturerOrPackerName?: string | undefined;
-        manufacturerOrPackerAddress?: string | undefined;
-        commonOrGenericNameOfCommodity?: string | undefined;
-        monthYearOfManufacture?: string | undefined;
-        importedProductCountryOfOrigin?: string | undefined;
-      }
-    | undefined;
+  | {
+    manufacturerOrPackerName?: string | undefined;
+    manufacturerOrPackerAddress?: string | undefined;
+    commonOrGenericNameOfCommodity?: string | undefined;
+    monthYearOfManufacture?: string | undefined;
+    importedProductCountryOfOrigin?: string | undefined;
+  }
+  | undefined;
   /** Statutory: prepackaged food (g3) — RET10 only */
   prepackagedFood?:
-    | {
-        nutritionalInfo?: string | undefined;
-        additivesInfo?: string | undefined;
-        brandOwnerName?: string | undefined;
-        brandOwnerFssaiLicense?: string | undefined;
-        importerName?: string | undefined;
-        importerFssaiLicense?: string | undefined;
-        netQuantity?: string | undefined;
-      }
-    | undefined;
+  | {
+    nutritionalInfo?: string | undefined;
+    additivesInfo?: string | undefined;
+    brandOwnerName?: string | undefined;
+    brandOwnerFssaiLicense?: string | undefined;
+    importerName?: string | undefined;
+    importerFssaiLicense?: string | undefined;
+    netQuantity?: string | undefined;
+  }
+  | undefined;
 }
 
 /** Build item-level tags per ONDC contract */
@@ -413,10 +413,10 @@ export function buildProviderLocation(
 export function buildBppDescriptor() {
   return {
     name: SELLER_PROFILE.BRAND_NAME || 'ODOP Mart',
-    symbol: `${ondcEnv.baseUri}/uploads/odop-logo.png`,
+    symbol: `${ondcEnv.baseUri}/uploads/ODOPMARTMPLOGO2_removebg-preview.png`,
     short_desc: 'ODOP Products Marketplace',
     long_desc: 'One District One Product e-commerce platform powered by ONDC',
-    images: [`${ondcEnv.baseUri}/uploads/odop-logo.png`],
+    images: [`${ondcEnv.baseUri}/uploads/ODOPMARTMPLOGO2_removebg-preview.png`],
     tags: [
       {
         code: 'bpp_terms',
@@ -567,20 +567,20 @@ export function buildOndcItem(inp: BuildOndcItemInput): object {
 
     ...(inp.attributes?.prepackagedFood
       ? {
-          '@ondc/org/statutory_reqs_prepackaged_food': {
-            nutritional_info:
-              inp.attributes.prepackagedFood.nutritionalInfo ||
-              'Energy(KCal)-(per 100kg) 420,(per serving 50g)250;Protein(g)-(per 100kg) 12,(per serving 50g) 6',
-            additives_info:
-              inp.attributes.prepackagedFood.additivesInfo || 'Preservatives,Artificial Colours',
-            brand_owner_FSSAI_license_no:
-              inp.attributes.prepackagedFood.brandOwnerFssaiLicense || '12345678901234',
-            other_FSSAI_license_no:
-              inp.attributes.prepackagedFood.brandOwnerFssaiLicense || '12345678901234',
-            importer_FSSAI_license_no:
-              inp.attributes.prepackagedFood.importerFssaiLicense || '12345678901234',
-          },
-        }
+        '@ondc/org/statutory_reqs_prepackaged_food': {
+          nutritional_info:
+            inp.attributes.prepackagedFood.nutritionalInfo ||
+            'Energy(KCal)-(per 100kg) 420,(per serving 50g)250;Protein(g)-(per 100kg) 12,(per serving 50g) 6',
+          additives_info:
+            inp.attributes.prepackagedFood.additivesInfo || 'Preservatives,Artificial Colours',
+          brand_owner_FSSAI_license_no:
+            inp.attributes.prepackagedFood.brandOwnerFssaiLicense || '12345678901234',
+          other_FSSAI_license_no:
+            inp.attributes.prepackagedFood.brandOwnerFssaiLicense || '12345678901234',
+          importer_FSSAI_license_no:
+            inp.attributes.prepackagedFood.importerFssaiLicense || '12345678901234',
+        },
+      }
       : {}),
 
     tags: buildItemTags({ domain: inp.domain, ...(inp.attributes ?? {}) }),
@@ -777,14 +777,14 @@ export function buildProviderEntry(
     locations.length > 0
       ? locations
       : [
-          buildProviderLocation('L1', '23.259933,77.412613', {
-            locality: resolveOndcLocality(),
-            street: '',
-            city: SELLER_PROFILE.CITY,
-            area_code: SELLER_PROFILE.AREA_CODE,
-            state: SELLER_PROFILE.STATE,
-          }),
-        ];
+        buildProviderLocation('L1', '23.259933,77.412613', {
+          locality: resolveOndcLocality(),
+          street: '',
+          city: SELLER_PROFILE.CITY,
+          area_code: SELLER_PROFILE.AREA_CODE,
+          state: SELLER_PROFILE.STATE,
+        }),
+      ];
 
   // Provider `categories` carries ONLY variant groups (ONDC 1.2.5). The standard
   // retail category lives on each item's `category_id`, not here — so when a
