@@ -162,8 +162,7 @@ export async function getActiveStores(): Promise<MainDbSeller[]> {
      JOIN seller_profiles sp ON sp.user_id = s.seller_user_id
      ${STORE_OWNER_JOIN}
      LEFT JOIN ondc_provider_settings ops ON ops.store_id = s.id
-     WHERE s.is_active = 1
-       AND sp.approval_status = 'APPROVED'
+     WHERE sp.approval_status = 'APPROVED'
        AND COALESCE(ops.is_active, 0) = 1
        AND EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id)
      ORDER BY s.id ASC`,

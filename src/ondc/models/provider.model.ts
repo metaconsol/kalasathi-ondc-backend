@@ -106,10 +106,9 @@ function buildFilters(opts?: ProviderFilterOpts): { clause: string; params: stri
 
   if (opts?.status === 'active') {
     conditions.push('COALESCE(ops.is_active, 0) = 1');
-    conditions.push('s.is_active = 1');
     conditions.push(HAS_PRODUCTS_EXISTS);
   } else if (opts?.status === 'inactive') {
-    conditions.push(`(COALESCE(ops.is_active, 0) = 0 OR s.is_active = 0 OR NOT ${HAS_PRODUCTS_EXISTS})`);
+    conditions.push(`(COALESCE(ops.is_active, 0) = 0 OR NOT ${HAS_PRODUCTS_EXISTS})`);
   }
 
   if (opts?.hasProducts === 'yes') {
@@ -184,7 +183,7 @@ export const providerModel = {
     const { clause, params } = buildFilters(opts);
     const rows = await ondcQuery<any>(
       `SELECT ${LISTING_SELECT} ${LISTING_JOIN} ${clause} ORDER BY s.store_name ASC`,
-      params
+      params,
     );
     return rows.map(mapRow);
   },
@@ -254,7 +253,10 @@ export const providerModel = {
         [storeId],
       );
       if (Number(rows[0]?.cnt ?? 0) === 0) {
-        throw new AppError('Provider cannot be activated: Must be approved and have at least one approved product.', 400);
+        throw new AppError(
+          'Provider cannot be activated: Must be approved and have at least one approved product.',
+          400,
+        );
       }
     }
 
@@ -284,7 +286,10 @@ export const providerModel = {
       validStoreIds = storeIds.filter((id) => validIdsSet.has(id));
 
       if (validStoreIds.length === 0) {
-        throw new AppError('None of the selected providers could be activated. They must be approved and have at least one approved product.', 400);
+        throw new AppError(
+          'None of the selected providers could be activated. They must be approved and have at least one approved product.',
+          400,
+        );
       }
     }
 
