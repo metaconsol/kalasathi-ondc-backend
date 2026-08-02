@@ -645,9 +645,6 @@ export interface QuoteBuildOutput {
 
 export interface QuoteBuildOptions {
   includeZeroBreakups?: boolean;
-  /** GST on freight, emitted as its own tax breakup line. Delhivery quotes
-   *  ex-tax; the invoice ODOP pays includes 18%. Matches ecom checkout. */
-  deliveryTaxPercent?: number;
 }
 
 /** 2-decimal money rounding, used so every breakup line sums exactly to the total. */
@@ -665,7 +662,7 @@ export function buildQuote(
   deliveryCharge: number = 0,
   options: QuoteBuildOptions = {},
 ): QuoteBuildOutput {
-  const { includeZeroBreakups = false, deliveryTaxPercent = 18 } = options;
+  const { includeZeroBreakups = false } = options;
   const breakup: object[] = [];
   let total = 0;
 
@@ -711,10 +708,13 @@ export function buildQuote(
   }
 
   if (deliveryCharge > 0 || includeZeroBreakups) {
+    // Already GST-inclusive (estimateDeliveryCharge grosses the Delhivery base
+    // up by 18%). Deliberately NOT split into its own tax line: buyer apps add
+    // every `tax` entry together into a single "Tax" figure, so a freight-GST
+    // line left the customer with a blended number they could not account for.
+    // Folding it in mirrors the storefront, where Shipping is shown inclusive
+    // and only the product GST appears on its own row.
     const freight = money(deliveryCharge);
-    // Delhivery quotes freight ex-tax; ODOP is invoiced with GST on top.
-    const freightTax = money((freight * deliveryTaxPercent) / 100);
-
     breakup.push({
       '@ondc/org/item_id': fulfillmentId,
       title: 'Delivery charges',
@@ -722,16 +722,6 @@ export function buildQuote(
       price: { currency: 'INR', value: freight.toFixed(2) },
     });
     total += freight;
-
-    if (freightTax > 0 || includeZeroBreakups) {
-      breakup.push({
-        '@ondc/org/item_id': fulfillmentId,
-        title: `GST (${deliveryTaxPercent}%) on delivery`,
-        '@ondc/org/title_type': 'tax',
-        price: { currency: 'INR', value: freightTax.toFixed(2) },
-      });
-      total += freightTax;
-    }
   }
 
   return {
