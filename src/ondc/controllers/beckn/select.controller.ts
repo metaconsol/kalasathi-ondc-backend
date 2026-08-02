@@ -18,6 +18,7 @@ import { txnLogModel } from '~/ondc/models/log.model';
 import { overallTxnsModel } from '~/ondc/models/overall_txns.model';
 import { buildQuote, type QuoteLineInput } from '~/ondc/utils/catalog.builders';
 import { ondcLogger } from '~/ondc/utils/logger.util';
+import { inactiveProviderError } from '~/ondc/utils/provider.guard';
 import type { BecknContext, BecknError } from '~/ondc/types/beckn.types';
 
 function buildTimeToShip(
@@ -293,16 +294,20 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
         requestErrors.push('No serviceable items found in order');
       }
 
+      // Checked here, not with requestErrors, so it keeps its own code instead of CORE-ERROR/30000.
+      const providerInactive = await inactiveProviderError(order);
+
       const domainItemIssues = [...itemErrors, ...serviceabilityErrors];
       const outboundError: BecknError | undefined =
-        requestErrors.length || domainItemIssues.length
+        providerInactive ??
+        (requestErrors.length || domainItemIssues.length
           ? {
               type: requestErrors.length ? 'CORE-ERROR' : 'DOMAIN-ERROR',
               // 30000 request error; 30009 location not serviceable; else 40002 stock.
               code: requestErrors.length ? '30000' : hasNonStockServiceFailure ? '30009' : '40002',
               message: [...requestErrors, ...domainItemIssues].join('; '),
             }
-          : undefined;
+          : undefined);
 
       await overallTxnsModel.patch(txnId, {
         on_select: 1,

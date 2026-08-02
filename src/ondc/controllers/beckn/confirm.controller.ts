@@ -42,6 +42,7 @@ import {
 } from '~/ondc/utils/catalog.builders';
 import type { BecknContext } from '~/ondc/types/beckn.types';
 import { quotedSelectDeliveryCharge } from './init.controller';
+import { inactiveProviderErrorForConfirm } from '~/ondc/utils/provider.guard';
 
 const DEFAULT_QUOTE_ITEM_TAGS = [
   {
@@ -227,11 +228,25 @@ function buildTimeToShip(
   }
 }
 
+/** Order id the buyer sent, or the deterministic fallback the persist path uses. */
+function ondcOrderIdOf(ctx: BecknContext, order: Record<string, any>): string {
+  return String(order['id'] || `ONDC-${ctx.transaction_id.slice(0, 8).toUpperCase()}`);
+}
+
 export async function handleConfirm(req: Request, res: Response): Promise<void> {
   const { context: ctx, message } = req.body as {
     context: BecknContext;
     message: { order: Record<string, any> };
   };
+
+  const inactive = await inactiveProviderErrorForConfirm(
+    message?.order,
+    ondcOrderIdOf(ctx, message?.order ?? {}),
+  );
+  if (inactive) {
+    res.status(200).json(buildAck(ctx, inactive));
+    return;
+  }
 
   // Sync ACK — must be first
   res.status(200).json(buildAck(ctx));
@@ -436,7 +451,7 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
         if (t === 'discount') discountTotal += v;
       }
 
-      const ondcOrderId = String(order['id'] || `ONDC-${txnId.slice(0, 8).toUpperCase()}`);
+      const ondcOrderId = ondcOrderIdOf(ctx, order);
 
       // Resolve seller / store from the underlying stores row (provider_id = String(stores.id)).
       const provider = providerId ? await providerModel.findById(providerId) : null;
