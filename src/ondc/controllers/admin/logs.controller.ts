@@ -5,6 +5,7 @@
 import type { Request, Response } from 'express';
 import { ApiResponse } from '~/lib/response';
 import { txnLogModel } from '~/ondc/models/log.model';
+import { transactionModel } from '~/ondc/models/transaction.model';
 
 /** GET /api/v1/ondc/admin/logs */
 export async function listLogs(req: Request, res: Response): Promise<void> {
@@ -105,7 +106,15 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
     ...(q ? { q } : {}),
   });
 
-  ApiResponse.success(res, `Deleted ${deleted} log${deleted === 1 ? '' : 's'}`, { deleted });
+  // ondc_transactions summarises these logs and is unreachable without them, so it follows.
+  const transactionsDeleted = await transactionModel.deleteOrphans(
+    transactionIds.length ? transactionIds : undefined,
+  );
+
+  ApiResponse.success(res, `Deleted ${deleted} log${deleted === 1 ? '' : 's'}`, {
+    deleted,
+    transactions_deleted: transactionsDeleted,
+  });
 }
 
 /** GET /api/v1/ondc/admin/logs/:transactionId */

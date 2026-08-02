@@ -8,6 +8,15 @@ import type { OndcTxnLog } from '~/ondc/types/api.types';
 
 type InsertPayload = Omit<OndcTxnLog, 'id' | 'created_at'>;
 
+// /confirm re-reads its own on_select quote, so deleting a live one re-quotes delivery at zero.
+const PROTECT_HOURS = Math.max(
+  0,
+  Math.trunc(Number(process.env['ONDC_LOG_PROTECT_HOURS'] ?? 48)) || 0,
+);
+const QUOTE_IN_USE = `action = 'on_select' AND direction = 'outbound'
+     AND created_at >= DATE_SUB(NOW(), INTERVAL ${PROTECT_HOURS} HOUR)
+     AND NOT EXISTS (SELECT 1 FROM ondc_orders o WHERE o.transaction_id = ondc_txn_logs.transaction_id)`;
+
 /** Build the shared WHERE clause used by listFiltered / countFiltered. */
 function buildLogFilter(filters: {
   q?: string;
@@ -107,6 +116,7 @@ export const txnLogModel = {
    * Delete logs matching a set of selectors (all ANDed together).
    * Returns the number of rows removed. Returns 0 (no-op) when NO selector is
    * supplied — a guard so an empty payload can never wipe the whole table.
+   * Quotes a /confirm may still re-read are always excluded (see QUOTE_IN_USE).
    */
   async deleteFiltered(filters: {
     ids?: number[];
@@ -150,6 +160,7 @@ export const txnLogModel = {
 
     // Safety net: never run an unbounded DELETE.
     if (conds.length === 0) return 0;
+    if (PROTECT_HOURS > 0) conds.push(`NOT (${QUOTE_IN_USE})`);
 
     const result = await ondcExec(`DELETE FROM ondc_txn_logs WHERE ${conds.join(' AND ')}`, params);
     return result.affectedRows;

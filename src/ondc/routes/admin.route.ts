@@ -42,6 +42,8 @@ import {
   listByAction,
   getTimeline,
   listBuyerApps,
+  getTransactionRecordStats,
+  purgeTransactionRecords,
 } from '~/ondc/controllers/admin/request_monitor.controller';
 import {
   listOndcIssues,
@@ -116,6 +118,9 @@ router.delete('/transactions', ...adminGuard, deleteTransactions);
 
 // ---- Request Monitor (per-action view of ondc_txn_logs) ----
 router.get('/request-monitor/counts', ...adminGuard, getActionCounts);
+// Both must precede /:transactionId or that param route swallows them.
+router.get('/request-monitor/transaction-records', ...adminGuard, getTransactionRecordStats);
+router.delete('/request-monitor/transaction-records', ...adminGuard, purgeTransactionRecords);
 router.get('/request-monitor', ...adminGuard, listByAction);
 router.get('/request-monitor/:transactionId', ...adminGuard, getTimeline);
 
