@@ -645,7 +645,13 @@ export interface QuoteBuildOutput {
 
 export interface QuoteBuildOptions {
   includeZeroBreakups?: boolean;
+  /** GST on freight, emitted as its own tax breakup line. Delhivery quotes
+   *  ex-tax; the invoice ODOP pays includes 18%. Matches ecom checkout. */
+  deliveryTaxPercent?: number;
 }
+
+/** 2-decimal money rounding, used so every breakup line sums exactly to the total. */
+const money = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 
 /**
  * Quote breakup = per-item prices + a single delivery (shipping) line only.
@@ -659,42 +665,77 @@ export function buildQuote(
   deliveryCharge: number = 0,
   options: QuoteBuildOptions = {},
 ): QuoteBuildOutput {
-  const { includeZeroBreakups = false } = options;
+  const { includeZeroBreakups = false, deliveryTaxPercent = 18 } = options;
   const breakup: object[] = [];
   let total = 0;
 
+  // products.price is GST-INCLUSIVE (odop_backend order.service.ts calls the
+  // same figure `inclusiveTotal` and extracts base via 100/(100+gst)). So the
+  // item line carries the ex-GST base and the embedded GST becomes its own
+  // `tax` line — the two still sum to exactly what the buyer pays, and the
+  // breakup now discloses the GST instead of burying it in the item price.
   for (const l of lines) {
-    const lineTotal = l.unitPrice * l.quantity;
-    total += lineTotal;
+    const lineTotal = money(l.unitPrice * l.quantity);
+    const rate = Number(l.taxPercent ?? 0);
+    const base = rate > 0 ? money((lineTotal * 100) / (100 + rate)) : lineTotal;
+    // Derived by subtraction, never rounded independently, so base + tax
+    // always reconstructs lineTotal to the paisa.
+    const tax = money(lineTotal - base);
+    const unitBase = l.quantity > 0 ? money(base / l.quantity) : base;
 
     breakup.push({
       '@ondc/org/item_id': l.itemId,
       '@ondc/org/item_quantity': { count: l.quantity },
       title: l.itemName,
       '@ondc/org/title_type': 'item',
-      price: { currency: 'INR', value: lineTotal.toFixed(2) },
+      price: { currency: 'INR', value: base.toFixed(2) },
       item: {
         quantity: {
           available: { count: String(Math.min(99, l.stockAvailable)) },
           maximum: { count: String(l.stockMaximum) },
         },
-        price: { currency: 'INR', value: l.unitPrice.toFixed(2) },
+        price: { currency: 'INR', value: unitBase.toFixed(2) },
       },
     });
+    total += base;
+
+    if (tax > 0 || includeZeroBreakups) {
+      breakup.push({
+        '@ondc/org/item_id': l.itemId,
+        title: `GST (${rate}%)`,
+        '@ondc/org/title_type': 'tax',
+        price: { currency: 'INR', value: tax.toFixed(2) },
+      });
+      total += tax;
+    }
   }
 
   if (deliveryCharge > 0 || includeZeroBreakups) {
+    const freight = money(deliveryCharge);
+    // Delhivery quotes freight ex-tax; ODOP is invoiced with GST on top.
+    const freightTax = money((freight * deliveryTaxPercent) / 100);
+
     breakup.push({
       '@ondc/org/item_id': fulfillmentId,
       title: 'Delivery charges',
       '@ondc/org/title_type': 'delivery',
-      price: { currency: 'INR', value: deliveryCharge.toFixed(2) },
+      price: { currency: 'INR', value: freight.toFixed(2) },
     });
-    total += deliveryCharge;
+    total += freight;
+
+    if (freightTax > 0 || includeZeroBreakups) {
+      breakup.push({
+        '@ondc/org/item_id': fulfillmentId,
+        title: `GST (${deliveryTaxPercent}%) on delivery`,
+        '@ondc/org/title_type': 'tax',
+        price: { currency: 'INR', value: freightTax.toFixed(2) },
+      });
+      total += freightTax;
+    }
   }
 
   return {
-    price: { currency: 'INR', value: total.toFixed(2) },
+    price: { currency: 'INR', value: money(total).toFixed(2) },
     breakup,
     ttl: 'PT30M',
   };
