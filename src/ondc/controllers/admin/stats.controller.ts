@@ -32,9 +32,10 @@ interface OndcDashboardStats {
 
 const num = (v: unknown): number => Number(v ?? 0) || 0;
 
-// A store reaches ONDC only when every gate passes: ecom-active, seller
-// Super Admin-approved, ONDC toggle on (no row = on), and holding a product.
-// Must stay in sync with getActiveStores() in seller.adapter.ts.
+// A store reaches ONDC only when every gate passes: seller Super Admin-approved,
+// switched ON in ondc_provider_settings (no row = OFF), and holding a sellable
+// product. stores.is_active is the ecom storefront's own switch and is not part
+// of this. Must stay in sync with getActiveStores() in seller.adapter.ts.
 const HAS_PRODUCTS = `EXISTS (
   SELECT 1 FROM products p 
   JOIN product_verification pv ON pv.product_id = p.id AND pv.approval_status = 'approved'
@@ -45,7 +46,7 @@ const LIVE_STORE_IDS = `
   FROM stores s
   JOIN seller_profiles sp ON sp.user_id = s.seller_user_id AND sp.approval_status = 'APPROVED'
   LEFT JOIN ondc_provider_settings ops ON ops.store_id = s.id
-  WHERE s.is_active = 1 AND COALESCE(ops.is_active, 0) = 1 AND ${HAS_PRODUCTS}`;
+  WHERE COALESCE(ops.is_active, 0) = 1 AND ${HAS_PRODUCTS}`;
 
 /** GET /api/v1/ondc/admin/dashboard/stats */
 export async function getDashboardStats(req: Request, res: Response): Promise<void> {
