@@ -6,14 +6,20 @@
 -- Independent of stores.is_active (the ecom site's own on/off switch) and of
 -- seller_profiles.approval_status (the Super Admin seller-approval gate) —
 -- this table lets the ONDC admin dashboard turn a store on/off for ONDC only,
--- without touching the ecom-owned `stores` table. No row for a store means
--- "active" (default); the admin toggle only ever needs to write when a store
--- is turned OFF or turned back ON after that.
+-- without touching the ecom-owned `stores` table.
+--
+-- No row for a store means INACTIVE. This table is the only source of ONDC
+-- availability: Super Admin approval alone must never publish a seller to the
+-- network, so a store reaches ONDC only once someone activates it in the ONDC
+-- Providers tab, which is what writes the row.
+--
+-- The default below was 1 in the original version of this file, when an absent
+-- row meant "active". 005 flips it on databases created before that change.
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS `ondc_provider_settings` (
   `store_id` bigint(20) unsigned NOT NULL,
-  `is_active` tinyint(1) NOT NULL DEFAULT 1,
+  `is_active` tinyint(1) NOT NULL DEFAULT 0,
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`store_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
