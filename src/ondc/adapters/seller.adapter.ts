@@ -153,7 +153,7 @@ export function sellerTaxNumber(p: MainDbSellerProfile | null | undefined): stri
  * All active stores eligible to be an ONDC provider: ecom-active, Super
  * Admin-approved seller, has at least one product (a store with none would
  * only ever produce an empty catalog entry), and not turned off via the
- * ONDC-only toggle (ondc_provider_settings — absent row means active).
+ * ONDC-only toggle (ondc_provider_settings — absent row means inactive).
  */
 export async function getActiveStores(): Promise<MainDbSeller[]> {
   const rows = await ondcQuery<any>(
@@ -164,7 +164,7 @@ export async function getActiveStores(): Promise<MainDbSeller[]> {
      LEFT JOIN ondc_provider_settings ops ON ops.store_id = s.id
      WHERE s.is_active = 1
        AND sp.approval_status = 'APPROVED'
-       AND COALESCE(ops.is_active, 1) = 1
+       AND COALESCE(ops.is_active, 0) = 1
        AND EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id)
      ORDER BY s.id ASC`,
   );

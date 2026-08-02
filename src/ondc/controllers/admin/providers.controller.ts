@@ -29,8 +29,19 @@ export async function listProviders(req: Request, res: Response): Promise<void> 
   const filterOpts = parseProviderFilters(req);
 
   if (page === undefined && limit === undefined) {
-    const providers = await providerModel.listAll();
-    ApiResponse.success(res, 'Providers', providers);
+    const providers = await providerModel.listAll(filterOpts);
+    const [total, productBreakdown] = await Promise.all([
+      providerModel.countAll(filterOpts),
+      providerModel.getProductBreakdown(filterOpts),
+    ]);
+    ApiResponse.success(res, 'Providers', providers, {
+      page: 1,
+      limit: providers.length || 1,
+      total,
+      totalPages: 1,
+      withProductsCount: productBreakdown.withProducts,
+      withoutProductsCount: productBreakdown.withoutProducts,
+    });
     return;
   }
 
