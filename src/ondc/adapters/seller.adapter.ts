@@ -153,8 +153,16 @@ export function sellerTaxNumber(p: MainDbSellerProfile | null | undefined): stri
  * All active stores eligible to be an ONDC provider: ecom-active, Super
  * Admin-approved seller, has at least one product (a store with none would
  * only ever produce an empty catalog entry), and not turned off via the
- * ONDC-only toggle (ondc_provider_settings — absent row means active).
+ * ONDC-only toggle (ondc_provider_settings — absent row means inactive).
  */
+const LIVE_STORE_JOIN = `
+     FROM stores s
+     JOIN seller_profiles sp ON sp.user_id = s.seller_user_id
+     LEFT JOIN ondc_provider_settings ops ON ops.store_id = s.id`;
+const LIVE_STORE_WHERE = `sp.approval_status = 'APPROVED'
+       AND COALESCE(ops.is_active, 0) = 1
+       AND EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id)`;
+
 export async function getActiveStores(): Promise<MainDbSeller[]> {
   const rows = await ondcQuery<any>(
     `SELECT ${STORE_SELECT}
@@ -162,13 +170,20 @@ export async function getActiveStores(): Promise<MainDbSeller[]> {
      JOIN seller_profiles sp ON sp.user_id = s.seller_user_id
      ${STORE_OWNER_JOIN}
      LEFT JOIN ondc_provider_settings ops ON ops.store_id = s.id
-     WHERE s.is_active = 1
-       AND sp.approval_status = 'APPROVED'
-       AND COALESCE(ops.is_active, 1) = 1
-       AND EXISTS (SELECT 1 FROM products p WHERE p.store_id = s.id)
+     WHERE ${LIVE_STORE_WHERE}
      ORDER BY s.id ASC`,
   );
   return rows.map(mapStoreRow);
+}
+
+/** The same gate for one store — so what a buyer can transact with matches what /on_search offered. */
+export async function isStoreLiveOnOndc(storeId: number): Promise<boolean> {
+  if (!Number.isFinite(storeId)) return false;
+  const rows = await ondcQuery<{ ok: number }>(
+    `SELECT 1 AS ok ${LIVE_STORE_JOIN} WHERE s.id = ? AND ${LIVE_STORE_WHERE} LIMIT 1`,
+    [storeId],
+  );
+  return rows.length > 0;
 }
 
 /** Fetch store by seller_user_id (stores.seller_user_id) */

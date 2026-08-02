@@ -14,6 +14,7 @@
 import type { Request, Response } from 'express';
 import { ApiResponse } from '~/lib/response';
 import { ondcQuery } from '~/lib/ondcSql';
+import { transactionModel } from '~/ondc/models/transaction.model';
 
 const ACTIONS = [
   'search',
@@ -258,4 +259,21 @@ export async function listBuyerApps(req: Request, res: Response): Promise<void> 
     rows.map((r) => ({ ...r, request_count: Number(r.request_count) })),
     { total: rows.length },
   );
+}
+
+/** GET /api/v1/ondc/admin/request-monitor/transaction-records
+ *  Size of ondc_transactions and how much of it is safe to purge.
+ */
+export async function getTransactionRecordStats(_req: Request, res: Response): Promise<void> {
+  ApiResponse.success(res, 'Transaction records', await transactionModel.stats());
+}
+
+/** DELETE /api/v1/ondc/admin/request-monitor/transaction-records
+ *  Purges rows whose logs are already gone. Order-bearing transactions are kept.
+ */
+export async function purgeTransactionRecords(_req: Request, res: Response): Promise<void> {
+  const deleted = await transactionModel.deleteOrphans();
+  ApiResponse.success(res, `Purged ${deleted} transaction record${deleted === 1 ? '' : 's'}`, {
+    deleted,
+  });
 }

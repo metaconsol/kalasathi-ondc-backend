@@ -26,6 +26,7 @@ import { ondcEnv } from '~/config/ondc.config';
 import { PLATFORM_SETTLEMENT } from '~/ondc/config/constants';
 import { ondcLogger } from '~/ondc/utils/logger.util';
 import { buildQuote, type QuoteLineInput } from '~/ondc/utils/catalog.builders';
+import { inactiveProviderError } from '~/ondc/utils/provider.guard';
 import type { BecknContext } from '~/ondc/types/beckn.types';
 
 type LooseObject = Record<string, any>;
@@ -227,6 +228,12 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
     context: BecknContext;
     message: { order: Record<string, any> };
   };
+
+  const inactive = await inactiveProviderError(message?.order);
+  if (inactive) {
+    res.status(200).json(buildAck(ctx, inactive));
+    return;
+  }
 
   res.status(200).json(buildAck(ctx));
 
