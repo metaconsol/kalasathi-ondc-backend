@@ -7,6 +7,7 @@
 
 import { ondcExec, ondcQuery } from '~/lib/ondcSql';
 import { parseStoreOndcDomains, type OndcRetailDomain } from '~/ondc/config/domain.config';
+import { AppError } from '~/lib/response';
 
 export interface OndcProviderRow {
   id: number;
@@ -46,7 +47,7 @@ const STORE_SELECT = `
   s.support_phone                        AS support_phone,
   s.support_email                        AS support_email,
   s.ondc_domain                          AS ondc_domain_raw,
-  COALESCE(ops.is_active, 1)             AS is_active,
+  COALESCE(ops.is_active, 0)             AS is_active,
   s.created_at                           AS created_at,
   s.updated_at                           AS updated_at`;
 
@@ -54,7 +55,7 @@ const STORE_SELECT = `
 // live /confirm order flow (see confirm.controller.ts), which must keep
 // resolving an already-placed order's provider even if the seller's approval
 // or product catalog changes afterward. ondc_provider_settings has no row for
-// stores never explicitly toggled — absent means active (default).
+// stores never explicitly toggled — absent means inactive (default).
 const STORE_JOIN = `
   FROM stores s
   LEFT JOIN ondc_provider_settings ops ON ops.store_id = s.id`;
@@ -104,9 +105,11 @@ function buildFilters(opts?: ProviderFilterOpts): { clause: string; params: stri
   }
 
   if (opts?.status === 'active') {
-    conditions.push('COALESCE(ops.is_active, 1) = 1');
+    conditions.push('COALESCE(ops.is_active, 0) = 1');
+    conditions.push('s.is_active = 1');
+    conditions.push(HAS_PRODUCTS_EXISTS);
   } else if (opts?.status === 'inactive') {
-    conditions.push('COALESCE(ops.is_active, 1) = 0');
+    conditions.push(`(COALESCE(ops.is_active, 0) = 0 OR s.is_active = 0 OR NOT ${HAS_PRODUCTS_EXISTS})`);
   }
 
   if (opts?.hasProducts === 'yes') {
@@ -169,7 +172,7 @@ export const providerModel = {
     const rows = await ondcQuery<any>(
       `SELECT ${STORE_SELECT} ${STORE_JOIN}
        WHERE s.seller_user_id = ?
-       ORDER BY COALESCE(ops.is_active, 1) DESC, s.id ASC
+       ORDER BY COALESCE(ops.is_active, 0) DESC, s.id ASC
        LIMIT 1`,
       [sellerId],
     );
@@ -177,9 +180,11 @@ export const providerModel = {
   },
 
   /** Every APPROVED store — active and inactive, with or without products — so admin can manage them. */
-  async listAll(): Promise<OndcProviderRow[]> {
+  async listAll(opts?: ProviderFilterOpts): Promise<OndcProviderRow[]> {
+    const { clause, params } = buildFilters(opts);
     const rows = await ondcQuery<any>(
-      `SELECT ${LISTING_SELECT} ${LISTING_JOIN} ORDER BY s.store_name ASC`,
+      `SELECT ${LISTING_SELECT} ${LISTING_JOIN} ${clause} ORDER BY s.store_name ASC`,
+      params
     );
     return rows.map(mapRow);
   },
@@ -228,7 +233,7 @@ export const providerModel = {
     const { clause, params } = buildFilters(opts);
     const rows = await ondcQuery<any>(
       `SELECT ${LISTING_SELECT} ${LISTING_JOIN} ${clause}
-       ORDER BY COALESCE(ops.is_active, 1) DESC, s.store_name ASC
+       ORDER BY COALESCE(ops.is_active, 0) DESC, s.store_name ASC
        LIMIT ? OFFSET ?`,
       [...params, opts.limit, opts.offset],
     );
@@ -239,6 +244,20 @@ export const providerModel = {
   async setActive(providerId: string, active: boolean): Promise<void> {
     const storeId = parseInt(providerId, 10);
     if (!Number.isFinite(storeId)) return;
+
+    if (active) {
+      // Provider must have approved products and be approved to be activated
+      const rows = await ondcQuery<{ cnt: number }>(
+        `SELECT COUNT(*) AS cnt FROM stores s
+         JOIN seller_profiles sp ON sp.user_id = s.seller_user_id AND sp.approval_status = 'APPROVED'
+         WHERE s.id = ? AND ${HAS_PRODUCTS_EXISTS}`,
+        [storeId],
+      );
+      if (Number(rows[0]?.cnt ?? 0) === 0) {
+        throw new AppError('Provider cannot be activated: Must be approved and have at least one approved product.', 400);
+      }
+    }
+
     await ondcExec(
       `INSERT INTO ondc_provider_settings (store_id, is_active) VALUES (?, ?)
        ON DUPLICATE KEY UPDATE is_active = VALUES(is_active), updated_at = NOW()`,
@@ -251,13 +270,31 @@ export const providerModel = {
     const storeIds = providerIds.map((id) => parseInt(id, 10)).filter((id) => Number.isFinite(id));
     if (storeIds.length === 0) return 0;
 
-    const values = storeIds.map(() => '(?, ?)').join(', ');
-    const params = storeIds.flatMap((id) => [id, active ? 1 : 0]);
+    let validStoreIds = storeIds;
+
+    if (active) {
+      const placeholders = storeIds.map(() => '?').join(',');
+      const rows = await ondcQuery<{ id: number }>(
+        `SELECT s.id FROM stores s
+         JOIN seller_profiles sp ON sp.user_id = s.seller_user_id AND sp.approval_status = 'APPROVED'
+         WHERE s.id IN (${placeholders}) AND ${HAS_PRODUCTS_EXISTS}`,
+        storeIds,
+      );
+      const validIdsSet = new Set(rows.map((r) => r.id));
+      validStoreIds = storeIds.filter((id) => validIdsSet.has(id));
+
+      if (validStoreIds.length === 0) {
+        throw new AppError('None of the selected providers could be activated. They must be approved and have at least one approved product.', 400);
+      }
+    }
+
+    const values = validStoreIds.map(() => '(?, ?)').join(', ');
+    const params = validStoreIds.flatMap((id) => [id, active ? 1 : 0]);
     await ondcExec(
       `INSERT INTO ondc_provider_settings (store_id, is_active) VALUES ${values}
        ON DUPLICATE KEY UPDATE is_active = VALUES(is_active), updated_at = NOW()`,
       params,
     );
-    return storeIds.length;
+    return validStoreIds.length;
   },
 };
