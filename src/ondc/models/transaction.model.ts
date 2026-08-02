@@ -9,6 +9,12 @@
 
 import { ondcExec, ondcQuery } from '~/lib/ondcSql';
 
+// Unreachable once its logs are gone — the only reader is the drill-down opened from a log row.
+const NO_LOGS = `NOT EXISTS (SELECT 1 FROM ondc_txn_logs l WHERE l.transaction_id = t.transaction_id)`;
+// A transaction that produced a real order keeps its row whatever happens to the logs.
+const NO_ORDER = `NOT EXISTS (SELECT 1 FROM ondc_orders o WHERE o.transaction_id = t.transaction_id)`;
+const PURGEABLE = `${NO_LOGS} AND ${NO_ORDER}`;
+
 export type TxnPhase = 'SEARCH' | 'SELECT' | 'INIT' | 'CONFIRM' | 'COMPLETED' | 'CANCELLED';
 
 export interface OndcTransactionRow {
@@ -77,5 +83,26 @@ export const transactionModel = {
       [transactionId],
     );
     return rows[0] ?? null;
+  },
+
+  /** Total rows and how many are purgeable, for the Request Monitor cleanup control. */
+  async stats(): Promise<{ total: number; purgeable: number }> {
+    const rows = await ondcQuery<{ total: number; purgeable: number }>(
+      `SELECT COUNT(*) AS total, COALESCE(SUM(${PURGEABLE}), 0) AS purgeable
+       FROM ondc_transactions t`,
+    );
+    return { total: Number(rows[0]?.total ?? 0), purgeable: Number(rows[0]?.purgeable ?? 0) };
+  },
+
+  /** Drops rows a log delete left behind. Never touches a transaction that produced an order. */
+  async deleteOrphans(transactionIds?: string[]): Promise<number> {
+    const scoped = transactionIds?.length
+      ? ` AND t.transaction_id IN (${transactionIds.map(() => '?').join(',')})`
+      : '';
+    const result = await ondcExec(
+      `DELETE t FROM ondc_transactions t WHERE ${PURGEABLE}${scoped}`,
+      transactionIds?.length ? transactionIds : [],
+    );
+    return result.affectedRows;
   },
 };
