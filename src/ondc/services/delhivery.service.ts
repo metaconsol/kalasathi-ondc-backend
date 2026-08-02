@@ -23,6 +23,15 @@ import { ondcLogger } from '~/ondc/utils/logger.util';
 const DELHIVERY_TIMEOUT_MS = 20_000;
 const DEFAULT_PACKAGE_METRICS = { weightGm: 500, lengthCm: 10, widthCm: 10, heightCm: 10 };
 
+/**
+ * GST on freight. Delhivery's charges endpoint quotes the base WITHOUT tax, but
+ * the invoice ODOP actually pays includes 18% — so the buyer must be charged it,
+ * exactly as the ecom checkout does (odop_backend SHIPPING_CHARGE_TAX_RATE).
+ * The ONDC quote adds it as its own `@ondc/org/title_type: "tax"` breakup line
+ * (see buildQuote), so this estimator deliberately returns the PRE-tax base.
+ */
+export const SHIPPING_CHARGE_TAX_PERCENT = Number(process.env['ONDC_SHIPPING_TAX_PERCENT'] ?? '18');
+
 // ---------------------------------------------------------------------------
 // Sanitizers (ported verbatim from odop_backend/src/service/delhivery.service.ts)
 // ---------------------------------------------------------------------------
@@ -1031,6 +1040,7 @@ export async function estimateDeliveryCharge(input: {
     });
     const amount = findChargeAmount(data);
     if (amount === null || amount < 0) return null;
+    // PRE-tax base. GST on it is emitted as a separate quote breakup line.
     return Math.round(amount * 100) / 100;
   } catch (err) {
     ondcLogger.warn('Delhivery shipping estimate failed — using 0 (fail-open)', {
