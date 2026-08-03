@@ -26,6 +26,7 @@ import { ondcEnv } from '~/config/ondc.config';
 import { PLATFORM_SETTLEMENT } from '~/ondc/config/constants';
 import { ondcLogger } from '~/ondc/utils/logger.util';
 import { buildQuote, type QuoteLineInput } from '~/ondc/utils/catalog.builders';
+import { resolveFinderFee, finderFeeKeys } from '~/ondc/utils/finder-fee';
 import { inactiveProviderError } from '~/ondc/utils/provider.guard';
 import type { BecknContext } from '~/ondc/types/beckn.types';
 
@@ -412,9 +413,11 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
 
       const providerLocationIds = storeLocations.map((loc) => ({ id: String(loc.id) }));
       const providerId = storeId ? String(storeId) : String(order?.['provider']?.['id'] ?? '');
-      const buyerFeeAmount =
-        String(order?.['payment']?.['@ondc/org/buyer_app_finder_fee_amount'] ?? '').trim() ||
-        String(ondcEnv.buyerFinderFeeDefault);
+      const finderFee = await resolveFinderFee({
+        requestPayment: order?.['payment'],
+        transactionId: txnId,
+        bapId: ctx.bap_id,
+      });
 
       // Platform collects the full amount from the buyer — settlement identity is
       // always ODOP's own, never an individual seller's real bank details.
@@ -477,8 +480,7 @@ export async function handleInit(req: Request, res: Response): Promise<void> {
             amount: total.toFixed(2),
             currency: 'INR',
           },
-          '@ondc/org/buyer_app_finder_fee_type': 'percent',
-          '@ondc/org/buyer_app_finder_fee_amount': buyerFeeAmount,
+          ...finderFeeKeys(finderFee),
           '@ondc/org/settlement_basis': 'delivery',
           '@ondc/org/settlement_window': 'P1D',
           '@ondc/org/withholding_amount': '0.00',

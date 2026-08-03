@@ -19,6 +19,7 @@ import { becknService } from '~/ondc/services/beckn.service';
 import { observabilityService } from '~/ondc/services/observability.service';
 import { incrementalCatalogService } from '~/ondc/services/incremental-catalog.service';
 import { bapTermsModel, extractBapTerms } from '~/ondc/models/bap_terms.model';
+import { readFinderFee } from '~/ondc/utils/finder-fee';
 import { transactionModel } from '~/ondc/models/transaction.model';
 import { txnLogModel } from '~/ondc/models/log.model';
 import { overallTxnsModel } from '~/ondc/models/overall_txns.model';
@@ -100,7 +101,9 @@ export async function handleSearch(req: Request, res: Response): Promise<void> {
         await bapTermsModel.upsert(terms);
       }
 
-      // 3. Upsert transaction + overall_txns
+      // 3. Upsert transaction + overall_txns. The declared fee rides along so every
+      // later callback in this transaction can echo it instead of inventing one.
+      const searchFee = readFinderFee(intent['payment']);
       await transactionModel.upsert({
         transaction_id: txnId,
         bap_id: bapId,
@@ -109,6 +112,8 @@ export async function handleSearch(req: Request, res: Response): Promise<void> {
         city: ctx.city,
         country: ctx.country ?? null,
         core_version: ctx.core_version ?? null,
+        bff_amount: searchFee?.amount ?? null,
+        bff_type: searchFee?.type ?? null,
         status: 'SEARCH',
       });
       await overallTxnsModel.upsert(txnId);

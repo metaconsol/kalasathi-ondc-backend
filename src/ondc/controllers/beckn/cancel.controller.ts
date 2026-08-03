@@ -15,6 +15,7 @@ import type { BecknContext } from '~/ondc/types/beckn.types';
 import { fetchStoreById, fetchStoreLocations } from '~/ondc/adapters/seller.adapter';
 import { bapTermsModel } from '~/ondc/models/bap_terms.model';
 import { ondcEnv } from '~/config/ondc.config';
+import { resolveFinderFee, finderFeeKeys } from '~/ondc/utils/finder-fee';
 import { PLATFORM_SETTLEMENT } from '~/ondc/config/constants';
 import { ondcQuery } from '~/lib/ondcSql';
 
@@ -608,13 +609,14 @@ export async function handleCancel(req: Request, res: Response): Promise<void> {
           status: origPayment.status ?? 'PAID',
           type: origPayment.type ?? 'ON-ORDER',
           collected_by: origPayment.collected_by ?? 'BAP',
-          '@ondc/org/buyer_app_finder_fee_type':
-            origPayment['@ondc/org/buyer_app_finder_fee_type'] ?? 'percent',
-          '@ondc/org/buyer_app_finder_fee_amount':
-            origPayment['@ondc/org/buyer_app_finder_fee_amount'] ??
-            bapTerms?.bff_percent ??
-            ondcEnv.buyerFinderFeeDefault ??
-            '3.0',
+          ...finderFeeKeys(
+            await resolveFinderFee({
+              requestPayment: origPayment,
+              ondcOrderId: dbOrder.ondc_order_id,
+              transactionId: dbOrder.transaction_id,
+              bapId: dbOrder.bap_id,
+            }),
+          ),
           '@ondc/org/settlement_details':
             origPayment['@ondc/org/settlement_details'] ?? dynamicSettlementDetails,
         };
