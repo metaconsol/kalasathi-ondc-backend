@@ -574,10 +574,26 @@ ALTER TABLE `ondc_orders`
   ADD COLUMN IF NOT EXISTS `delhivery_last_scan_at`    DATETIME     NULL AFTER `delhivery_shipment_status`,
   ADD COLUMN IF NOT EXISTS `delhivery_last_response`   LONGTEXT     NULL AFTER `delhivery_last_scan_at`;
 
--- From 004: independent ONDC-only provider on/off toggle (decoupled from stores.is_active).
+-- From 004 + 005: independent ONDC-only provider on/off toggle (decoupled from
+-- stores.is_active). No row means INACTIVE, so the default is 0 — a defaulted
+-- insert must never publish a store to the live network.
 CREATE TABLE IF NOT EXISTS `ondc_provider_settings` (
   `store_id` bigint(20) unsigned NOT NULL,
-  `is_active` tinyint(1) NOT NULL DEFAULT 1,
+  `is_active` tinyint(1) NOT NULL DEFAULT 0,
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`store_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- From 006: the buyer app finder fee, so every on_* callback echoes the value the
+-- BAP sent on /search instead of a local default. Amounts stay VARCHAR — the echo
+-- must be byte-identical to what was received ('5.0' must not become '5').
+ALTER TABLE `ondc_orders`
+  ADD COLUMN IF NOT EXISTS `buyer_finder_fee_amount` VARCHAR(16) NULL AFTER `order_total`,
+  ADD COLUMN IF NOT EXISTS `buyer_finder_fee_type`   VARCHAR(16) NULL AFTER `buyer_finder_fee_amount`;
+
+ALTER TABLE `ondc_transactions`
+  ADD COLUMN IF NOT EXISTS `bff_amount` VARCHAR(16) NULL AFTER `core_version`,
+  ADD COLUMN IF NOT EXISTS `bff_type`   VARCHAR(16) NULL AFTER `bff_amount`;
+
+ALTER TABLE `bap_terms`
+  ADD COLUMN IF NOT EXISTS `bff_type` VARCHAR(16) NULL AFTER `bff_percent`;
