@@ -9,6 +9,7 @@ import {
   fetchOndcCatalogRows,
   buildOndcItemFromRow,
   type OndcCatalogRow,
+  isRowOutOfStock,
 } from '~/ondc/adapters/product.adapter';
 import {
   getActiveStores,
@@ -36,7 +37,11 @@ export const catalogService = {
    * into one item per leaf variant (or one per product if no variants).
    * Skips items whose resolved ONDC domain doesn't match the requested one.
    */
-  async buildSearchCatalog(domain: string): Promise<OnSearchCatalog> {
+  async buildSearchCatalog(
+    domain: string,
+    opts: { hideOutOfStock?: boolean } = {},
+  ): Promise<OnSearchCatalog> {
+    const hideOutOfStock = opts.hideOutOfStock ?? true;
     const providers: object[] = [];
     const requestedDomain = (domain || 'ONDC:RET12') as OndcRetailDomain;
 
@@ -72,6 +77,9 @@ export const catalogService = {
       // match against the requested domain.
       const builtItems: ItemWithVariantMeta[] = [];
       for (const row of rows) {
+        // Omitted from a full catalog; retained as available.count 0 on the incremental
+        // path, which is the only way to tell a buyer app the item is gone.
+        if (hideOutOfStock && isRowOutOfStock(row)) continue;
         try {
           const built = await buildOndcItemFromRow(row, {
             providerId,

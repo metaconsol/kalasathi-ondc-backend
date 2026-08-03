@@ -13,6 +13,9 @@ CREATE OR REPLACE SQL SECURITY INVOKER VIEW `products` AS SELECT * FROM `odopmar
 CREATE OR REPLACE SQL SECURITY INVOKER VIEW `product_variants` AS SELECT * FROM `odopmartmp_new`.`product_variants`;
 CREATE OR REPLACE SQL SECURITY INVOKER VIEW `product_images` AS SELECT * FROM `odopmartmp_new`.`product_images`;
 CREATE OR REPLACE SQL SECURITY INVOKER VIEW `variant_images` AS SELECT * FROM `odopmartmp_new`.`variant_images`;
+-- Per-variant stock. products.stock is never maintained for variant products (the storefront
+-- decrements inventory.qty_on_hand instead), so /on_search needs this to publish a real count.
+CREATE OR REPLACE SQL SECURITY INVOKER VIEW `inventory` AS SELECT * FROM `odopmartmp_new`.`inventory`;
 CREATE OR REPLACE SQL SECURITY INVOKER VIEW `categories` AS SELECT * FROM `odopmartmp_new`.`categories`;
 CREATE OR REPLACE SQL SECURITY INVOKER VIEW `product_ondc_attributes` AS SELECT * FROM `odopmartmp_new`.`product_ondc_attributes`;
 CREATE OR REPLACE SQL SECURITY INVOKER VIEW `product_serviceable_pincodes` AS SELECT * FROM `odopmartmp_new`.`product_serviceable_pincodes`;
