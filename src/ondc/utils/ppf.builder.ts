@@ -8,6 +8,7 @@ import type { OndcOrderItemRow, OndcOrderRow } from '~/ondc/models/order.model';
 import type { PpfSettlementItem } from '~/ondc/models/ppf.model';
 import type { BecknPayment } from '~/ondc/types/beckn.types';
 import { safeJsonParse } from '~/ondc/utils/payload.builder';
+import { finderFeeCommission, orderFinderFee } from '~/ondc/utils/finder-fee';
 
 export interface NtsContext {
   domain: string;
@@ -197,8 +198,8 @@ export function buildSettlementsFromOrder(
   const payment: BecknPayment = safeJsonParse(order.payment_json ?? '{}', {});
   const currency = order.currency || 'INR';
   const total = parseFloat(String(order.order_total ?? 0));
-  const finderFeePercent = parseFloat(payment['@ondc/org/buyer_app_finder_fee_amount'] ?? '3');
-  const commission = money((total * finderFeePercent) / 100);
+  // 'amount' is a flat fee, not a percentage — dividing it by 100 understated it 100-fold.
+  const commission = money(finderFeeCommission(orderFinderFee(order, payment), total));
   const withholding = money(payment['@ondc/org/withholding_amount'] ?? 0);
   const settleAmount = money(total - parseFloat(commission));
   const updatedAt = nowNtsIso();

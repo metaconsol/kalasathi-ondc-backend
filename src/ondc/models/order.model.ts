@@ -40,6 +40,9 @@ export interface OndcOrderRow {
   payment_status: 'NOT_PAID' | 'PAID' | 'FAILED' | 'REFUNDED' | null;
   payment_transaction_ref: string | null;
   payment_json: string | null;
+  /** Finder fee frozen at /confirm — every later callback echoes these. */
+  buyer_finder_fee_amount: string | null;
+  buyer_finder_fee_type: string | null;
   item_total: string;
   delivery_charges: string;
   packing_charges: string;
@@ -148,12 +151,13 @@ export const orderModel = {
           provider_id, seller_id, store_id,
           status, payment_method, payment_status,
           payment_transaction_ref, payment_json,
+          buyer_finder_fee_amount, buyer_finder_fee_type,
           item_total, delivery_charges, packing_charges, tax_total,
           convenience_fee, discount_total, order_total, currency, item_count,
           customer_name, customer_phone, customer_email, billing_json,
           cancel_reason_id, return_reason_id, raw_confirm_payload)
        VALUES
-         (?,?,?, ?,?,?,?, ?,?,?, ?,?,?, ?,?,?, ?,?, ?,?,?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?)`,
+         (?,?,?, ?,?,?,?, ?,?,?, ?,?,?, ?,?,?, ?,?, ?,?, ?,?,?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?)`,
       [
         data.ondc_order_id,
         data.transaction_id,
@@ -173,6 +177,8 @@ export const orderModel = {
         data.payment_status,
         data.payment_transaction_ref,
         data.payment_json,
+        data.buyer_finder_fee_amount,
+        data.buyer_finder_fee_type,
         data.item_total,
         data.delivery_charges,
         data.packing_charges,

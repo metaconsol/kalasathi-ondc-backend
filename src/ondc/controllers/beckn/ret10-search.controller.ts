@@ -9,6 +9,7 @@ import { transactionModel } from '~/ondc/models/transaction.model';
 import { txnLogModel } from '~/ondc/models/log.model';
 import { overallTxnsModel } from '~/ondc/models/overall_txns.model';
 import { ondcLogger } from '~/ondc/utils/logger.util';
+import { readFinderFee } from '~/ondc/utils/finder-fee';
 import type { BecknContext } from '~/ondc/types/beckn.types';
 
 /**
@@ -59,6 +60,7 @@ export async function handleRet10Search(req: Request, res: Response): Promise<vo
         await bapTermsModel.upsert(terms);
       }
 
+      const searchFee = readFinderFee(body.message?.intent?.['payment']);
       await transactionModel.upsert({
         transaction_id: txnId,
         bap_id: bapId,
@@ -67,6 +69,8 @@ export async function handleRet10Search(req: Request, res: Response): Promise<vo
         city: ctx.city,
         country: ctx.country ?? null,
         core_version: ctx.core_version ?? null,
+        bff_amount: searchFee?.amount ?? null,
+        bff_type: searchFee?.type ?? null,
         status: 'SEARCH',
       });
       await overallTxnsModel.upsert(txnId);

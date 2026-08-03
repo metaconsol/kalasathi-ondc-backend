@@ -26,6 +26,8 @@ export interface OndcTransactionRow {
   city: string | null;
   country: string | null;
   core_version: string | null;
+  bff_amount: string | null;
+  bff_type: string | null;
   status: TxnPhase | null;
   created_at: Date;
   updated_at: Date;
@@ -39,6 +41,9 @@ export interface TxnUpsertInput {
   city?: string | null;
   country?: string | null;
   core_version?: string | null;
+  /** Finder fee the BAP declared on /search — set there, preserved by later phases. */
+  bff_amount?: string | null;
+  bff_type?: string | null;
   status: TxnPhase;
 }
 
@@ -46,8 +51,8 @@ export const transactionModel = {
   async upsert(data: TxnUpsertInput): Promise<void> {
     await ondcExec(
       `INSERT INTO ondc_transactions
-         (transaction_id, bap_id, bpp_id, domain, city, country, core_version, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         (transaction_id, bap_id, bpp_id, domain, city, country, core_version, bff_amount, bff_type, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
          bap_id       = COALESCE(VALUES(bap_id), bap_id),
          bpp_id       = COALESCE(VALUES(bpp_id), bpp_id),
@@ -55,6 +60,8 @@ export const transactionModel = {
          city         = COALESCE(VALUES(city), city),
          country      = COALESCE(VALUES(country), country),
          core_version = COALESCE(VALUES(core_version), core_version),
+         bff_amount   = COALESCE(VALUES(bff_amount), bff_amount),
+         bff_type     = COALESCE(VALUES(bff_type), bff_type),
          status       = VALUES(status),
          updated_at   = NOW()`,
       [
@@ -65,6 +72,8 @@ export const transactionModel = {
         data.city ?? null,
         data.country ?? null,
         data.core_version ?? null,
+        data.bff_amount ?? null,
+        data.bff_type ?? null,
         data.status,
       ],
     );

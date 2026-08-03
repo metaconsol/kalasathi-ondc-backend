@@ -16,6 +16,7 @@ import { ondcLogger } from '~/ondc/utils/logger.util';
 import { fetchStoreById, fetchStoreLocations } from '~/ondc/adapters/seller.adapter';
 import { bapTermsModel } from '~/ondc/models/bap_terms.model';
 import { ondcEnv } from '~/config/ondc.config';
+import { resolveFinderFee, finderFeeKeys } from '~/ondc/utils/finder-fee';
 import { PLATFORM_SETTLEMENT } from '~/ondc/config/constants';
 import { ondcQuery } from '~/lib/ondcSql';
 import { txnLogModel } from '~/ondc/models/log.model';
@@ -522,15 +523,14 @@ export const flow3CService = {
       status: origPayment.status ?? 'PAID',
       type: origPayment.type ?? 'ON-ORDER',
       collected_by: origPayment.collected_by ?? 'BAP',
-      '@ondc/org/buyer_app_finder_fee_type':
-        origPayment['@ondc/org/buyer_app_finder_fee_type'] ??
-        dbPayment['@ondc/org/buyer_app_finder_fee_type'] ??
-        'percent',
-      '@ondc/org/buyer_app_finder_fee_amount':
-        origPayment['@ondc/org/buyer_app_finder_fee_amount'] ??
-        dbPayment['@ondc/org/buyer_app_finder_fee_amount'] ??
-        bapTerms?.bff_percent ??
-        String(ondcEnv.buyerFinderFeeDefault),
+      ...finderFeeKeys(
+        await resolveFinderFee({
+          requestPayment: { ...dbPayment, ...origPayment },
+          ondcOrderId: dbOrder.ondc_order_id,
+          transactionId: dbOrder.transaction_id,
+          bapId: dbOrder.bap_id,
+        }),
+      ),
       // Platform collects the full amount from the buyer — settlement identity is
       // always ODOP's own, never an individual seller's real bank details.
       '@ondc/org/settlement_details': origPayment['@ondc/org/settlement_details'] ??

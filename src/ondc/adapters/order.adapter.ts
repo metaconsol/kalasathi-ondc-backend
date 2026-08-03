@@ -18,6 +18,7 @@ import { safeJsonParse } from '~/ondc/utils/payload.builder';
 import { fetchStoreById, fetchStoreLocations } from '~/ondc/adapters/seller.adapter';
 import { SELLER_PROFILE, PLATFORM_SETTLEMENT } from '~/ondc/config/constants';
 import { ondcEnv } from '~/config/ondc.config';
+import { readFinderFee, resolveFinderFee, finderFeeKeys } from '~/ondc/utils/finder-fee';
 
 export interface ConfirmMessage {
   order: OndcOrder;
@@ -111,7 +112,11 @@ export function adaptConfirmToOrderRow(
   const paymentStatus: 'NOT_PAID' | 'PAID' | 'FAILED' | 'REFUNDED' | null =
     payment?.status === 'PAID' ? 'PAID' : 'NOT_PAID';
 
+  const declaredFee = readFinderFee(payment);
+
   return {
+    buyer_finder_fee_amount: declaredFee?.amount ?? null,
+    buyer_finder_fee_type: declaredFee?.type ?? null,
     ondc_order_id: order.id || generateOndcOrderId(),
     transaction_id: context.transaction_id,
     message_id: context.message_id,
@@ -634,6 +639,18 @@ export async function buildOnStatusOrder(
     settlement_status: nonEmpty(detail?.settlement_status, 'PAID'),
     settlement_timestamp: nonEmpty(detail?.settlement_timestamp, updatedIso),
   }));
+  // on_status and on_update must answer with the same fee on_confirm did.
+  Object.assign(
+    payment,
+    finderFeeKeys(
+      await resolveFinderFee({
+        requestPayment: payment,
+        ondcOrderId: row.ondc_order_id,
+        transactionId: row.transaction_id,
+        bapId: row.bap_id,
+      }),
+    ),
+  );
   order['payment'] = payment;
 
   // documents (invoice) is required on /on_status.
