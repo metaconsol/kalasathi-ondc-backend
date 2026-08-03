@@ -181,10 +181,12 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
 
         const fulfillmentId = String(reqItem.fulfillment_id ?? fallbackFulfillmentId);
         selectedFulfillmentId = fulfillmentId;
-        const stockAvailable = row.stock > 0 ? 99 : 0;
-        const stockMaximum = row.stock;
+        // One decision drives the error, the advertised counts and the quoted quantity.
+        const outOfStock = isRowOutOfStock(row);
+        const stockAvailable = outOfStock ? 0 : 99;
+        const stockMaximum = outOfStock ? 0 : Math.max(row.stock, 0) || 99;
 
-        if (isRowOutOfStock(row)) {
+        if (outOfStock) {
           itemErrors.push('Item is currently out of stock');
         }
 
@@ -192,7 +194,7 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
           itemId: reqItem.id,
           itemName: row.name,
           unitPrice: row.price,
-          quantity: row.stock <= 0 ? 0 : qty,
+          quantity: outOfStock ? 0 : qty,
           stockAvailable,
           stockMaximum,
           taxPercent: row.gst_percent,

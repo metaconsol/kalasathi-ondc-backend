@@ -198,8 +198,10 @@ const PRODUCT_SELECT = `
  * variant (or one row per product if no variants exist).
  */
 /**
- * Available units per leaf variant, as the storefront computes it
- * (seller.service.ts and publicProduct.service.ts both use this expression).
+ * Available units per leaf variant — qty_on_hand, matching the gate that actually blocks a sale
+ * (odop_backend order.service.ts:97 tests qty_on_hand alone). qty_reserved is deliberately NOT
+ * subtracted: reserving already decrements qty_on_hand in the same statement, so subtracting it
+ * again would count every in-flight order twice and publish sellable items as sold out.
  * inventory is keyed by (store_location_id, variant_id), so a variant sums across locations.
  *
  * Isolated in its own query and its own try/catch on purpose: `inventory` is a base table on
@@ -212,13 +214,15 @@ async function fetchVariantStock(variantIds: number[]): Promise<Map<number, numb
   try {
     const rows = await ondcQuery<{ variant_id: number; stock: number }>(
       `SELECT i.variant_id AS variant_id,
-              GREATEST(COALESCE(SUM(i.qty_on_hand), 0) - COALESCE(SUM(i.qty_reserved), 0), 0) AS stock
+              GREATEST(COALESCE(SUM(i.qty_on_hand), 0), 0) AS stock
        FROM inventory i
        WHERE i.variant_id IN (${variantIds.map(() => '?').join(',')})
        GROUP BY i.variant_id`,
       variantIds,
     );
-    return new Map(rows.map((r) => [Number(r.variant_id), Number(r.stock)]));
+    const map = new Map(rows.map((r) => [Number(r.variant_id), Number(r.stock)]));
+    // Nothing at all for a non-empty ask means an unseeded inventory, not a sold-out catalogue.
+    return map.size === 0 ? null : map;
   } catch (err) {
     ondcLogger.error('variant inventory unreadable — items will not be hidden on stock', { err });
     return null;
@@ -484,7 +488,7 @@ async function assembleRows(
           chainAttrs,
           finalImgs,
           hasVariants,
-          variantStock === null ? null : (variantStock.get(leaf.id) ?? 0),
+          variantStock === null || !variantStock.has(leaf.id) ? null : variantStock.get(leaf.id)!,
         ),
       );
     }

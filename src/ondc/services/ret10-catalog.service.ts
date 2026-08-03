@@ -375,7 +375,8 @@ export const ret10CatalogService = {
   /**
    * Build the /on_search catalog for ONDC:RET10.
    */
-  async buildSearchCatalog(): Promise<OnSearchCatalog> {
+  async buildSearchCatalog(opts: { hideOutOfStock?: boolean } = {}): Promise<OnSearchCatalog> {
+    const hideOutOfStock = opts.hideOutOfStock ?? true;
     const providers: object[] = [];
 
     const stores = await getActiveStores();
@@ -408,8 +409,8 @@ export const ret10CatalogService = {
 
       const builtItems: ItemWithVariantMeta[] = [];
       for (const row of rows) {
-        // Out of stock items are omitted from the catalog entirely.
-        if (isRowOutOfStock(row)) continue;
+        // See catalog.service: kept on the incremental path so removals can be signalled.
+        if (hideOutOfStock && isRowOutOfStock(row)) continue;
         try {
           const built = await buildOndcItemFromRow(row, {
             providerId,
