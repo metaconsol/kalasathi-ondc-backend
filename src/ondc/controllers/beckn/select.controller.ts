@@ -9,7 +9,11 @@ import type { Request, Response } from 'express';
 import { buildAck, buildOnSelect } from '~/ondc/utils/payload.builder';
 import { becknService } from '~/ondc/services/beckn.service';
 import { observabilityService } from '~/ondc/services/observability.service';
-import { resolveOndcCatalogRow, resolveOndcCategory } from '~/ondc/adapters/product.adapter';
+import {
+  resolveOndcCatalogRow,
+  resolveOndcCategory,
+  isRowOutOfStock,
+} from '~/ondc/adapters/product.adapter';
 import { checkProductServiceability } from '~/ondc/services/serviceability.service';
 import { estimateDeliveryCharge } from '~/ondc/services/delhivery.service';
 import { fetchStoreById, fetchStoreLocations } from '~/ondc/adapters/seller.adapter';
@@ -180,7 +184,7 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
         const stockAvailable = row.stock > 0 ? 99 : 0;
         const stockMaximum = row.stock;
 
-        if (row.stock <= 0) {
+        if (isRowOutOfStock(row)) {
           itemErrors.push('Item is currently out of stock');
         }
 

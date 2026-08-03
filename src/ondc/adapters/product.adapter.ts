@@ -9,6 +9,7 @@
  */
 
 import { ondcQuery } from '~/lib/ondcSql';
+import { ondcLogger } from '~/ondc/utils/logger.util';
 import categoryRules from '~/ondc/config/categoryRules.json' with { type: 'json' };
 import { ondcEnv } from '~/config/ondc.config';
 import { SELLER_PROFILE } from '~/ondc/config/constants';
@@ -78,6 +79,8 @@ export interface OndcCatalogRow {
   hsn_sac_code: string | null;
   /** Manual out-of-stock override (products.force_out_of_stock). */
   force_out_of_stock: boolean;
+  /** false when variant inventory could not be read — callers must not hide the item then. */
+  stock_known: boolean;
   sku: string | null;
   gtin_ean: string | null;
   variant_attribute_value: string | null;
@@ -194,6 +197,43 @@ const PRODUCT_SELECT = `
  * Fetch all published products for a store, expanded into one row per leaf
  * variant (or one row per product if no variants exist).
  */
+/**
+ * Available units per leaf variant, as the storefront computes it
+ * (seller.service.ts and publicProduct.service.ts both use this expression).
+ * inventory is keyed by (store_location_id, variant_id), so a variant sums across locations.
+ *
+ * Isolated in its own query and its own try/catch on purpose: `inventory` is a base table on
+ * the ecom database and prod_ondc_db reaches it through a view. If that view is missing, this
+ * degrades to "stock unknown" — the catalog still ships, items are simply not hidden — rather
+ * than taking every /on_search down with ER_NO_SUCH_TABLE.
+ */
+async function fetchVariantStock(variantIds: number[]): Promise<Map<number, number> | null> {
+  if (variantIds.length === 0) return new Map();
+  try {
+    const rows = await ondcQuery<{ variant_id: number; stock: number }>(
+      `SELECT i.variant_id AS variant_id,
+              GREATEST(COALESCE(SUM(i.qty_on_hand), 0) - COALESCE(SUM(i.qty_reserved), 0), 0) AS stock
+       FROM inventory i
+       WHERE i.variant_id IN (${variantIds.map(() => '?').join(',')})
+       GROUP BY i.variant_id`,
+      variantIds,
+    );
+    return new Map(rows.map((r) => [Number(r.variant_id), Number(r.stock)]));
+  } catch (err) {
+    ondcLogger.error('variant inventory unreadable — items will not be hidden on stock', { err });
+    return null;
+  }
+}
+
+/**
+ * The single definition of out-of-stock, shared by /on_search, /select and the admin catalog.
+ * Never hides an item whose stock we could not determine: publishing something sold out is
+ * recoverable, silently delisting a live seller's whole catalog is not.
+ */
+export function isRowOutOfStock(row: OndcCatalogRow): boolean {
+  return row.force_out_of_stock || (row.stock_known && row.stock <= 0);
+}
+
 export async function fetchOndcCatalogRows(storeId: number): Promise<OndcCatalogRow[]> {
   const products = await ondcQuery<ProductBaseRow>(
     `SELECT ${PRODUCT_SELECT}
@@ -238,14 +278,14 @@ export async function fetchOndcCatalogRows(storeId: number): Promise<OndcCatalog
   const variantImages =
     variantIds.length > 0
       ? await ondcQuery<{ variant_id: number; image_url: string }>(
-        `SELECT variant_id, image_url FROM variant_images
+          `SELECT variant_id, image_url FROM variant_images
          WHERE variant_id IN (${variantIds.map(() => '?').join(',')})
          ORDER BY sort_order ASC, id ASC`,
-        variantIds,
-      )
+          variantIds,
+        )
       : [];
 
-  const rows = assembleRows(products, variantRows, attrRows, productImages, variantImages);
+  const rows = await assembleRows(products, variantRows, attrRows, productImages, variantImages);
   return attachItemRatings(rows);
 }
 
@@ -292,14 +332,14 @@ export async function resolveOndcCatalogRow(itemId: string): Promise<OndcCatalog
 
   const variantImages = parts.variantId
     ? await ondcQuery<{ variant_id: number; image_url: string }>(
-      `SELECT variant_id, image_url FROM variant_images
+        `SELECT variant_id, image_url FROM variant_images
          WHERE variant_id = ?
          ORDER BY sort_order ASC, id ASC`,
-      [parts.variantId],
-    )
+        [parts.variantId],
+      )
     : [];
 
-  const allRows = assembleRows(products, variantRows, attrRows, productImages, variantImages);
+  const allRows = await assembleRows(products, variantRows, attrRows, productImages, variantImages);
   const ratedRows = await attachItemRatings(allRows);
   return ratedRows.find((r) => r.variant_id === parts.variantId) ?? null;
 }
@@ -339,13 +379,13 @@ async function attachItemRatings(rows: OndcCatalogRow[]): Promise<OndcCatalogRow
 
 // ─── Row assembly (variant expansion + attr/image merging) ─────────────────
 
-function assembleRows(
+async function assembleRows(
   products: ProductBaseRow[],
   variants: VariantBaseRow[],
   attrs: OndcAttrRow[],
   productImages: { product_id: number; image_url: string }[],
   variantImages: { variant_id: number; image_url: string }[],
-): OndcCatalogRow[] {
+): Promise<OndcCatalogRow[]> {
   // Group attributes
   const attrsByProduct = new Map<
     number,
@@ -399,6 +439,13 @@ function assembleRows(
   const absolutize = (url: string): string =>
     url.startsWith('http') ? url : `${baseUrl}/uploads/${url}`;
 
+  // One rollup for every leaf variant in the batch, not one query per row.
+  const allLeafIds = products.flatMap((p) => {
+    const vs = variantsByProduct.get(p.id) ?? [];
+    return vs.filter((v) => !childrenByParent.has(v.id)).map((v) => v.id);
+  });
+  const variantStock = await fetchVariantStock(allLeafIds);
+
   const out: OndcCatalogRow[] = [];
 
   for (const p of products) {
@@ -430,7 +477,16 @@ function assembleRows(
       const variantImgs = rawVariantImgs.length > 1 ? rawVariantImgs.slice(0, -1) : rawVariantImgs;
       const finalImgs = variantImgs.length > 0 ? variantImgs : productImgs;
 
-      out.push(buildRowForVariant(p, leaf, chainAttrs, finalImgs, hasVariants));
+      out.push(
+        buildRowForVariant(
+          p,
+          leaf,
+          chainAttrs,
+          finalImgs,
+          hasVariants,
+          variantStock === null ? null : (variantStock.get(leaf.id) ?? 0),
+        ),
+      );
     }
   }
 
@@ -459,6 +515,7 @@ function buildRowForProduct(
   const price = parseFloat(String(p.default_price ?? p.mrp ?? 0));
   const mrp = parseFloat(String(p.mrp ?? p.default_price ?? 0));
   return {
+    stock_known: true,
     product_id: p.id,
     variant_id: null,
     store_id: p.store_id,
@@ -508,6 +565,7 @@ function buildRowForVariant(
   attrs: Record<string, { value: string; color_name: string | null }>,
   images: string[],
   hasVariants: boolean,
+  variantStock: number | null,
 ): OndcCatalogRow {
   const variantPrice = v.price ? parseFloat(String(v.price)) : null;
   const variantMrp = v.mrp ? parseFloat(String(v.mrp)) : null;
@@ -528,9 +586,11 @@ function buildRowForVariant(
       : p.unit_count
         ? parseFloat(String(p.unit_count))
         : null;
-  const stock = parseInt(String(p.stock ?? 0), 10);
+  // products.stock is not maintained for variant products; their units live in inventory.
+  const stock = variantStock ?? parseInt(String(p.stock ?? 0), 10);
 
   return {
+    stock_known: variantStock !== null,
     product_id: p.id,
     variant_id: v.id,
     store_id: p.store_id,
@@ -538,8 +598,8 @@ function buildRowForVariant(
       // Only append the variant name when it adds information — sellers often
       // set variant_name = product_name, which produced ugly "X - X" names.
       v.variant_name &&
-        v.variant_name.trim() !== '' &&
-        v.variant_name.trim().toLowerCase() !==
+      v.variant_name.trim() !== '' &&
+      v.variant_name.trim().toLowerCase() !==
         String(p.product_name ?? '')
           .trim()
           .toLowerCase()
@@ -806,7 +866,10 @@ export async function buildOndcItemFromRow(
   const cfg = getDomainConfig(domain);
 
   const baseUrl = ondcEnv.baseUri.replace(/\/api\/v1\/ondc$/, '');
-  const images = row.images.length > 0 ? row.images : [`${baseUrl}/uploads/ODOPMARTMPLOGO2_removebg-preview.png`];
+  const images =
+    row.images.length > 0
+      ? row.images
+      : [`${baseUrl}/uploads/ODOPMARTMPLOGO2_removebg-preview.png`];
 
   const ondcItemId = buildOndcItemId(row.product_id, row.variant_id);
 
@@ -849,9 +912,9 @@ export async function buildOndcItemFromRow(
     attrValue(row.ondc_attrs, 'colour') ??
     row.color_code ??
     (row.variant_id !== null &&
-      vName &&
-      vName.toLowerCase() !== 'default' &&
-      vName.toLowerCase() !== productNameLower
+    vName &&
+    vName.toLowerCase() !== 'default' &&
+    vName.toLowerCase() !== productNameLower
       ? vName
       : undefined);
   const sizeFromVariant =

@@ -9,6 +9,7 @@ import {
   fetchOndcCatalogRows,
   buildOndcItemFromRow,
   type OndcCatalogRow,
+  isRowOutOfStock,
 } from '~/ondc/adapters/product.adapter';
 import {
   getActiveStores,
@@ -72,6 +73,8 @@ export const catalogService = {
       // match against the requested domain.
       const builtItems: ItemWithVariantMeta[] = [];
       for (const row of rows) {
+        // Out of stock items are omitted from the catalog entirely.
+        if (isRowOutOfStock(row)) continue;
         try {
           const built = await buildOndcItemFromRow(row, {
             providerId,
