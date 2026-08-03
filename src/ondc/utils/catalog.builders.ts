@@ -413,10 +413,10 @@ export function buildProviderLocation(
 export function buildBppDescriptor() {
   return {
     name: SELLER_PROFILE.BRAND_NAME || 'ODOP Mart',
-    symbol: `${ondcEnv.baseUri}/uploads/ODOPMARTMPLOGO2_removebg-preview.png`,
+    symbol: `${bppOrigin()}/uploads/ODOPMARTMPLOGO2_removebg-preview.png`,
     short_desc: 'ODOP Products Marketplace',
     long_desc: 'One District One Product e-commerce platform powered by ONDC',
-    images: [`${ondcEnv.baseUri}/uploads/ODOPMARTMPLOGO2_removebg-preview.png`],
+    images: [`${bppOrigin()}/uploads/ODOPMARTMPLOGO2_removebg-preview.png`],
     tags: [
       {
         code: 'bpp_terms',
