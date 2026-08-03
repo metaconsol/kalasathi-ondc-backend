@@ -42,6 +42,7 @@ import {
 } from '~/ondc/utils/catalog.builders';
 import type { BecknContext } from '~/ondc/types/beckn.types';
 import { quotedSelectDeliveryCharge } from './init.controller';
+import { resolveFinderFee, finderFeeKeys } from '~/ondc/utils/finder-fee';
 import { inactiveProviderErrorForConfirm } from '~/ondc/utils/provider.guard';
 
 const DEFAULT_QUOTE_ITEM_TAGS = [
@@ -452,6 +453,13 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
       }
 
       const ondcOrderId = ondcOrderIdOf(ctx, order);
+      // Resolved before persistence so the frozen value and the wire value are the same.
+      const finderFee = await resolveFinderFee({
+        requestPayment: payment,
+        ondcOrderId,
+        transactionId: txnId,
+        bapId: ctx.bap_id,
+      });
 
       // Resolve seller / store from the underlying stores row (provider_id = String(stores.id)).
       const provider = providerId ? await providerModel.findById(providerId) : null;
@@ -485,7 +493,9 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
                 : 'PREPAID') as any,
               payment_status: payment['status'] === 'PAID' ? 'PAID' : 'NOT_PAID',
               payment_transaction_ref: payment['params']?.['transaction_id'] ?? null,
-              payment_json: JSON.stringify(payment),
+              payment_json: JSON.stringify({ ...payment, ...finderFeeKeys(finderFee) }),
+              buyer_finder_fee_amount: finderFee.amount,
+              buyer_finder_fee_type: finderFee.type,
               item_total: itemTotal.toFixed(2),
               delivery_charges: deliveryCharge.toFixed(2),
               packing_charges: packingCharge.toFixed(2),
@@ -731,12 +741,7 @@ export async function handleConfirm(req: Request, res: Response): Promise<void> 
           status: String(inboundPaymentStatus ?? 'NOT-PAID'),
           type: String(inboundPaymentType ?? 'ON-ORDER'),
           collected_by: String(inboundCollectedBy ?? 'BAP'),
-          '@ondc/org/buyer_app_finder_fee_type': String(
-            payment['@ondc/org/buyer_app_finder_fee_type'] ?? 'percent',
-          ),
-          '@ondc/org/buyer_app_finder_fee_amount': String(
-            payment['@ondc/org/buyer_app_finder_fee_amount'] ?? ondcEnv.buyerFinderFeeDefault,
-          ),
+          ...finderFeeKeys(finderFee),
           '@ondc/org/settlement_basis': String(payment['@ondc/org/settlement_basis'] ?? 'delivery'),
           '@ondc/org/settlement_window': String(payment['@ondc/org/settlement_window'] ?? 'P1D'),
           '@ondc/org/withholding_amount': String(payment['@ondc/org/withholding_amount'] ?? '0.00'),

@@ -1,6 +1,7 @@
 /** BAP terms extracted from /search intent.tags and payment field */
 
 import { ondcExec, ondcQuery } from '~/lib/ondcSql';
+import { readFinderFee } from '~/ondc/utils/finder-fee';
 
 export interface BapTermsRow {
   id: number;
@@ -10,6 +11,7 @@ export interface BapTermsRow {
   static_terms: string | null;
   static_terms_new: string | null;
   bff_percent: string | null;
+  bff_type: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -23,14 +25,15 @@ export interface BapTermsListFilters {
 export const bapTermsModel = {
   async upsert(data: Omit<BapTermsRow, 'id' | 'created_at' | 'updated_at'>): Promise<void> {
     await ondcExec(
-      `INSERT INTO bap_terms (bap_id, bap_uri, unique_uid, static_terms, static_terms_new, bff_percent)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO bap_terms (bap_id, bap_uri, unique_uid, static_terms, static_terms_new, bff_percent, bff_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
          bap_uri        = VALUES(bap_uri),
          unique_uid     = VALUES(unique_uid),
          static_terms     = COALESCE(NULLIF(VALUES(static_terms), ''), static_terms),
          static_terms_new = COALESCE(NULLIF(VALUES(static_terms_new), ''), static_terms_new),
          bff_percent      = COALESCE(NULLIF(VALUES(bff_percent), ''), bff_percent),
+         bff_type         = COALESCE(NULLIF(VALUES(bff_type), ''), bff_type),
          updated_at       = NOW()`,
       [
         data.bap_id,
@@ -39,6 +42,7 @@ export const bapTermsModel = {
         data.static_terms,
         data.static_terms_new,
         data.bff_percent,
+        data.bff_type,
       ],
     );
   },
@@ -85,6 +89,7 @@ export function extractBapTerms(
   let staticTerms: string | null = null;
   let staticTermsNew: string | null = null;
   let bffPercent: string | null = null;
+  let bffType: string | null = null;
 
   // Extract from intent.tags[]
   const tags: any[] = Array.isArray(intent['tags']) ? intent['tags'] : [];
@@ -97,15 +102,19 @@ export function extractBapTerms(
       if (code === 'static_terms_new' && value) staticTermsNew = value;
       if ((code === 'buyer_finder_fee_amount' || code === 'buyer_app_finder_fee_amount') && value)
         bffPercent = value;
+      if ((code === 'buyer_finder_fee_type' || code === 'buyer_app_finder_fee_type') && value)
+        bffType = value;
     }
   }
 
   // Also extract from intent.payment
+  // readFinderFee tests presence, so a declared fee of 0 survives (gcr.ondc.org sends 0).
   const payment: Record<string, any> = intent['payment'] ?? {};
-  if (payment['@ondc/org/buyer_app_finder_fee_amount'])
-    bffPercent = String(payment['@ondc/org/buyer_app_finder_fee_amount']);
-  if (payment['buyer_app_finder_fee_amount'])
-    bffPercent = String(payment['buyer_app_finder_fee_amount']);
+  const declared = readFinderFee(payment);
+  if (declared) {
+    bffPercent = declared.amount;
+    if (declared.type) bffType = declared.type;
+  }
 
   return {
     bap_id: bapId.slice(0, 255),
@@ -113,6 +122,7 @@ export function extractBapTerms(
     unique_uid: uniqueUid.slice(0, 255),
     static_terms: staticTerms,
     static_terms_new: staticTermsNew,
-    bff_percent: bffPercent,
+    bff_percent: bffPercent === null ? null : bffPercent.slice(0, 50),
+    bff_type: bffType === null ? null : bffType.slice(0, 16),
   };
 }

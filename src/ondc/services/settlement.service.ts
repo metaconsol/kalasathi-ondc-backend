@@ -10,6 +10,7 @@ import { settlementModel } from '~/ondc/models/settlement.model';
 import { orderModel } from '~/ondc/models/order.model';
 import { ondcLogger, reconLogger } from '~/ondc/utils/logger.util';
 import { safeJsonParse } from '~/ondc/utils/payload.builder';
+import { finderFeeCommission, orderFinderFee } from '~/ondc/utils/finder-fee';
 import type { BecknPayment } from '~/ondc/types/beckn.types';
 
 export const settlementService = {
@@ -20,13 +21,8 @@ export const settlementService = {
 
     const payment: BecknPayment = safeJsonParse(order.payment_json, {});
     const totalAmount = payment.params?.amount ?? '0';
-    const finderFeePercent = parseFloat(
-      payment['@ondc/org/buyer_app_finder_fee_amount'] ??
-        process.env['ONDC_BUYER_FINDER_FEE_DEFAULT'] ??
-        '3',
-    );
     const total = parseFloat(totalAmount);
-    const finderFee = ((total * finderFeePercent) / 100).toFixed(2);
+    const finderFee = finderFeeCommission(orderFinderFee(order, payment), total).toFixed(2);
     const settlementAmount = (total - parseFloat(finderFee)).toFixed(2);
 
     const settlementId = `SETTLE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
