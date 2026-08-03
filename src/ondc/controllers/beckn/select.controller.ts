@@ -9,7 +9,11 @@ import type { Request, Response } from 'express';
 import { buildAck, buildOnSelect } from '~/ondc/utils/payload.builder';
 import { becknService } from '~/ondc/services/beckn.service';
 import { observabilityService } from '~/ondc/services/observability.service';
-import { resolveOndcCatalogRow, resolveOndcCategory } from '~/ondc/adapters/product.adapter';
+import {
+  resolveOndcCatalogRow,
+  resolveOndcCategory,
+  isRowOutOfStock,
+} from '~/ondc/adapters/product.adapter';
 import { checkProductServiceability } from '~/ondc/services/serviceability.service';
 import { estimateDeliveryCharge } from '~/ondc/services/delhivery.service';
 import { fetchStoreById, fetchStoreLocations } from '~/ondc/adapters/seller.adapter';
@@ -177,10 +181,12 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
 
         const fulfillmentId = String(reqItem.fulfillment_id ?? fallbackFulfillmentId);
         selectedFulfillmentId = fulfillmentId;
-        const stockAvailable = row.stock > 0 ? 99 : 0;
-        const stockMaximum = row.stock;
+        // One decision drives the error, the advertised counts and the quoted quantity.
+        const outOfStock = isRowOutOfStock(row);
+        const stockAvailable = outOfStock ? 0 : 99;
+        const stockMaximum = outOfStock ? 0 : Math.max(row.stock, 0) || 99;
 
-        if (row.stock <= 0) {
+        if (outOfStock) {
           itemErrors.push('Item is currently out of stock');
         }
 
@@ -188,7 +194,7 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
           itemId: reqItem.id,
           itemName: row.name,
           unitPrice: row.price,
-          quantity: row.stock <= 0 ? 0 : qty,
+          quantity: outOfStock ? 0 : qty,
           stockAvailable,
           stockMaximum,
           taxPercent: row.gst_percent,

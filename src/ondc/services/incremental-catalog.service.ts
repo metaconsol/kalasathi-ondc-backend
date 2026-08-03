@@ -89,7 +89,9 @@ function stopSession(transactionId: string): boolean {
 async function pushDelta(transactionId: string, session: IncrementalSession): Promise<void> {
   let fresh: OnSearchCatalog;
   try {
-    fresh = await catalogService.buildSearchCatalog(session.domain);
+    // Keep sold-out items here: pushDelta can only diff keys that are present, so dropping
+    // one sends nothing and the buyer app goes on advertising it.
+    fresh = await catalogService.buildSearchCatalog(session.domain, { hideOutOfStock: false });
   } catch (err) {
     ondcLogger.error('Incremental catalog: failed to rebuild catalog', { transactionId, err });
     return;
