@@ -5,7 +5,7 @@
 
 import express from 'express';
 import { authMiddleware } from '~/middleware/auth.middleware';
-import { isAdmin, isAdminOrSeller } from '~/middleware/admin.middleware';
+import { isAdmin, isAdminOrSeller, isSuperAdmin } from '~/middleware/admin.middleware';
 import { listCatalogItems, debugCatalog } from '~/ondc/controllers/admin/catalog.controller';
 import {
   listOrders,
@@ -53,6 +53,13 @@ import {
   resolveOndcIssue,
   closeOndcIssue,
 } from '~/ondc/controllers/admin/issues.controller';
+import {
+  listBapManagement,
+  toggleBapManagement,
+  bulkToggleBapManagement,
+  bapManagementAnalytics,
+  importBapManagement,
+} from '~/ondc/controllers/admin/bap_management.controller';
 import { getDashboardStats } from '~/ondc/controllers/admin/stats.controller';
 import { getSettings, revealKeys } from '~/ondc/controllers/admin/settings.controller';
 import {
@@ -66,6 +73,7 @@ const router = express.Router();
 
 const adminGuard = [authMiddleware, isAdmin];
 const sellerGuard = [authMiddleware, isAdminOrSeller];
+const superAdminGuard = [authMiddleware, isSuperAdmin];
 
 // ---- Dashboard (aggregate stats; role-scoped for sellers) ----
 router.get('/dashboard/stats', ...sellerGuard, getDashboardStats);
@@ -123,6 +131,15 @@ router.get('/request-monitor/transaction-records', ...adminGuard, getTransaction
 router.delete('/request-monitor/transaction-records', ...adminGuard, purgeTransactionRecords);
 router.get('/request-monitor', ...adminGuard, listByAction);
 router.get('/request-monitor/:transactionId', ...adminGuard, getTimeline);
+
+// ---- BAP management (which buyer apps we serve) ----
+// Reads are admin; every write is SUPER_ADMIN. Literal segments are registered
+// before /:bapId/* so the param route cannot swallow them.
+router.get('/bap-management', ...adminGuard, listBapManagement);
+router.post('/bap-management/bulk-toggle', ...superAdminGuard, bulkToggleBapManagement);
+router.post('/bap-management/import', ...superAdminGuard, importBapManagement);
+router.get('/bap-management/:bapId/analytics', ...adminGuard, bapManagementAnalytics);
+router.post('/bap-management/:bapId/toggle', ...superAdminGuard, toggleBapManagement);
 
 // ---- Buyer Apps (distinct bap_ids that have made requests) ----
 router.get('/buyer-apps', ...adminGuard, listBuyerApps);

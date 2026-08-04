@@ -21,6 +21,7 @@ import { handleUpdate } from '~/ondc/controllers/beckn/update.controller';
 import { handleRating } from '~/ondc/controllers/beckn/rating.controller';
 import { handleIssue, handleIssueStatus } from '~/ondc/controllers/issue.controller';
 import { handleCatalogRejection } from '~/ondc/controllers/beckn/catalog-rejection.controller';
+import { bapFilterMiddleware } from '~/ondc/middleware/bapFilter.middleware';
 import {
   handleOnRecon,
   handleOnReceiverRecon,
@@ -33,7 +34,12 @@ const router = express.Router();
 // Auth MUST run before validation: the validator can emit outbound NACK
 // callbacks to the request's bap_uri, which for an unauthenticated caller
 // would be an SSRF + signed-response oracle to an attacker-chosen URL.
-const becknMiddleware = [ondcRequestLogger, ondcAuthMiddleware, ondcContextValidator];
+const becknMiddleware = [
+  ondcRequestLogger,
+  ondcAuthMiddleware,
+  bapFilterMiddleware,
+  ondcContextValidator,
+];
 
 /**
  * @route POST /api/v1/ondc/search
