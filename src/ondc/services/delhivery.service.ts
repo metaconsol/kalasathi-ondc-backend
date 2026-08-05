@@ -900,7 +900,28 @@ export async function createPickup(
 // error — /on_select must respond even if the courier is down.
 // ---------------------------------------------------------------------------
 
-const SHIPPING_ESTIMATE_TIMEOUT_MS = 6000;
+const SHIPPING_ESTIMATE_TIMEOUT_MS = Number(process.env['ONDC_SHIPPING_TIMEOUT_MS'] ?? 4000);
+// /select answers inside the BAP's TTL (PT30S), so the whole retry budget must fit well
+// under it: 3 x 4s plus backoff is ~13s worst case.
+const SHIPPING_ESTIMATE_ATTEMPTS = Math.max(1, Number(process.env['ONDC_SHIPPING_RETRIES'] ?? 3));
+const SHIPPING_ESTIMATE_BACKOFF_MS = [300, 800];
+// Last good quote per identical parcel+route, so a courier blip reuses a real number
+// instead of quoting free delivery. Short enough that a tariff change is picked up.
+const QUOTE_CACHE_TTL_MS = Math.max(
+  0,
+  Number(process.env['ONDC_SHIPPING_CACHE_TTL_MS'] ?? 600_000),
+);
+const quoteCache = new Map<string, { value: number; expiresAt: number }>();
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Retry only what a retry can fix: timeouts, network drops, 5xx and 429. */
+function isRetryableShippingError(err: unknown): boolean {
+  if (!axios.isAxiosError(err)) return false;
+  if (!err.response) return true;
+  const status = err.response.status;
+  return status >= 500 || status === 429;
+}
 
 /** Pull the freight amount out of Delhivery's charges response (nested/array-safe). */
 function findChargeAmount(value: unknown): number | null {
@@ -965,6 +986,35 @@ interface ShippingItemInput {
  * `buyerPincode`. Returns the amount in INR, or null to skip (fail-open).
  * @param paymentType affects Delhivery's COD-vs-prepaid charge; defaults Pre-paid.
  */
+/**
+ * Freight including GST.
+ *
+ * Delhivery's `total_amount` ALREADY includes the tax it reports in `tax_data` —
+ * a 320g Bhopal parcel comes back gross 62.18, CGST 5.60, SGST 5.60,
+ * total 73.38. We used to multiply that by 1.18 again and quote 86.59, so every
+ * buyer paid 18% too much for delivery. Tax is only added when we had to fall
+ * back to a pre-tax field, which is the one case it is genuinely missing.
+ */
+function taxInclusiveFreight(data: unknown): number | null {
+  const row = Array.isArray(data) ? data[0] : data;
+  const record = row && typeof row === 'object' ? (row as Record<string, unknown>) : null;
+
+  const total = record ? findChargeAmount(record['total_amount'] ?? record['totalAmount']) : null;
+  if (total !== null && total >= 0) return total;
+
+  const gross = record ? findChargeAmount(record['gross_amount'] ?? record['grossAmount']) : null;
+  if (gross !== null && gross >= 0) {
+    const tax = record?.['tax_data'];
+    const taxTotal = tax && typeof tax === 'object' ? findChargeAmount(Object.values(tax)) : null;
+    // Reported tax beats an assumed rate — the slab and the rate can both change.
+    return taxTotal !== null ? gross + taxTotal : gross * (1 + SHIPPING_CHARGE_TAX_PERCENT / 100);
+  }
+
+  // Unknown shape: whatever number we can find, plus the configured rate.
+  const fallback = findChargeAmount(data);
+  return fallback === null ? null : fallback * (1 + SHIPPING_CHARGE_TAX_PERCENT / 100);
+}
+
 export async function estimateDeliveryCharge(input: {
   storeId: number | null;
   items: ShippingItemInput[];
@@ -1037,15 +1087,42 @@ export async function estimateDeliveryCharge(input: {
       ipkg_type: 'box',
     };
 
-    const { data } = await axios.get(`${delhiveryEnv.baseUrl}/api/kinko/v1/invoice/charges/.json`, {
-      headers: jsonHeaders(),
-      params,
-      timeout: SHIPPING_ESTIMATE_TIMEOUT_MS,
-    });
-    const amount = findChargeAmount(data);
-    if (amount === null || amount < 0) return null;
-    // Tax-INCLUSIVE, matching what the ecom checkout quotes for the same parcel.
-    return Math.round(amount * (1 + SHIPPING_CHARGE_TAX_PERCENT / 100) * 100) / 100;
+    const cacheKey = JSON.stringify(params);
+    let lastError: unknown = null;
+
+    for (let attempt = 1; attempt <= SHIPPING_ESTIMATE_ATTEMPTS; attempt++) {
+      try {
+        const { data } = await axios.get(
+          `${delhiveryEnv.baseUrl}/api/kinko/v1/invoice/charges/.json`,
+          { headers: jsonHeaders(), params, timeout: SHIPPING_ESTIMATE_TIMEOUT_MS },
+        );
+        const amount = taxInclusiveFreight(data);
+        if (amount === null || amount < 0) return null;
+        const value = Math.round(amount * 100) / 100;
+        quoteCache.set(cacheKey, { value, expiresAt: Date.now() + QUOTE_CACHE_TTL_MS });
+        return value;
+      } catch (err) {
+        lastError = err;
+        if (attempt >= SHIPPING_ESTIMATE_ATTEMPTS || !isRetryableShippingError(err)) break;
+        ondcLogger.warn('Delhivery shipping estimate failed — retrying', {
+          attempt,
+          of: SHIPPING_ESTIMATE_ATTEMPTS,
+          storeId: input.storeId,
+        });
+        await sleep(SHIPPING_ESTIMATE_BACKOFF_MS[attempt - 1] ?? 800);
+      }
+    }
+
+    // Every attempt failed. A recent identical quote beats quoting free delivery.
+    const cached = quoteCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      ondcLogger.warn('Delhivery unreachable — reusing the last quote for this parcel', {
+        storeId: input.storeId,
+        value: cached.value,
+      });
+      return cached.value;
+    }
+    throw lastError ?? new Error('Delhivery shipping estimate failed');
   } catch (err) {
     ondcLogger.warn('Delhivery shipping estimate failed — using 0 (fail-open)', {
       storeId: input.storeId,

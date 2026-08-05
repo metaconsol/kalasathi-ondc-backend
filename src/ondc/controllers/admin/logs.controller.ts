@@ -64,6 +64,8 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
     direction?: unknown;
     domain?: unknown;
     q?: unknown;
+    bap_id?: unknown;
+    days?: unknown;
   };
 
   const ids = Array.isArray(body.ids)
@@ -82,6 +84,8 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
       : undefined;
   const domain = body.domain ? String(body.domain).trim() : undefined;
   const q = body.q ? String(body.q).trim() : undefined;
+  const bapId = body.bap_id ? String(body.bap_id).trim() : undefined;
+  const days = body.days ? Number(body.days) : undefined;
 
   const hasSelector =
     ids.length > 0 ||
@@ -90,7 +94,9 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
     actions.length > 0 ||
     !!direction ||
     !!domain ||
-    !!q;
+    !!q ||
+    !!bapId ||
+    (days !== undefined && !Number.isNaN(days) && days > 0);
   if (!hasSelector) {
     ApiResponse.badRequest(res, 'Provide at least one filter or selection to delete logs');
     return;
@@ -104,6 +110,8 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
     ...(direction ? { direction } : {}),
     ...(domain ? { domain } : {}),
     ...(q ? { q } : {}),
+    ...(bapId ? { bapId } : {}),
+    ...(days ? { days } : {}),
   });
 
   // ondc_transactions summarises these logs and is unreachable without them, so it follows.
