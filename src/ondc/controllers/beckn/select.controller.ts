@@ -16,6 +16,7 @@ import {
 } from '~/ondc/adapters/product.adapter';
 import { checkProductServiceability } from '~/ondc/services/serviceability.service';
 import { estimateDeliveryCharge } from '~/ondc/services/delhivery.service';
+import { delhiveryEnv } from '~/config/delhivery.config';
 import { fetchStoreById, fetchStoreLocations } from '~/ondc/adapters/seller.adapter';
 import { transactionModel } from '~/ondc/models/transaction.model';
 import { txnLogModel } from '~/ondc/models/log.model';
@@ -252,13 +253,18 @@ export async function handleSelect(req: Request, res: Response): Promise<void> {
       // courier is disabled/unreachable, so /on_select never blocks). Only the
       // item prices + this delivery charge appear in the quote — no tax /
       // packing / convenience-fee lines.
-      const deliveryCharge =
-        (await estimateDeliveryCharge({
-          storeId: resolvedStoreId,
-          items: shippingItems,
-          buyerPincode,
-          paymentType: 'Pre-paid',
-        })) ?? 0;
+      // null means the courier could not be reached even after retries. Quoting 0 there
+      // promises free delivery we then have to honour, so say so instead.
+      const estimatedDelivery = await estimateDeliveryCharge({
+        storeId: resolvedStoreId,
+        items: shippingItems,
+        buyerPincode,
+        paymentType: 'Pre-paid',
+      });
+      if (estimatedDelivery === null && delhiveryEnv.enabled) {
+        requestErrors.push('Delivery charge is temporarily unavailable, please retry');
+      }
+      const deliveryCharge = estimatedDelivery ?? 0;
       const quote = buildQuote(lines, selectedFulfillmentId, deliveryCharge, {
         includeZeroBreakups: true,
       });

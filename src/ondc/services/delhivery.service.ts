@@ -900,7 +900,28 @@ export async function createPickup(
 // error — /on_select must respond even if the courier is down.
 // ---------------------------------------------------------------------------
 
-const SHIPPING_ESTIMATE_TIMEOUT_MS = 6000;
+const SHIPPING_ESTIMATE_TIMEOUT_MS = Number(process.env['ONDC_SHIPPING_TIMEOUT_MS'] ?? 4000);
+// /select answers inside the BAP's TTL (PT30S), so the whole retry budget must fit well
+// under it: 3 x 4s plus backoff is ~13s worst case.
+const SHIPPING_ESTIMATE_ATTEMPTS = Math.max(1, Number(process.env['ONDC_SHIPPING_RETRIES'] ?? 3));
+const SHIPPING_ESTIMATE_BACKOFF_MS = [300, 800];
+// Last good quote per identical parcel+route, so a courier blip reuses a real number
+// instead of quoting free delivery. Short enough that a tariff change is picked up.
+const QUOTE_CACHE_TTL_MS = Math.max(
+  0,
+  Number(process.env['ONDC_SHIPPING_CACHE_TTL_MS'] ?? 600_000),
+);
+const quoteCache = new Map<string, { value: number; expiresAt: number }>();
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Retry only what a retry can fix: timeouts, network drops, 5xx and 429. */
+function isRetryableShippingError(err: unknown): boolean {
+  if (!axios.isAxiosError(err)) return false;
+  if (!err.response) return true;
+  const status = err.response.status;
+  return status >= 500 || status === 429;
+}
 
 /** Pull the freight amount out of Delhivery's charges response (nested/array-safe). */
 function findChargeAmount(value: unknown): number | null {
@@ -1066,14 +1087,42 @@ export async function estimateDeliveryCharge(input: {
       ipkg_type: 'box',
     };
 
-    const { data } = await axios.get(`${delhiveryEnv.baseUrl}/api/kinko/v1/invoice/charges/.json`, {
-      headers: jsonHeaders(),
-      params,
-      timeout: SHIPPING_ESTIMATE_TIMEOUT_MS,
-    });
-    const amount = taxInclusiveFreight(data);
-    if (amount === null || amount < 0) return null;
-    return Math.round(amount * 100) / 100;
+    const cacheKey = JSON.stringify(params);
+    let lastError: unknown = null;
+
+    for (let attempt = 1; attempt <= SHIPPING_ESTIMATE_ATTEMPTS; attempt++) {
+      try {
+        const { data } = await axios.get(
+          `${delhiveryEnv.baseUrl}/api/kinko/v1/invoice/charges/.json`,
+          { headers: jsonHeaders(), params, timeout: SHIPPING_ESTIMATE_TIMEOUT_MS },
+        );
+        const amount = taxInclusiveFreight(data);
+        if (amount === null || amount < 0) return null;
+        const value = Math.round(amount * 100) / 100;
+        quoteCache.set(cacheKey, { value, expiresAt: Date.now() + QUOTE_CACHE_TTL_MS });
+        return value;
+      } catch (err) {
+        lastError = err;
+        if (attempt >= SHIPPING_ESTIMATE_ATTEMPTS || !isRetryableShippingError(err)) break;
+        ondcLogger.warn('Delhivery shipping estimate failed — retrying', {
+          attempt,
+          of: SHIPPING_ESTIMATE_ATTEMPTS,
+          storeId: input.storeId,
+        });
+        await sleep(SHIPPING_ESTIMATE_BACKOFF_MS[attempt - 1] ?? 800);
+      }
+    }
+
+    // Every attempt failed. A recent identical quote beats quoting free delivery.
+    const cached = quoteCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      ondcLogger.warn('Delhivery unreachable — reusing the last quote for this parcel', {
+        storeId: input.storeId,
+        value: cached.value,
+      });
+      return cached.value;
+    }
+    throw lastError ?? new Error('Delhivery shipping estimate failed');
   } catch (err) {
     ondcLogger.warn('Delhivery shipping estimate failed — using 0 (fail-open)', {
       storeId: input.storeId,
