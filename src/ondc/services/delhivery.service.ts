@@ -965,6 +965,35 @@ interface ShippingItemInput {
  * `buyerPincode`. Returns the amount in INR, or null to skip (fail-open).
  * @param paymentType affects Delhivery's COD-vs-prepaid charge; defaults Pre-paid.
  */
+/**
+ * Freight including GST.
+ *
+ * Delhivery's `total_amount` ALREADY includes the tax it reports in `tax_data` —
+ * a 320g Bhopal parcel comes back gross 62.18, CGST 5.60, SGST 5.60,
+ * total 73.38. We used to multiply that by 1.18 again and quote 86.59, so every
+ * buyer paid 18% too much for delivery. Tax is only added when we had to fall
+ * back to a pre-tax field, which is the one case it is genuinely missing.
+ */
+function taxInclusiveFreight(data: unknown): number | null {
+  const row = Array.isArray(data) ? data[0] : data;
+  const record = row && typeof row === 'object' ? (row as Record<string, unknown>) : null;
+
+  const total = record ? findChargeAmount(record['total_amount'] ?? record['totalAmount']) : null;
+  if (total !== null && total >= 0) return total;
+
+  const gross = record ? findChargeAmount(record['gross_amount'] ?? record['grossAmount']) : null;
+  if (gross !== null && gross >= 0) {
+    const tax = record?.['tax_data'];
+    const taxTotal = tax && typeof tax === 'object' ? findChargeAmount(Object.values(tax)) : null;
+    // Reported tax beats an assumed rate — the slab and the rate can both change.
+    return taxTotal !== null ? gross + taxTotal : gross * (1 + SHIPPING_CHARGE_TAX_PERCENT / 100);
+  }
+
+  // Unknown shape: whatever number we can find, plus the configured rate.
+  const fallback = findChargeAmount(data);
+  return fallback === null ? null : fallback * (1 + SHIPPING_CHARGE_TAX_PERCENT / 100);
+}
+
 export async function estimateDeliveryCharge(input: {
   storeId: number | null;
   items: ShippingItemInput[];
@@ -1042,10 +1071,9 @@ export async function estimateDeliveryCharge(input: {
       params,
       timeout: SHIPPING_ESTIMATE_TIMEOUT_MS,
     });
-    const amount = findChargeAmount(data);
+    const amount = taxInclusiveFreight(data);
     if (amount === null || amount < 0) return null;
-    // Tax-INCLUSIVE, matching what the ecom checkout quotes for the same parcel.
-    return Math.round(amount * (1 + SHIPPING_CHARGE_TAX_PERCENT / 100) * 100) / 100;
+    return Math.round(amount * 100) / 100;
   } catch (err) {
     ondcLogger.warn('Delhivery shipping estimate failed — using 0 (fail-open)', {
       storeId: input.storeId,
