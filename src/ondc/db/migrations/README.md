@@ -16,6 +16,7 @@ Run against the database `ONDC_DB_URL` points to, in this exact order:
 | 5   | `005_provider_settings_default_off.sql` | ondc_provider_settings.is_active DEFAULT 1 → 0, so a defaulted insert can never publish a store on ONDC. Touches no existing row                               |
 | 6   | `006_buyer_finder_fee.sql`              | ondc*orders.buyer_finder_fee*_, ondc*transactions.bff*_, bap*terms.bff_type — so every on*\* callback echoes the fee the BAP sent on /search                   |
 | 7   | `007_inventory_for_variant_stock.sql`   | `inventory` — per-variant stock for /on_search. Pairs with the `inventory` view in `../prod/20_prod_ondc_views.sql`; see the rule below                        |
+| 8   | `008_bap_management.sql`                | bap_management + bap_management_audit + bap_request_log — per-buyer-app on/off switch for inbound discovery traffic. Seeds from bap_terms, all active          |
 
 ## Anything prod needs goes in BOTH places
 
