@@ -126,6 +126,8 @@ export const txnLogModel = {
     direction?: string;
     domain?: string;
     q?: string;
+    bapId?: string;
+    days?: number;
   }): Promise<number> {
     const conds: string[] = [];
     const params: unknown[] = [];
@@ -156,6 +158,14 @@ export const txnLogModel = {
     if (filters.q) {
       conds.push('transaction_id LIKE ?');
       params.push(`%${filters.q}%`);
+    }
+    if (filters.bapId) {
+      conds.push('bap_id = ?');
+      params.push(filters.bapId);
+    }
+    if (filters.days && filters.days > 0) {
+      conds.push('created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)');
+      params.push(filters.days);
     }
 
     // Safety net: never run an unbounded DELETE.
