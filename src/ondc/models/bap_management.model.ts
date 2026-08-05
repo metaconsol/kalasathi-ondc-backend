@@ -40,7 +40,7 @@ export function normalizeBapId(value: unknown): string {
 }
 
 const mapRow = (r: any): BapManagementRow => ({
-  id: Number(r.id),
+  id: r.id != null ? Number(r.id) : 0,
   bap_id: r.bap_id,
   bap_name: r.bap_name ?? null,
   is_active: Boolean(r.is_active),
@@ -52,24 +52,44 @@ const mapRow = (r: any): BapManagementRow => ({
 
 // Orders that are still moving. Toggling a BAP off must not strand these.
 const IN_FLIGHT = `(SELECT COUNT(*) FROM ondc_orders o
-   WHERE o.bap_id = m.bap_id AND o.status NOT IN ('DELIVERED','CANCELLED','RETURNED'))`;
+   WHERE o.bap_id = k.bap_id AND o.status NOT IN ('DELIVERED','CANCELLED','RETURNED'))`;
 
 // 24h counters. ondc_txn_logs holds one row per inbound request already.
 const REQ_24H = `(SELECT COUNT(*) FROM ondc_txn_logs l
-   WHERE l.bap_id = m.bap_id AND l.direction = 'inbound'
+   WHERE l.bap_id = k.bap_id AND l.direction = 'inbound'
      AND l.created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR))`;
 const FILTERED_24H = `(SELECT COUNT(*) FROM bap_request_log f
-   WHERE f.bap_id = m.bap_id AND f.was_processed = 0
+   WHERE f.bap_id = k.bap_id AND f.was_processed = 0
      AND f.created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR))`;
 const ORDERS_24H = `(SELECT COUNT(*) FROM ondc_orders o
-   WHERE o.bap_id = m.bap_id AND o.created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR))`;
+   WHERE o.bap_id = k.bap_id AND o.created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR))`;
 const LAST_REQ = `(SELECT MAX(l.created_at) FROM ondc_txn_logs l
-   WHERE l.bap_id = m.bap_id AND l.direction = 'inbound')`;
-const LAST_ORDER = `(SELECT MAX(o.created_at) FROM ondc_orders o WHERE o.bap_id = m.bap_id)`;
+   WHERE l.bap_id = k.bap_id AND l.direction = 'inbound')`;
+const LAST_ORDER = `(SELECT MAX(o.created_at) FROM ondc_orders o WHERE o.bap_id = k.bap_id)`;
 const LAST_TOGGLE = `(SELECT a.changed_by_name FROM bap_management_audit a
-   WHERE a.bap_id = m.bap_id ORDER BY a.id DESC LIMIT 1)`;
+   WHERE a.bap_id = k.bap_id ORDER BY a.id DESC LIMIT 1)`;
 const LAST_TOGGLE_AT = `(SELECT a.changed_at FROM bap_management_audit a
-   WHERE a.bap_id = m.bap_id ORDER BY a.id DESC LIMIT 1)`;
+   WHERE a.bap_id = k.bap_id ORDER BY a.id DESC LIMIT 1)`;
+
+/**
+ * Every buyer app we know of, not only the ones an admin has already configured.
+ *
+ * bap_terms gets a row on every inbound /search, so it is the real record of who
+ * sends us traffic; bap_management only has a row once someone toggles that BAP
+ * or the 008 seed ran. Listing from bap_management alone meant a buyer app that
+ * appeared after the migration could never show up on the screen — 10 rows
+ * listed against 20 buyer apps actually sending requests.
+ *
+ * COALESCE(m.is_active, 1): no config row means active, the same rule the filter
+ * middleware applies.
+ */
+const KNOWN_BAPS = `FROM (
+         SELECT LOWER(TRIM(bap_id)) AS bap_id FROM bap_terms
+          WHERE TRIM(COALESCE(bap_id, '')) <> ''
+          UNION
+         SELECT bap_id FROM bap_management
+       ) k
+       LEFT JOIN bap_management m ON m.bap_id = k.bap_id`;
 
 export const bapManagementModel = {
   /** Only the ids that are switched OFF — the filter's whole working set. */
@@ -82,10 +102,17 @@ export const bapManagementModel = {
 
   async list(search?: string): Promise<BapListRow[]> {
     const term = String(search ?? '').trim();
-    const where = term ? 'WHERE m.bap_id LIKE ? OR m.bap_name LIKE ?' : '';
+    const where = term ? 'WHERE k.bap_id LIKE ? OR m.bap_name LIKE ?' : '';
     const params = term ? [`%${term}%`, `%${term}%`] : [];
     const rows = await ondcQuery<any>(
-      `SELECT m.*,
+      `SELECT k.bap_id                       AS bap_id,
+              m.id                           AS id,
+              COALESCE(m.bap_name, k.bap_id) AS bap_name,
+              COALESCE(m.is_active, 1)       AS is_active,
+              m.notes                        AS notes,
+              m.updated_by                   AS updated_by,
+              m.config_updated_at            AS config_updated_at,
+              m.created_at                   AS created_at,
               ${REQ_24H}        AS requests_24h,
               ${FILTERED_24H}   AS filtered_24h,
               ${ORDERS_24H}     AS orders_24h,
@@ -94,8 +121,8 @@ export const bapManagementModel = {
               ${IN_FLIGHT}      AS in_flight_orders,
               ${LAST_TOGGLE}    AS last_toggled_by,
               ${LAST_TOGGLE_AT} AS last_toggled_at
-       FROM bap_management m ${where}
-       ORDER BY m.is_active DESC, requests_24h DESC, m.bap_id ASC`,
+       ${KNOWN_BAPS} ${where}
+       ORDER BY is_active DESC, requests_24h DESC, k.bap_id ASC`,
       params,
     );
     return rows.map((r) => {
