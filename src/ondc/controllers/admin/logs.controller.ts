@@ -66,6 +66,8 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
     q?: unknown;
     bap_id?: unknown;
     days?: unknown;
+    ack?: unknown;
+    all?: unknown;
   };
 
   const ids = Array.isArray(body.ids)
@@ -87,7 +89,12 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
   const bapId = body.bap_id ? String(body.bap_id).trim() : undefined;
   const days = body.days ? Number(body.days) : undefined;
 
+  // Explicit "everything" from the single Delete button when no filter is set. It has
+  // to be stated rather than inferred, so an empty body still cannot wipe the table.
+  const deleteAll = body.all === true || body.all === 'true';
+
   const hasSelector =
+    deleteAll ||
     ids.length > 0 ||
     transactionIds.length > 0 ||
     !!action ||
@@ -102,7 +109,40 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
     return;
   }
 
+  // Request Monitor sends the action it is showing plus an ack filter. buyer_ack is
+  // derived, so resolve the exact transaction_ids first and delete by them — the
+  // button must remove precisely what the screen listed, never more.
+  const ack = body.ack ? String(body.ack).trim().toUpperCase() : undefined;
+  if (ack === 'ACK' || ack === 'NACK') {
+    const scoped = await txnLogModel.transactionIdsForAction({
+      action: (actions[0] ?? action) as string,
+      ...(days ? { days } : {}),
+      ...(q ? { q } : {}),
+      ...(bapId ? { bapId } : {}),
+      ...(domain ? { domain } : {}),
+      ack,
+    });
+    if (scoped.length === 0) {
+      ApiResponse.success(res, 'Nothing matched that filter', {
+        deleted: 0,
+        transactions_deleted: 0,
+      });
+      return;
+    }
+    const removed = await txnLogModel.deleteFiltered({
+      transactionIds: scoped,
+      ...(actions.length ? { actions } : {}),
+    });
+    const txns = await transactionModel.deleteOrphans(scoped);
+    ApiResponse.success(res, `Deleted ${removed} log${removed === 1 ? '' : 's'}`, {
+      deleted: removed,
+      transactions_deleted: txns,
+    });
+    return;
+  }
+
   const deleted = await txnLogModel.deleteFiltered({
+    ...(deleteAll ? { all: true } : {}),
     ...(ids.length ? { ids } : {}),
     ...(transactionIds.length ? { transactionIds } : {}),
     ...(actions.length ? { actions } : {}),
