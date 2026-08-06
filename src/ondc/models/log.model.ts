@@ -45,6 +45,64 @@ function buildLogFilter(filters: {
   return { where: conds.length ? `WHERE ${conds.join(' AND ')}` : '', params };
 }
 
+export interface DeleteLogFilters {
+  ids?: number[];
+  transactionIds?: string[];
+  action?: string;
+  actions?: string[];
+  direction?: string;
+  domain?: string;
+  q?: string;
+  bapId?: string;
+  days?: number;
+  /** Every row. Still honours the in-use quote guard. */
+  all?: boolean;
+}
+
+/** One place, so the delete and the "how many did the guard hold back" count agree. */
+function buildDeleteSelectors(filters: DeleteLogFilters): { conds: string[]; params: unknown[] } {
+  const conds: string[] = [];
+  const params: unknown[] = [];
+
+  if (filters.ids?.length) {
+    conds.push(`id IN (${filters.ids.map(() => '?').join(',')})`);
+    params.push(...filters.ids);
+  }
+  if (filters.transactionIds?.length) {
+    conds.push(`transaction_id IN (${filters.transactionIds.map(() => '?').join(',')})`);
+    params.push(...filters.transactionIds);
+  }
+  if (filters.actions?.length) {
+    conds.push(`action IN (${filters.actions.map(() => '?').join(',')})`);
+    params.push(...filters.actions);
+  } else if (filters.action) {
+    conds.push('action = ?');
+    params.push(filters.action);
+  }
+  if (filters.direction) {
+    conds.push('direction = ?');
+    params.push(filters.direction);
+  }
+  if (filters.domain) {
+    conds.push('domain = ?');
+    params.push(filters.domain);
+  }
+  if (filters.q) {
+    conds.push('transaction_id LIKE ?');
+    params.push(`%${filters.q}%`);
+  }
+  if (filters.bapId) {
+    conds.push('bap_id = ?');
+    params.push(filters.bapId);
+  }
+  if (filters.days && filters.days > 0) {
+    conds.push('created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)');
+    params.push(filters.days);
+  }
+  if (filters.all && conds.length === 0) conds.push('1 = 1');
+  return { conds, params };
+}
+
 export const txnLogModel = {
   async insert(data: InsertPayload): Promise<number> {
     const result = await ondcExec(
@@ -118,60 +176,8 @@ export const txnLogModel = {
    * supplied — a guard so an empty payload can never wipe the whole table.
    * Quotes a /confirm may still re-read are always excluded (see QUOTE_IN_USE).
    */
-  async deleteFiltered(filters: {
-    ids?: number[];
-    transactionIds?: string[];
-    action?: string;
-    actions?: string[];
-    direction?: string;
-    domain?: string;
-    q?: string;
-    bapId?: string;
-    days?: number;
-    /** Every row. Still honours the in-use quote guard below. */
-    all?: boolean;
-  }): Promise<number> {
-    const conds: string[] = [];
-    const params: unknown[] = [];
-
-    if (filters.ids && filters.ids.length) {
-      conds.push(`id IN (${filters.ids.map(() => '?').join(',')})`);
-      params.push(...filters.ids);
-    }
-    if (filters.transactionIds && filters.transactionIds.length) {
-      conds.push(`transaction_id IN (${filters.transactionIds.map(() => '?').join(',')})`);
-      params.push(...filters.transactionIds);
-    }
-    if (filters.actions && filters.actions.length) {
-      conds.push(`action IN (${filters.actions.map(() => '?').join(',')})`);
-      params.push(...filters.actions);
-    } else if (filters.action) {
-      conds.push('action = ?');
-      params.push(filters.action);
-    }
-    if (filters.direction) {
-      conds.push('direction = ?');
-      params.push(filters.direction);
-    }
-    if (filters.domain) {
-      conds.push('domain = ?');
-      params.push(filters.domain);
-    }
-    if (filters.q) {
-      conds.push('transaction_id LIKE ?');
-      params.push(`%${filters.q}%`);
-    }
-    if (filters.bapId) {
-      conds.push('bap_id = ?');
-      params.push(filters.bapId);
-    }
-    if (filters.days && filters.days > 0) {
-      conds.push('created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)');
-      params.push(filters.days);
-    }
-
-    // Safety net: never run an unbounded DELETE unless it was asked for explicitly.
-    if (filters.all && conds.length === 0) conds.push('1 = 1');
+  async deleteFiltered(filters: DeleteLogFilters): Promise<number> {
+    const { conds, params } = buildDeleteSelectors(filters);
     if (conds.length === 0) return 0;
     if (PROTECT_HOURS > 0) conds.push(`NOT (${QUOTE_IN_USE})`);
 
@@ -233,6 +239,19 @@ export const txnLogModel = {
 
     const rows = await ondcQuery<{ transaction_id: string }>(sql, args);
     return rows.map((r) => String(r.transaction_id));
+  },
+
+  /** Rows the filter matched but the in-use quote guard is holding back. */
+  async countProtected(filters: DeleteLogFilters): Promise<number> {
+    if (PROTECT_HOURS <= 0) return 0;
+    const { conds, params } = buildDeleteSelectors(filters);
+    if (conds.length === 0) return 0;
+    const rows = await ondcQuery<{ total: number }>(
+      `SELECT COUNT(*) AS total FROM ondc_txn_logs
+       WHERE ${conds.join(' AND ')} AND (${QUOTE_IN_USE})`,
+      params,
+    );
+    return Number(rows[0]?.total ?? 0);
   },
 
   async countAll(): Promise<number> {
