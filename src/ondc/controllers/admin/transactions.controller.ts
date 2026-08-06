@@ -99,7 +99,9 @@ export async function deleteTransactions(req: Request, res: Response): Promise<v
 
   const { sql: selectorSql, params: selectorParams } = buildSelectors(body);
 
-  const hasSelector = txnIds.length > 0 || selectorSql.length > 0;
+  // Explicit "everything" from the single Delete button when no stage filter is set.
+  const deleteAll = body['all'] === true || body['all'] === 'true';
+  const hasSelector = deleteAll || txnIds.length > 0 || selectorSql.length > 0;
   if (!hasSelector) {
     ApiResponse.badRequest(res, 'Provide at least one filter or selection to delete transactions');
     return;
@@ -118,6 +120,7 @@ export async function deleteTransactions(req: Request, res: Response): Promise<v
     params.push(...selectorParams);
   }
 
+  if (deleteAll && clauses.length === 0) clauses.push('1 = 1');
   const result = await ondcExec(`DELETE FROM overall_txns WHERE ${clauses.join(' AND ')}`, params);
   const deleted = result.affectedRows ?? 0;
 
