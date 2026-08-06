@@ -265,6 +265,53 @@ export const bapManagementModel = {
     );
   },
 
+  /** Size of the filter audit trail, so the screen can show what it is holding. */
+  async requestLogStats(): Promise<{ total: number; last_24h: number; oldest: Date | null }> {
+    const rows = await ondcQuery<any>(
+      `SELECT COUNT(*) AS total,
+              COALESCE(SUM(created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)), 0) AS last_24h,
+              MIN(created_at) AS oldest
+       FROM bap_request_log`,
+    );
+    return {
+      total: Number(rows[0]?.total ?? 0),
+      last_24h: Number(rows[0]?.last_24h ?? 0),
+      oldest: rows[0]?.oldest ?? null,
+    };
+  },
+
+  /**
+   * Purge the filter audit trail. Pure diagnostics — one row per request the
+   * filter dropped (or would have dropped in audit-only mode), so it grows with
+   * traffic and nothing downstream reads it beyond the counts on this screen.
+   * Scoped by buyer app and/or age; `all` is required to clear it unfiltered.
+   */
+  async deleteRequestLog(filters: {
+    bapId?: string;
+    olderThanDays?: number;
+    all?: boolean;
+  }): Promise<number> {
+    const conds: string[] = [];
+    const params: unknown[] = [];
+    if (filters.bapId) {
+      conds.push('bap_id = ?');
+      params.push(normalizeBapId(filters.bapId));
+    }
+    if (filters.olderThanDays && filters.olderThanDays > 0) {
+      conds.push('created_at < DATE_SUB(NOW(), INTERVAL ? DAY)');
+      params.push(filters.olderThanDays);
+    }
+    if (conds.length === 0) {
+      if (!filters.all) return 0;
+      conds.push('1 = 1');
+    }
+    const result = await ondcExec(
+      `DELETE FROM bap_request_log WHERE ${conds.join(' AND ')}`,
+      params,
+    );
+    return result.affectedRows;
+  },
+
   /** One row per dropped request. Processed ones are already in ondc_txn_logs. */
   async logFiltered(input: {
     bapId: string;
