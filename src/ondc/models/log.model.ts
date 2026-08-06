@@ -128,6 +128,8 @@ export const txnLogModel = {
     q?: string;
     bapId?: string;
     days?: number;
+    /** Every row. Still honours the in-use quote guard below. */
+    all?: boolean;
   }): Promise<number> {
     const conds: string[] = [];
     const params: unknown[] = [];
@@ -168,7 +170,8 @@ export const txnLogModel = {
       params.push(filters.days);
     }
 
-    // Safety net: never run an unbounded DELETE.
+    // Safety net: never run an unbounded DELETE unless it was asked for explicitly.
+    if (filters.all && conds.length === 0) conds.push('1 = 1');
     if (conds.length === 0) return 0;
     if (PROTECT_HOURS > 0) conds.push(`NOT (${QUOTE_IN_USE})`);
 

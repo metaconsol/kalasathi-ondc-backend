@@ -67,6 +67,7 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
     bap_id?: unknown;
     days?: unknown;
     ack?: unknown;
+    all?: unknown;
   };
 
   const ids = Array.isArray(body.ids)
@@ -88,7 +89,12 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
   const bapId = body.bap_id ? String(body.bap_id).trim() : undefined;
   const days = body.days ? Number(body.days) : undefined;
 
+  // Explicit "everything" from the single Delete button when no filter is set. It has
+  // to be stated rather than inferred, so an empty body still cannot wipe the table.
+  const deleteAll = body.all === true || body.all === 'true';
+
   const hasSelector =
+    deleteAll ||
     ids.length > 0 ||
     transactionIds.length > 0 ||
     !!action ||
@@ -136,6 +142,7 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
   }
 
   const deleted = await txnLogModel.deleteFiltered({
+    ...(deleteAll ? { all: true } : {}),
     ...(ids.length ? { ids } : {}),
     ...(transactionIds.length ? { transactionIds } : {}),
     ...(actions.length ? { actions } : {}),
