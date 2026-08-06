@@ -44,13 +44,17 @@ const actor = (req: Request) => ({
 
 /** GET /api/v1/ondc/admin/bap-management */
 export async function listBapManagement(req: Request, res: Response): Promise<void> {
-  const rows = await bapManagementModel.list(String(req.query['q'] ?? ''));
+  const [rows, requestLog] = await Promise.all([
+    bapManagementModel.list(String(req.query['q'] ?? '')),
+    bapManagementModel.requestLogStats(),
+  ]);
   ApiResponse.success(res, 'Buyer apps', rows, {
     total: rows.length,
     active: rows.filter((r) => r.is_active).length,
     inactive: rows.filter((r) => !r.is_active).length,
     feature_enabled: bapFilterConfig.enabled,
     audit_only: bapFilterConfig.auditOnly,
+    request_log: requestLog,
   } as any);
 }
 
@@ -239,4 +243,42 @@ export async function importBapManagement(req: Request, res: Response): Promise<
       imported,
     },
   );
+}
+
+const purgeLogSchema = z.object({
+  bap_id: z.string().trim().max(255).optional(),
+  older_than_days: z.number().int().min(1).max(3650).optional(),
+  all: z.boolean().optional(),
+});
+
+/**
+ * DELETE /api/v1/ondc/admin/bap-management/request-log
+ * Clears the filter audit trail — one row per request the filter dropped, so it
+ * grows with traffic and nothing reads it beyond the counts on this screen.
+ * Scope comes from the filters; `all` is required to clear it unscoped.
+ */
+export async function purgeBapRequestLog(req: Request, res: Response): Promise<void> {
+  const parsed = purgeLogSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    ApiResponse.badRequest(res, 'bap_id, older_than_days or all is required');
+    return;
+  }
+  const { bap_id, older_than_days, all } = parsed.data;
+  if (!bap_id && !older_than_days && !all) {
+    ApiResponse.badRequest(res, 'Provide bap_id, older_than_days, or all to confirm');
+    return;
+  }
+
+  const deleted = await bapManagementModel.deleteRequestLog({
+    ...(bap_id ? { bapId: bap_id } : {}),
+    ...(older_than_days ? { olderThanDays: older_than_days } : {}),
+    ...(all ? { all } : {}),
+  });
+  ondcLogger.info('bap management: request log purged', {
+    deleted,
+    bapId: bap_id ?? null,
+    olderThanDays: older_than_days ?? null,
+    by: actor(req).changedByName,
+  });
+  ApiResponse.success(res, `Deleted ${deleted} audit row${deleted === 1 ? '' : 's'}`, { deleted });
 }

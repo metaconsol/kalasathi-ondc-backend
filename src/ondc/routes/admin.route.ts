@@ -59,6 +59,7 @@ import {
   bulkToggleBapManagement,
   bapManagementAnalytics,
   importBapManagement,
+  purgeBapRequestLog,
 } from '~/ondc/controllers/admin/bap_management.controller';
 import { getDashboardStats } from '~/ondc/controllers/admin/stats.controller';
 import { getSettings, revealKeys } from '~/ondc/controllers/admin/settings.controller';
@@ -138,6 +139,7 @@ router.get('/request-monitor/:transactionId', ...adminGuard, getTimeline);
 router.get('/bap-management', ...adminGuard, listBapManagement);
 router.post('/bap-management/bulk-toggle', ...superAdminGuard, bulkToggleBapManagement);
 router.post('/bap-management/import', ...superAdminGuard, importBapManagement);
+router.delete('/bap-management/request-log', ...superAdminGuard, purgeBapRequestLog);
 router.get('/bap-management/:bapId/analytics', ...adminGuard, bapManagementAnalytics);
 router.post('/bap-management/:bapId/toggle', ...superAdminGuard, toggleBapManagement);
 
