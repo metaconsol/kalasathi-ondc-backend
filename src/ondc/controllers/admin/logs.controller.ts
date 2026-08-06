@@ -66,6 +66,7 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
     q?: unknown;
     bap_id?: unknown;
     days?: unknown;
+    ack?: unknown;
   };
 
   const ids = Array.isArray(body.ids)
@@ -99,6 +100,38 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
     (days !== undefined && !Number.isNaN(days) && days > 0);
   if (!hasSelector) {
     ApiResponse.badRequest(res, 'Provide at least one filter or selection to delete logs');
+    return;
+  }
+
+  // Request Monitor sends the action it is showing plus an ack filter. buyer_ack is
+  // derived, so resolve the exact transaction_ids first and delete by them — the
+  // button must remove precisely what the screen listed, never more.
+  const ack = body.ack ? String(body.ack).trim().toUpperCase() : undefined;
+  if (ack === 'ACK' || ack === 'NACK') {
+    const scoped = await txnLogModel.transactionIdsForAction({
+      action: (actions[0] ?? action) as string,
+      ...(days ? { days } : {}),
+      ...(q ? { q } : {}),
+      ...(bapId ? { bapId } : {}),
+      ...(domain ? { domain } : {}),
+      ack,
+    });
+    if (scoped.length === 0) {
+      ApiResponse.success(res, 'Nothing matched that filter', {
+        deleted: 0,
+        transactions_deleted: 0,
+      });
+      return;
+    }
+    const removed = await txnLogModel.deleteFiltered({
+      transactionIds: scoped,
+      ...(actions.length ? { actions } : {}),
+    });
+    const txns = await transactionModel.deleteOrphans(scoped);
+    ApiResponse.success(res, `Deleted ${removed} log${removed === 1 ? '' : 's'}`, {
+      deleted: removed,
+      transactions_deleted: txns,
+    });
     return;
   }
 

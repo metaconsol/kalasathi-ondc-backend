@@ -176,6 +176,62 @@ export const txnLogModel = {
     return result.affectedRows;
   },
 
+  /**
+   * transaction_ids currently visible for one action, including the ACK/NACK filter.
+   *
+   * buyer_ack is derived from the newest outbound on_<action> row, not stored on the
+   * inbound row, so it cannot be expressed as a WHERE on the delete. Resolving the
+   * ids here and deleting by them keeps "delete what I am looking at" exact instead
+   * of quietly deleting more than the screen showed.
+   */
+  async transactionIdsForAction(filters: {
+    action: string;
+    days?: number;
+    q?: string;
+    bapId?: string;
+    domain?: string;
+    ack?: string;
+  }): Promise<string[]> {
+    const conds = [`direction = 'inbound'`, 'action = ?'];
+    const params: unknown[] = [filters.action];
+    if (filters.days && filters.days > 0) {
+      conds.push('created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)');
+      params.push(filters.days);
+    }
+    if (filters.q) {
+      conds.push('transaction_id LIKE ?');
+      params.push(`%${filters.q}%`);
+    }
+    if (filters.bapId) {
+      conds.push('bap_id = ?');
+      params.push(filters.bapId);
+    }
+    if (filters.domain) {
+      conds.push('domain = ?');
+      params.push(filters.domain);
+    }
+
+    const ack = String(filters.ack ?? '').toUpperCase();
+    const wantAck = ack === 'ACK' || ack === 'NACK';
+    const outAction = `on_${filters.action}`;
+    const ackSub = `(SELECT ob.ack_status FROM ondc_txn_logs ob
+         WHERE ob.transaction_id = l.transaction_id
+           AND ob.action = ? AND ob.direction = 'outbound'
+         ORDER BY ob.id DESC LIMIT 1)`;
+
+    const sql = wantAck
+      ? `SELECT transaction_id FROM (
+           SELECT l.transaction_id, ${ackSub} AS buyer_ack
+           FROM ondc_txn_logs l WHERE ${conds.join(' AND ')}
+           GROUP BY l.transaction_id
+         ) g WHERE buyer_ack = ?`
+      : `SELECT DISTINCT l.transaction_id FROM ondc_txn_logs l WHERE ${conds.join(' AND ')}`;
+    const args = wantAck ? [outAction, ...params, ack] : params;
+
+    const rows = await ondcQuery<{ transaction_id: string }>(sql, args);
+    return rows.map((r) => String(r.transaction_id));
+  },
+
   async countAll(): Promise<number> {
     const rows = await ondcQuery<{ total: number }>(`SELECT COUNT(*) AS total FROM ondc_txn_logs`);
     return rows[0]?.total ?? 0;
