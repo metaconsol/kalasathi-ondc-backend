@@ -141,7 +141,7 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  const deleted = await txnLogModel.deleteFiltered({
+  const selectors = {
     ...(deleteAll ? { all: true } : {}),
     ...(ids.length ? { ids } : {}),
     ...(transactionIds.length ? { transactionIds } : {}),
@@ -152,7 +152,12 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
     ...(q ? { q } : {}),
     ...(bapId ? { bapId } : {}),
     ...(days ? { days } : {}),
-  });
+  };
+
+  const deleted = await txnLogModel.deleteFiltered(selectors);
+  // Rows the filter matched but the in-use quote guard kept. Without this the button
+  // reports a bare "0 deleted" and looks broken when it is actually protecting an order.
+  const held = await txnLogModel.countProtected(selectors);
 
   // ondc_transactions summarises these logs and is unreachable without them, so it follows.
   const transactionsDeleted = await transactionModel.deleteOrphans(
@@ -162,6 +167,7 @@ export async function deleteLogs(req: Request, res: Response): Promise<void> {
   ApiResponse.success(res, `Deleted ${deleted} log${deleted === 1 ? '' : 's'}`, {
     deleted,
     transactions_deleted: transactionsDeleted,
+    protected: held,
   });
 }
 
