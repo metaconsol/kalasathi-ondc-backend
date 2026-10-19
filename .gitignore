@@ -2,9 +2,8 @@ node_modules/
 dist/
 coverage/
 .env
+.env*
 .env.*
-!.env.example
-!.env.sample
 *.log
 .DS_Store
 .claude
