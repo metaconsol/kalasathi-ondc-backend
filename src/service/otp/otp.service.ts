@@ -48,11 +48,7 @@ class OTPService {
 
   private generateOTP = () => {
     const otp = Math.floor(100000 + Math.random() * 900000);
-    const otpStr = otp.toString();
-    if (process.env.NODE_ENV === 'development') {
-      console.log('--- [DEV ONLY] Generated OTP: ', otpStr, ' ---');
-    }
-    return otpStr;
+    return otp.toString();
   };
 
   /** Inserts AuthToken + Otp atomically so we never persist a token without its OTP row. */
@@ -246,10 +242,7 @@ class OTPService {
     }
 
     const storedCode = String(otp.code ?? '').trim();
-    if (
-      storedCode !== normalizedCode &&
-      !(process.env.NODE_ENV === 'development' && normalizedCode === '123456')
-    ) {
+    if (storedCode !== normalizedCode) {
       return {
         success: false,
         message:
